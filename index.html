@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>APK Web Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #171a21;
+      --border: #2a2f3a;
+      --text: #e6e8ec;
+      --muted: #8b93a1;
+      --accent: #4c8dff;
+      --ok: #38b26a;
+      --error: #ff5c5c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+    .app { display: flex; gap: 24px; max-width: 1000px; width: 100%; }
+    .stage { display: flex; flex-direction: column; gap: 12px; }
+    .device {
+      width: 360px;
+      height: 640px;
+      border-radius: 28px;
+      background: #000;
+      border: 8px solid #23262e;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    }
+    #screen { display: block; width: 360px; height: 640px; touch-action: none; }
+    .toolbar { display: flex; align-items: center; gap: 12px; }
+    .status { font-size: 13px; color: var(--muted); }
+    .status[data-kind='ok'] { color: var(--ok); }
+    .status[data-kind='error'] { color: var(--error); }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    .side {
+      flex: 1;
+      min-width: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-zone.dragging { border-color: var(--accent); background: rgba(76, 141, 255, 0.08); }
+    .log {
+      flex: 1;
+      min-height: 220px;
+      max-height: 420px;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-word; }
+    .log-warn { color: #e2b93b; }
+    .log-error { color: var(--error); }
+    .hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .download-link { color: var(--accent); text-decoration: none; }
+    .download-link:hover { text-decoration: underline; }
+    input[type='file'] { display: none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="stage">
+      <div class="device">
+        <canvas id="screen" width="360" height="640"></canvas>
+      </div>
+      <div class="toolbar">
+        <button id="pick-btn">选择 APK</button>
+        <input id="apk-file" type="file" accept=".apk,application/vnd.android.package-archive" />
+        <span id="status" class="status">等待选择 APK</span>
+      </div>
+    </div>
+    <div class="side">
+      <h1>APK Web Simulator</h1>
+      <div id="drop-zone" class="drop-zone">拖拽 APK 到这里，或点击「选择 APK」</div>
+      <div class="hint">
+        仅支持不含原生库（lib/）的纯 Java APK，大小不超过 50MB。
+        界面由浏览器内的 Canvas 版 Android Framework 绘制，事件由 DEX 解释器执行。
+      </div>
+      <div class="hint">
+        没有 APK？<a class="download-link" href="samples/hello-dex.apk" download>下载示例 APK（hello-dex.apk）</a>
+      </div>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+  <script src="vendor/jszip.min.js"></script>
+  <script type="module" src="dist/apk.min.js"></script>
+</body>
+</html>
