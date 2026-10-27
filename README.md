@@ -35,10 +35,68 @@ npm run serve
 
 | 产物 | 内容 |
 | --- | --- |
-| `dist/android-framework.min.js` | DEX 解析、运行时、Canvas 版 Android Framework 全部代码 |
-| `dist/apk.min.js` | 页面入口逻辑（选择文件、拖拽、日志、启动引擎），依赖上一个文件 |
+| `dist/android-framework.min.js` | 纯框架实现：DEX 解析、运行时、资源解析、Canvas 版 Android Framework。不含任何页面/DOM 逻辑 |
+| `dist/apk.min.js` | 用户调用层：设备信息、渲染目标元素、文件加载、状态与日志回调，依赖上一个文件 |
 
 `index.html` 通过 `<script type="module">` 引用 `dist/apk.min.js`，它会自动加载 `android-framework.min.js`。JSZip 以全局变量形式提供，来自 `vendor/jszip.min.js`。
+
+## 在页面中使用
+
+`apk.min.js` 对外暴露 `createSimulator` 与 `ApkSimulator`，由调用方指定设备信息与渲染目标元素：
+
+```html
+<script src="vendor/jszip.min.js"></script>
+<script type="module">
+  import { createSimulator } from './dist/apk.min.js';
+
+  const sim = createSimulator({
+    // 渲染目标：可传 CSS 选择器、DOM 元素，或直接传已有 canvas
+    element: '#phone-screen',
+    // 设备信息
+    device: {
+      width: 360,
+      height: 640,
+      dpr: window.devicePixelRatio || 1,
+      style: 'material',
+      maxApkSize: 50 * 1024 * 1024,
+    },
+    onLog: (entry) => console.log(`[${entry.level}] ${entry.tag}: ${entry.message}`),
+    onFinished: () => console.log('Activity 已结束'),
+    onError: (error) => console.error(error),
+  });
+
+  // 从 File 对象加载（例如 <input type="file">）
+  await sim.loadFromFile(file);
+
+  // 也支持 URL、ArrayBuffer 或已解压的 JSZip 实例
+  // await sim.loadFromUrl('samples/hello-dex.apk');
+  // await sim.loadFromArrayBuffer(buffer);
+  // await sim.loadFromZip(zip);
+
+  sim.setDevice({ width: 280, height: 480 }); // 运行中调整尺寸
+  sim.destroy();                              // 停止并从目标元素移除 canvas
+</script>
+```
+
+| 选项 | 说明 |
+| --- | --- |
+| `element` | 渲染目标，接受 CSS 选择器字符串或 DOM 元素，自动在其中创建 canvas |
+| `canvas` | 直接使用已有的 `<canvas>`，优先于 `element` |
+| `device.width` / `device.height` | 逻辑分辨率，默认 360×640 |
+| `device.dpr` | 设备像素比，默认取 `window.devicePixelRatio`（上限 2）；canvas 物理尺寸为逻辑尺寸 × dpr |
+| `device.style` | 主题风格，默认 `material` |
+| `device.maxApkSize` | APK 大小上限，默认 50MB |
+| `onLog` / `onFinished` / `onError` | 日志、结束、错误回调 |
+
+| 方法 | 说明 |
+| --- | --- |
+| `loadFromFile(file)` | 从浏览器 `File` 对象加载 |
+| `loadFromUrl(url, options)` | 通过 `fetch` 下载后加载 |
+| `loadFromArrayBuffer(buffer)` | 从二进制内容加载 |
+| `loadFromZip(zip)` | 从 JSZip 实例加载 |
+| `setDevice(device)` | 更新设备信息并立即应用新尺寸 |
+| `stop()` / `destroy()` | 停止运行 / 停止并清理 canvas |
+| `vm` | 当前 `JavaVM` 实例（只读） |
 
 开发时可用 `npm run build:dev` 生成带 source map 的未压缩版本。
 
@@ -107,4 +165,4 @@ npm run check
 
 ## 许可
 
-本仓库未附带许可证文件，使用前请与作者确认。
+本项目基于 [MIT License](./LICENSE) 开源。

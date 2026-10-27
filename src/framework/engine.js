@@ -160,13 +160,29 @@ export class EmulatorEngine {
   }
 
   attachCanvas(canvas) {
-    if (!canvas) return;
+    if (!canvas) return this.screen;
     this.screen = new SurfaceScreen(canvas, {
       width: this.options.width || canvas.clientWidth || 360,
       height: this.options.height || canvas.clientHeight || 640,
+      dpr: this.options.dpr,
       style: this.options.style || 'material',
     });
     if (this.vm) this.vm.screen = this.screen;
+    return this.screen;
+  }
+
+  setCanvasSize(width, height) {
+    if (!this.screen) return;
+    this.screen.resize(width, height);
+    if (this.vm) this.vm.screen = this.screen;
+  }
+
+  get width() {
+    return this.screen?.width ?? this.options.width ?? 360;
+  }
+
+  get height() {
+    return this.screen?.height ?? this.options.height ?? 640;
   }
 
   applyManifestTheme(vm, apk) {
