@@ -27,12 +27,12 @@ await engine.start(apk);
 
 const peer = engine.vm.registry.getPeer(engine.activity);
 assert(peer.contentView, '未设置 ContentView');
-const [title, subtitle, button, count] = [
-  peer.contentView.findViewById(0x7f020003),
-  peer.contentView.findViewById(0x7f020002),
-  peer.contentView.findViewById(0x7f020000),
-  peer.contentView.findViewById(0x7f020001),
-];
+const res = engine.vm.resources;
+const byId = (name) => peer.contentView.findViewById(res.getIdentifier(name, 'id'));
+const title = byId('title');
+const subtitle = byId('subtitle');
+const button = byId('action');
+const count = byId('count');
 assert(title?.getText() === 'Hello World', '标题文本未由 DEX 设置');
 assert(subtitle?.getText().includes('Dalvik'), '副标题资源未加载');
 assert(button?.getText().includes('点我'), '按钮文本未加载');
@@ -55,6 +55,24 @@ assert(sameAppIntent.$peer.className === 'com.example.helloworld.MainActivity', 
 const previousActivity = engine.activity;
 callIntent('Landroid/app/Activity;', 'startActivity', '(Landroid/content/Intent;)V', previousActivity, [sameAppIntent]);
 assert(vm.activity !== previousActivity, 'startActivity 未启动新 Activity');
+
+const secondClass = vm.getClassObject('Lcom/example/helloworld/SecondActivity;');
+const secondIntent = vm.instantiate('Landroid/content/Intent;', []);
+callIntent('Landroid/content/Intent;', 'setClass', '(Landroid/content/Context;Ljava/lang/Class;)Landroid/content/Intent;', secondIntent, [vm.contextObject, secondClass]);
+callIntent('Landroid/content/Intent;', 'putExtra', '(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;', secondIntent, ['com.example.helloworld.MESSAGE', '来自 MainActivity 的问候']);
+callIntent('Landroid/app/Activity;', 'startActivity', '(Landroid/content/Intent;)V', vm.activity, [secondIntent]);
+const secondPeer = vm.registry.getPeer(vm.activity, vm.registry.classNameOf(vm.activity));
+const secondRoot = secondPeer.contentView;
+assert(secondRoot, '第二个 Activity 未设置 ContentView');
+const secondMessage = secondRoot.findViewById(res.getIdentifier('second_message', 'id'));
+assert(secondMessage?.getText() === '收到参数：来自 MainActivity 的问候', `第二个 Activity 渲染异常: ${secondMessage?.getText()}`);
+
+const buildRecord = vm.registry.resolve('Landroid/os/Build;');
+assert(buildRecord?.nativeDef, 'Build 类未定义');
+assert(vm.registry.resolve('Landroid/os/Build$VERSION;')?.nativeDef, 'Build$VERSION 未定义');
+
+const reflectClass = vm.getClassObject('Lcom/example/helloworld/MainActivity;');
+assert(reflectClass, '反射未取得 MainActivity Class');
 
 const foreignIntent = vm.instantiate('Landroid/content/Intent;', []);
 callIntent('Landroid/content/Intent;', 'setClassName', '(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;', foreignIntent, ['com.other.app', 'com.other.app.Foo']);

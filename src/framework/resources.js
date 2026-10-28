@@ -1,6 +1,20 @@
 import { Bitmap } from './graphics.js';
 import { parseBinaryXml, typedValueToNumber, typedValueToString } from '../res/axml.js';
 
+const ANDROID_FRAMEWORK_COLORS = new Map([
+  [0x01060000, 0xffff4444], [0x0106000b, 0xffffffff], [0x0106000c, 0xff000000],
+  [0x0106000d, 0x00000000], [0x0106000e, 0xff000000], [0x0106000f, 0xffffffff],
+  [0x01060012, 0xff00ddff], [0x01060013, 0xff0099cc], [0x01060014, 0xff669900],
+  [0x01060015, 0xff338800], [0x01060016, 0xffff4444], [0x01060017, 0xffcc0000],
+  [0x01060018, 0xffff8800], [0x01060019, 0xffcc6600], [0x0106001a, 0xffaa66cc],
+  [0x0106001b, 0xff33b5e5], [0x0106006a, 0xfff0f0f0], [0x0106006b, 0xff000000],
+  [0x0106006f, 0xfffafafa], [0x01060070, 0xfff5f5f5], [0x01060071, 0xffeeeeee],
+  [0x01060072, 0xffe0e0e0], [0x01060073, 0xffdddddd], [0x01060074, 0xffcccccc],
+  [0x01060075, 0xff999999], [0x01060076, 0xff888888], [0x01060077, 0xff777777],
+  [0x01060078, 0xff666666], [0x01060079, 0xff555555], [0x0106007a, 0xff444444],
+  [0x0106007b, 0xff333333], [0x0106007c, 0xff222222], [0x0106007d, 0xff111111],
+]);
+
 export class AssetManager {
   constructor(apk) {
     this.apk = apk;
@@ -94,7 +108,12 @@ export class Resources {
   }
 
   resolve(resId) {
-    return this.table.resolve(resId);
+    const value = this.table.resolve(resId);
+    if (value !== null && value !== undefined) return value;
+    if (typeof resId === 'number' && ANDROID_FRAMEWORK_COLORS.has(resId >>> 0)) {
+      return ANDROID_FRAMEWORK_COLORS.get(resId >>> 0);
+    }
+    return value;
   }
 
   getString(resId, ...args) {

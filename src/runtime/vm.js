@@ -141,6 +141,21 @@ export class JavaVM {
     return object;
   }
 
+  focusedEditable() {
+    const decor = this.screen?.decorView;
+    if (!decor) return null;
+    const stack = [decor];
+    while (stack.length) {
+      const view = stack.pop();
+      if (view?.editable && view.focused) return view;
+      if (Array.isArray(view?.children)) {
+        for (let i = view.children.length - 1; i >= 0; i--) stack.push(view.children[i]);
+      }
+      if (view?.child) stack.push(view.child);
+    }
+    return null;
+  }
+
   newArray(typeDescriptor, length, initial) {
     if (length < 0) this.throwException('Ljava/lang/NegativeArraySizeException;', String(length));
     let fill = undefined;

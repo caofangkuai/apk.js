@@ -4,4 +4,20 @@
     <string name="hint">这个界面由浏览器内的 Dalvik 解释器驱动</string>
     <string name="action">点我执行 DEX 逻辑</string>
     <string name="never">尚未点击</string>
+    <string name="echo_hint">在这里输入一些文字</string>
+    <string name="echo_action">回显输入</string>
+    <string name="echo_empty">（还没有输入内容）</string>
+    <string name="add_action">动态添加一行</string>
+    <string name="added_prefix">动态行 #</string>
+    <string name="progress_action">推进进度 +10</string>
+    <string name="progress_label">进度：0%</string>
+    <string name="pill_action">圆角背景按钮</string>
+    <string name="pill_done">圆角胶囊背景渲染正常</string>
+    <string name="build_action">读取 Build 信息</string>
+    <string name="reflect_action">运行反射测试</string>
+    <string name="activity_action">打开第二个页面</string>
+    <string name="section_env">环境与系统</string>
+    <string name="second_title">第二个 Activity</string>
+    <string name="second_empty">（没有收到参数）</string>
+    <string name="second_back">返回</string>
 </resources>

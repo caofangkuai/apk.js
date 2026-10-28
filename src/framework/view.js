@@ -1001,10 +1001,35 @@ export class View {
       drawShapeBackground(canvas, bg, this);
       return;
     }
+    if (bg.type === 'xml') {
+      const root = bg.xml;
+      const inner = unwrapXmlDrawable(root);
+      if (inner && inner.name === 'shape') {
+        drawShapeBackground(canvas, { type: 'shape', xml: inner }, this);
+      } else if (inner && inner.name === 'vector') {
+        if (typeof canvas.drawVector === 'function') canvas.drawVector(inner, 0, 0, this.getWidth(), this.getHeight());
+      }
+      return;
+    }
     if (bg.type === 'bitmap' && bg.bitmap?.image) {
       canvas.context.save();
       canvas.context.drawImage(bg.bitmap.image, 0, 0, this.getWidth(), this.getHeight());
       canvas.context.restore();
+      return;
+    }
+    const peerDrawable = bg.$peer || (bg.$object ? bg.$object.$peer : null) || getDrawablePeer(this, bg);
+    if (peerDrawable) {
+      const content = peerDrawable.content;
+      if (content) {
+        const contentPeer = content.$peer || (content.$object ? content.$object.$peer : null) || getDrawablePeer(this, content);
+        if (contentPeer && (contentPeer.color !== undefined || contentPeer.cornerRadii || contentPeer.cornerRadius)) {
+          drawPeerDrawable(canvas, contentPeer, this);
+          return;
+        }
+      }
+      if (peerDrawable.color !== undefined || peerDrawable.cornerRadii || peerDrawable.cornerRadius) {
+        drawPeerDrawable(canvas, peerDrawable, this);
+      }
     }
   }
 
@@ -1372,6 +1397,127 @@ export function colorToCss(color) {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+function getDrawablePeer(view, value) {
+  if (!value || typeof value !== 'object') return null;
+  const vm = view?.vm || view?.$vm || null;
+  if (!vm || !vm.registry?.getPeer) return null;
+  try {
+    const peer = vm.registry.getPeer(value);
+    return peer && typeof peer === 'object' ? peer : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function unwrapXmlDrawable(node) {
+  let current = node;
+  const wrappers = new Set(['ripple', 'selector', 'inset', 'layer-list', 'animated-selector', 'animated-vector']);
+  let guard = 0;
+  while (current && wrappers.has(current.name) && guard++ < 8) {
+    const children = (current.children || []).filter((c) => c.type === 'element');
+    const inner = children.find((c) => c.name === 'item');
+    const next = inner || children[0];
+    if (!next) return current;
+    const nested = (next.children || []).filter((c) => c.type === 'element');
+    current = (nested.find((c) => c.name === 'shape' || c.name === 'vector') || next);
+    if (wrappers.has(current.name)) continue;
+    break;
+  }
+  return current;
+}
+
+function drawPeerDrawable(canvas, peer, view) {
+  const ctx = canvas.context;
+  const width = view.getWidth();
+  const height = view.getHeight();
+  const color = typeof peer.color === 'number' ? peer.color : 0;
+  const alpha = color >>> 24;
+  if (alpha === 0 && peer.color === 0 && !peer.cornerRadii && !peer.cornerRadius) return;
+  ctx.save();
+  ctx.fillStyle = colorToCss(color);
+  const radii = peer.cornerRadii;
+  const radius = peer.cornerRadius || (radii && radii.length ? Math.max(...radii) : 0);
+  if (radius > 0) {
+    roundedRect(ctx, 0, 0, width, height, radius);
+    ctx.fill();
+  } else {
+    ctx.fillRect(0, 0, width, height);
+  }
+  const strokeWidth = peer.strokeWidth || 0;
+  if (strokeWidth > 0) {
+    ctx.strokeStyle = colorToCss(peer.strokeColor || 0xff000000);
+    ctx.lineWidth = strokeWidth;
+    if (radius > 0) {
+      roundedRect(ctx, strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth, radius);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth);
+    }
+  }
+  ctx.restore();
+}
+
+function resolveReferenceValue(vm, value, depth = 0) {
+  if (value === null || value === undefined || depth > 8) return value;
+  if (typeof value !== 'object' || value.reference === undefined) return value;
+  const resources = vm?.resources;
+  const id = value.reference >>> 0;
+  if (resources) {
+    let resolved;
+    try {
+      resolved = resources.resolve(id);
+    } catch (_error) {
+      resolved = null;
+    }
+    if (resolved !== null && resolved !== undefined) {
+      if (typeof resolved === 'object' && resolved.reference !== undefined) {
+        return resolveReferenceValue(vm, resolved, depth + 1);
+      }
+      return resolved;
+    }
+    const key = resources.table?.getEntry?.(id)?.key;
+    const theme = vm?.themeAttributes;
+    if (key && theme && Object.prototype.hasOwnProperty.call(theme, key)) {
+      return theme[key];
+    }
+  }
+  return value;
+}
+
+function resolveShapeColor(view, value) {
+  const vm = view?.vm || view?.$vm || null;
+  const resolved = resolveReferenceValue(vm, value);
+  if (resolved && typeof resolved === 'object') {
+    if (resolved.reference !== undefined) return resolved.reference >>> 0;
+    if (resolved.color !== undefined) return resolved.color >>> 0;
+  }
+  return parseShapeColor(resolved);
+}
+
+function resolveShapeDimension(view, value) {
+  const vm = view?.vm || view?.$vm || null;
+  const resolved = resolveReferenceValue(vm, value);
+  if (resolved && typeof resolved === 'object') {
+    if (resolved.dimension) {
+      const density = vm?.resources?.displayMetrics?.density || vm?.displayMetrics?.density || 1;
+      const unit = resolved.dimension.unit;
+      const magnitude = resolved.dimension.value;
+      if (unit === 'dp' || unit === 'dip' || unit === 'sp') return magnitude * density;
+      if (unit === 'pt') return magnitude * density * 1.333;
+      if (unit === 'in') return magnitude * density * 160;
+      if (unit === 'mm') return magnitude * density * 160 / 25.4;
+      return magnitude;
+    }
+    if (resolved.reference !== undefined) return resolved.reference;
+  }
+  if (typeof resolved === 'string' && /dp|dip|sp|pt|px/.test(resolved)) {
+    const density = vm?.resources?.displayMetrics?.density || 1;
+    const match = /^(-?\d+(?:\.\d+)?)(dp|dip|sp|pt|px)$/.exec(resolved);
+    if (match) return match[2] === 'px' ? parseFloat(match[1]) : parseFloat(match[1]) * density;
+  }
+  return parseDimensionAttr(resolved);
+}
+
 function drawShapeBackground(canvas, bg, view) {
   const shape = bg.xml;
   const ctx = canvas.context;
@@ -1381,8 +1527,8 @@ function drawShapeBackground(canvas, bg, view) {
   const solid = shape.children.find((c) => c.type === 'element' && c.name === 'solid');
   const corners = shape.children.find((c) => c.type === 'element' && c.name === 'corners');
   const stroke = shape.children.find((c) => c.type === 'element' && c.name === 'stroke');
-  const color = solid ? parseShapeColor(getShapeAttribute(solid,'color')) : 0;
-  const radius = corners ? parseDimensionAttr(getShapeAttribute(corners,'radius')) : 0;
+  const color = solid ? resolveShapeColor(view, getShapeAttribute(solid, 'color')) : 0;
+  const radius = corners ? resolveShapeDimension(view, getShapeAttribute(corners, 'radius')) : 0;
   ctx.fillStyle = colorToCss(color);
   if (radius > 0) {
     roundedRect(ctx, 0, 0, width, height, radius);
@@ -1391,8 +1537,8 @@ function drawShapeBackground(canvas, bg, view) {
     ctx.fillRect(0, 0, width, height);
   }
   if (stroke) {
-    const strokeColor = parseShapeColor(getShapeAttribute(stroke,'color'));
-    const strokeWidth = parseDimensionAttr(getShapeAttribute(stroke,'width')) || 1;
+    const strokeColor = resolveShapeColor(view, getShapeAttribute(stroke, 'color'));
+    const strokeWidth = resolveShapeDimension(view, getShapeAttribute(stroke, 'width')) || 1;
     ctx.strokeStyle = colorToCss(strokeColor);
     ctx.lineWidth = strokeWidth;
     if (radius > 0) {
@@ -1433,8 +1579,9 @@ function getShapeAttribute(node, name) {
 }
 
 function parseShapeColor(value) {
-  if (!value) return 0;
-  if (typeof value === 'object' && value.reference !== undefined) return value.reference;
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return value >>> 0;
+  if (typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
   const text = String(value);
   if (text.startsWith('#')) {
     const hex = text.slice(1);

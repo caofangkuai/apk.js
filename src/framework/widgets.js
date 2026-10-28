@@ -344,6 +344,107 @@ export class EditText extends TextView {
     this.hintText = '';
     this.inputType = 1;
     this.focused = false;
+    this.focusable = true;
+    this.focusableInTouchMode = true;
+    this.clickable = true;
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+    this.showCursor = false;
+    this.cursorVisible = true;
+    this.cursorBlinkTimer = null;
+  }
+
+  onTouchEvent(event) {
+    if (!this.enabled) return super.onTouchEvent(event);
+    if (event.action === 'down') {
+      this.requestFocus();
+      this.showKeyboard();
+      this.pressed = true;
+      return true;
+    }
+    if (event.action === 'up') {
+      this.pressed = false;
+      this.invalidate();
+      return true;
+    }
+    return super.onTouchEvent(event);
+  }
+
+  requestFocus() {
+    const focused = super.requestFocus();
+    if (focused) {
+      this.selectionStart = this.selectionEnd = this.getText().length;
+      this.startCursorBlink();
+    }
+    return focused;
+  }
+
+  clearFocus() {
+    const had = this.focused;
+    super.clearFocus();
+    if (had) {
+      this.showCursor = false;
+      this.stopCursorBlink();
+    }
+  }
+
+  startCursorBlink() {
+    this.showCursor = true;
+    this.cursorVisible = true;
+    this.stopCursorBlink();
+    if (typeof setInterval === 'function') {
+      this.cursorBlinkTimer = setInterval(() => {
+        this.cursorVisible = !this.cursorVisible;
+        this.invalidate();
+      }, 500);
+    }
+  }
+
+  stopCursorBlink() {
+    if (this.cursorBlinkTimer !== null) {
+      clearInterval(this.cursorBlinkTimer);
+      this.cursorBlinkTimer = null;
+    }
+  }
+
+  showKeyboard() {
+    const screen = this.vm?.screen;
+    if (screen?.showKeyboard) {
+      screen.showKeyboard(this);
+    }
+  }
+
+  getSelectionStart() {
+    return this.selectionStart ?? this.getText().length;
+  }
+
+  getSelectionEnd() {
+    return this.selectionEnd ?? this.getText().length;
+  }
+
+  setSelection(index) {
+    const length = this.getText().length;
+    const clamped = Math.max(0, Math.min(length, index | 0));
+    this.selectionStart = clamped;
+    this.selectionEnd = clamped;
+    this.invalidate();
+  }
+
+  onDraw(canvas) {
+    super.onDraw(canvas);
+    if (!this.showCursor || !this.cursorVisible) return;
+    const ctx = canvas.context;
+    if (!ctx) return;
+    const text = this.getText() || '';
+    const caret = Math.min(this.selectionEnd ?? text.length, text.length);
+    const measured = measureTextWidth(text.slice(0, caret), this.textSize, this.typeface);
+    const x = this.paddingLeft + measured;
+    const height = this.textSize * 1.2;
+    const top = Math.max(this.paddingTop, (this.getHeight() - height) / 2);
+    ctx.save();
+    ctx.fillStyle = cssColor(this.textColor, 0.85);
+    ctx.fillRect(x, top, Math.max(1, this.textSize * 0.06), height);
+    ctx.restore();
   }
 }
 
@@ -450,6 +551,10 @@ export class ProgressBar extends View {
     return this;
   }
 
+  getProgress() {
+    return this.progress;
+  }
+
   setMax(value) {
     this.max = value;
     return this;
@@ -527,6 +632,11 @@ export class ScrollView extends View {
     this.scrollX = x;
     this.scrollY = Math.max(0, Math.min(this.scrollRange, y));
     this.invalidate();
+  }
+
+  findViewById(id) {
+    if (this.id === id) return this;
+    return this.child ? this.child.findViewById(id) : null;
   }
 
   dispatchDraw(canvas) {

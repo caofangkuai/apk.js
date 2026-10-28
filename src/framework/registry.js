@@ -422,7 +422,9 @@ function buildFrameworkDefinitions(vm) {
           vm.startActivity(intent, null);
         },
         'getTheme()Landroid/content/res/Resources$Theme;': (self, _args, vm) => getThemeObject(vm),
-        'setTheme(I)V': () => undefined,
+        'setTheme(I)V': (self, [styleId], vm) => {
+          if (typeof styleId === 'number' && styleId) loadThemeFromStyleId(vm, styleId >>> 0);
+        },
         'setTheme(Landroid/content/res/Resources$Theme;)V': () => undefined,
         'obtainStyledAttributes([I)Landroid/content/res/TypedArray;': (self, [attrs], vm) => createTypedArray(vm, attrs),
         'obtainStyledAttributes(I[I)Landroid/content/res/TypedArray;': (self, [_style, attrs], vm) => createTypedArray(vm, attrs),
@@ -1120,6 +1122,32 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/view/inputmethod/InputMethodManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'showSoftInput(Landroid/view/View;I)Z': (self, [view], vm) => {
+          const target = view?.$view || view?.view || vm.focusedEditable?.();
+          if (target) vm.screen?.showKeyboard?.(target);
+          return !!target;
+        },
+        'hideSoftInputFromWindow(Landroid/os/IBinder;I)Z': (self, _args, vm) => {
+          vm.screen?.hideKeyboard?.();
+          return true;
+        },
+        'toggleSoftInput(II)V': (self, _args, vm) => {
+          if (vm.screen?.isKeyboardShown?.()) vm.screen.hideKeyboard();
+          else {
+            const target = vm.focusedEditable?.();
+            if (target) vm.screen?.showKeyboard?.(target);
+          }
+        },
+        'isActive()Z': (self, _args, vm) => !!vm.screen?.isKeyboardShown?.(),
+        'restartInput(Landroid/view/View;)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/View;', {
       super: 'Ljava/lang/Object;',
       ctor: viewPeerConstructor('Landroid/view/View;'),
@@ -1452,7 +1480,8 @@ function buildFrameworkDefinitions(vm) {
         if (!targetMethod) {
           vm.throwException('Ljava/lang/NullPointerException;', `反射方法 ${self.name} 未绑定目标`);
         }
-        const argumentList = args?.$data || args || [];
+        const rawArgs = args?.$data || args || [];
+        const argumentList = coerceReflectionArgs(vm, targetMethod.proto?.parameters || [], rawArgs);
         const isStatic = !!targetMethod.isStatic || (target === null && !targetMethod.isConstructor);
         const mode = isStatic ? 'static' : 'virtual';
         const receiver = mode === 'static' ? null : target;
@@ -1618,6 +1647,24 @@ function buildFrameworkDefinitions(vm) {
       ctor: viewPeerConstructor('Landroid/widget/EditText;'),
       methods: {
         'getText()Landroid/text/Editable;': (self) => self.view?.getText() ?? '',
+        'getSelectionStart()I': (self) => self.view?.getSelectionStart?.() ?? 0,
+        'getSelectionEnd()I': (self) => self.view?.getSelectionEnd?.() ?? 0,
+        'setSelection(I)V': (self, [index]) => self.view?.setSelection?.(index | 0),
+        'setSelection(II)V': (self, [start, end]) => {
+          const view = self.view;
+          if (!view) return;
+          const length = view.getText().length;
+          view.selectionStart = Math.max(0, Math.min(length, start | 0));
+          view.selectionEnd = Math.max(0, Math.min(length, end | 0));
+          view.invalidate?.();
+        },
+        'setEditable(Z)V': (self, [value]) => {
+          if (self.view) self.view.editable = !!value;
+        },
+        'setInputType(I)V': (self, [type]) => {
+          if (self.view) self.view.inputType = type | 0;
+        },
+        'showSoftInput()V': (self) => self.view?.showKeyboard?.(),
       },
     })
   );
@@ -1759,6 +1806,7 @@ function buildFrameworkDefinitions(vm) {
       ctor: viewPeerConstructor('Landroid/widget/ProgressBar;'),
       methods: {
         'setProgress(I)V': (self, [value]) => self.view?.setProgress?.(value),
+        'getProgress()I': (self) => self.view?.progress ?? 0,
         'setMax(I)V': (self, [value]) => self.view?.setMax?.(value),
       },
     })
@@ -3319,26 +3367,40 @@ function themeStore(vm) {
 export function loadThemeFromStyleId(vm, styleId) {
   const table = vm?.resources?.table;
   if (!table || typeof styleId !== 'number') return false;
-  const attributes = table.getStyleAttributes(styleId);
-  if (!attributes.size) return false;
   const store = themeStore(vm);
   store.$styleId = styleId;
-  for (const [attrId, rawValue] of attributes) {
-    const entry = table.getEntry(attrId);
-    const key = entry?.key;
-    if (!key) continue;
-    let value = rawValue;
-    if (value && typeof value === 'object' && 'reference' in value) {
-      const resolved = table.resolve(value.reference);
-      value = resolved === null || resolved === undefined ? value.reference : resolved;
+  let changed = false;
+  const seen = new Set();
+  const apply = (id) => {
+    id = id >>> 0;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const entry = table.getEntry(id);
+    if (!entry) return;
+    const bag = entry.bag;
+    const parent = bag && typeof bag.parent === 'number' ? bag.parent >>> 0 : 0;
+    if (parent) apply(parent);
+    const attributes = table.getStyleAttributes(id);
+    if (!attributes || !attributes.size) return;
+    changed = true;
+    for (const [attrId, rawValue] of attributes) {
+      const attrEntry = table.getEntry(attrId);
+      const key = attrEntry?.key;
+      if (!key) continue;
+      let value = rawValue;
+      if (value && typeof value === 'object' && 'reference' in value) {
+        const resolved = table.resolve(value.reference);
+        value = resolved === null || resolved === undefined ? value.reference : resolved;
+      }
+      if (key === 'actionBarSize' && typeof value === 'number' && value > 4096) {
+        const resolved = table.resolve(value);
+        if (typeof resolved === 'number') value = Math.round(resolved / (vm.displayMetrics?.density || 1));
+      }
+      store[key] = value;
     }
-    if (key === 'actionBarSize' && typeof value === 'number' && value > 4096) {
-      const resolved = table.resolve(value);
-      if (typeof resolved === 'number') value = Math.round(resolved / (vm.displayMetrics?.density || 1));
-    }
-    store[key] = value;
-  }
-  return true;
+  };
+  apply(styleId);
+  return changed;
 }
 
 function themeAttributeValues(vm, attrIds, styleId) {
@@ -3447,7 +3509,20 @@ function makeTypedArrayPeer(vm, values) {
     },
     getColor: (index, fallback) => {
       const value = lookup(index);
-      return typeof value === 'number' ? value >>> 0 : fallback;
+      if (typeof value === 'number') return value >>> 0;
+      if (value && typeof value === 'object' && value.reference !== undefined) {
+        const resolved = vm.resources?.resolve?.(value.reference >>> 0);
+        if (typeof resolved === 'number') return resolved >>> 0;
+        if (typeof resolved === 'string' && resolved.startsWith('#')) {
+          const hex = resolved.slice(1);
+          if (hex.length === 6) return (0xff000000 | parseInt(hex, 16)) >>> 0;
+          if (hex.length === 8) return parseInt(hex, 16) >>> 0;
+        }
+        const key = vm.resources?.table?.getEntry?.(value.reference >>> 0)?.key;
+        const themed = key ? vm.themeAttributes?.[key] : undefined;
+        if (typeof themed === 'number') return themed >>> 0;
+      }
+      return fallback;
     },
     getDrawable: (index) => {
       const value = lookup(index);
@@ -3479,6 +3554,55 @@ function makeTypedArrayPeer(vm, values) {
   };
 }
 
+function coerceReflectionArgs(vm, paramDescriptors, args) {
+  if (!Array.isArray(args)) return args;
+  return paramDescriptors.map((descriptor, index) => {
+    const arg = args[index];
+    switch (descriptor) {
+      case 'I':
+      case 'S':
+      case 'B':
+      case 'C': {
+        if (typeof arg === 'number') return arg | 0;
+        if (arg && typeof arg === 'object') {
+          if (typeof arg.intValue === 'function') return arg.intValue();
+          if (arg.$peer && typeof arg.$peer.value === 'number') return arg.$peer.value | 0;
+          if (typeof arg.value === 'number') return arg.value | 0;
+        }
+        return arg === null || arg === undefined ? 0 : Number(arg) | 0;
+      }
+      case 'J': {
+        if (typeof arg === 'number') return arg;
+        if (arg && typeof arg === 'object') {
+          if (typeof arg.longValue === 'function') return arg.longValue();
+          if (arg.$peer && typeof arg.$peer.value === 'number') return arg.$peer.value;
+        }
+        return Number(arg) || 0;
+      }
+      case 'F':
+      case 'D': {
+        if (typeof arg === 'number') return arg;
+        if (arg && typeof arg === 'object') {
+          if (typeof arg.doubleValue === 'function') return arg.doubleValue();
+          if (arg.$peer && typeof arg.$peer.value === 'number') return arg.$peer.value;
+        }
+        return Number(arg) || 0;
+      }
+      case 'Z': {
+        if (typeof arg === 'boolean') return arg;
+        if (typeof arg === 'number') return arg !== 0;
+        if (arg && typeof arg === 'object') {
+          if (typeof arg.booleanValue === 'function') return arg.booleanValue();
+          if (arg.$peer && typeof arg.$peer.value === 'boolean') return arg.$peer.value;
+        }
+        return !!arg;
+      }
+      default:
+        return arg;
+    }
+  });
+}
+
 function contextSystemService(vm, name) {
   if (!vm) return null;
   const key = String(name || '');
@@ -3492,6 +3616,25 @@ function contextSystemService(vm, name) {
     object = inflater;
   } else if (key === 'window') {
     object = vm.contextObject?.windowObject ?? null;
+  } else if (key === 'input_method') {
+    object = {
+      showSoftInput() {
+        const focused = vm.focusedEditable?.();
+        if (focused) vm.screen?.showKeyboard?.(focused);
+        return true;
+      },
+      hideSoftInputFromWindow() {
+        vm.screen?.hideKeyboard?.();
+        return true;
+      },
+      toggleSoftInput() {
+        if (vm.screen?.isKeyboardShown?.()) vm.screen.hideKeyboard();
+        else {
+          const focused = vm.focusedEditable?.();
+          if (focused) vm.screen?.showKeyboard?.(focused);
+        }
+      },
+    };
   }
   vm.serviceCache.set(cacheKey, object);
   return object;
@@ -3577,7 +3720,23 @@ function getThemeObject(vm) {
         const table = vm.resources?.table || null;
         const key = table ? table.getEntry(attrId >>> 0)?.key : null;
         if (!key || !Object.prototype.hasOwnProperty.call(store, key)) return false;
-        if (out) out.data = store[key];
+        if (out) {
+          const data = typeof store[key] === 'number' ? store[key] | 0 : 0;
+          const resourceId = typeof store[key] === 'number' ? store[key] >>> 0 : 0;
+          if (out.$fields instanceof Map) {
+            out.$fields.set('Landroid/util/TypedValue;->type:I', 0x10);
+            out.$fields.set('Landroid/util/TypedValue;->data:I', data);
+            out.$fields.set('Landroid/util/TypedValue;->resourceId:I', resourceId);
+          } else if (out.$peer) {
+            out.$peer.data = data;
+            out.$peer.type = 0x10;
+            out.$peer.resourceId = resourceId;
+          } else {
+            out.data = data;
+            out.type = 0x10;
+            out.resourceId = resourceId;
+          }
+        }
         return true;
       },
       obtainStyledAttributes: (attrs) => createTypedArray(vm, attrs),

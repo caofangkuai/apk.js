@@ -2003,6 +2003,7 @@ JAVA_CORE_CLASSES['Landroid/graphics/drawable/GradientDrawable;'] = nativeDef('L
   methods: {
     'setShape(I)V': (self, [shape]) => { self.shape = toInt(shape); },
     'setColor(I)V': (self, [color]) => { self.color = toInt(color) >>> 0; },
+    'setColor(Landroid/content/res/ColorStateList;)V': (self, [csl]) => { const c=csl&&(csl.defaultColor!==undefined?csl.defaultColor:csl.color); if(typeof c==='number') self.color = c>>>0; },
     'setStroke(ILandroid/content/res/ColorStateList;)V': (self, [width]) => { self.strokeWidth = toInt(width); },
     'setStroke(II)V': (self, [width, color]) => {
       self.strokeWidth = toInt(width);
@@ -2011,6 +2012,29 @@ JAVA_CORE_CLASSES['Landroid/graphics/drawable/GradientDrawable;'] = nativeDef('L
     'setCornerRadius(F)V': (self, [radius]) => { self.cornerRadius = Number(radius) || 0; },
     'setCornerRadii([F)V': (self, [radii]) => { self.cornerRadii = arrayValues(radii) || null; },
     'setGradientType(I)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/graphics/drawable/RippleDrawable;'] = nativeDef('Landroid/graphics/drawable/RippleDrawable;', {
+  super: 'Landroid/graphics/drawable/Drawable;',
+  ctor: peerClass(function () {
+    this.content = null;
+    this.mask = null;
+    this.rippleColor = null;
+  }, { content: null, mask: null, rippleColor: null }),
+  methods: {
+    '<init>(Landroid/content/res/ColorStateList;)V': (self, [colorStateList]) => {
+      self.rippleColor = colorStateList;
+    },
+    '<init>(Landroid/content/res/ColorStateList;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;)V': (self, [colorStateList, content, mask]) => {
+      self.rippleColor = colorStateList;
+      self.content = content;
+      self.mask = mask;
+    },
+    'setDrawableByLayerId(ILandroid/graphics/drawable/Drawable;)Z': (self, [_id, drawable]) => {
+      self.content = drawable;
+      return true;
+    },
   },
 });
 

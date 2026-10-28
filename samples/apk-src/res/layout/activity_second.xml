@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="#FFF8F9FA">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/second_title"
+        android:textColor="#FF202124"
+        android:textSize="22sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/second_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/second_empty"
+        android:textColor="#FF188038"
+        android:textSize="16sp"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/second_back"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:text="@string/second_back"
+        android:textAllCaps="false" />
+
+</LinearLayout>

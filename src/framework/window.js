@@ -231,6 +231,34 @@ export class SurfaceScreen {
     });
   }
 
+  findViewAt(point, view = this.decorView) {
+    if (!view) return null;
+    if (view.visibility !== undefined && view.visibility !== 0) return null;
+    if (Array.isArray(view.children)) {
+      for (let i = view.children.length - 1; i >= 0; i--) {
+        const child = view.children[i];
+        const x = point.x - (child.left || 0) - (child.translationX || 0);
+        const y = point.y - (child.top || 0) - (child.translationY || 0);
+        const w = child.getWidth ? child.getWidth() : child.width || 0;
+        const h = child.getHeight ? child.getHeight() : child.height || 0;
+        if (x >= 0 && y >= 0 && x < w && y < h) {
+          return this.findViewAt({ x, y }, child) || child;
+        }
+      }
+    }
+    if (view.child) {
+      const child = view.child;
+      const x = point.x - (child.left || 0);
+      const y = point.y - (child.top || 0);
+      const w = child.getWidth ? child.getWidth() : child.width || 0;
+      const h = child.getHeight ? child.getHeight() : child.height || 0;
+      if (x >= 0 && y >= 0 && x < w && y < h) {
+        return this.findViewAt({ x, y }, child) || child;
+      }
+    }
+    return view;
+  }
+
   dispatchTouch(event) {
     if (event.action === 'down') this.pointerDown = true;
     if (event.action === 'up' || event.action === 'cancel') this.pointerDown = false;
@@ -246,6 +274,10 @@ export class SurfaceScreen {
     }
 
     if (this.decorView) {
+      if (event.action === 'down' && this.keyboardTarget) {
+        const hit = this.findViewAt({ x: event.x, y: event.y });
+        if (hit !== this.keyboardTarget) this.hideKeyboard();
+      }
       const handled = this.decorView.dispatchTouchEvent({ ...event, action: event.action });
       if (handled) {
         this.invalidate();
@@ -255,6 +287,159 @@ export class SurfaceScreen {
     if (this.touchHandler) this.touchHandler(event);
     this.invalidate();
     return false;
+  }
+
+  ensureKeyboardInput() {
+    if (this.keyboardInput) return this.keyboardInput;
+    const doc = typeof document !== 'undefined' ? document : null;
+    if (!doc) return null;
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-hidden', 'true');
+    input.style.position = 'absolute';
+    input.style.left = '0';
+    input.style.top = '0';
+    input.style.width = '1px';
+    input.style.height = '1px';
+    input.style.opacity = '0.01';
+    input.style.border = '0';
+    input.style.padding = '0';
+    input.style.margin = '0';
+    input.style.fontSize = '16px';
+    input.style.zIndex = '-1';
+    input.style.pointerEvents = 'none';
+    input.style.caretColor = 'transparent';
+    const parent = this.canvas.parentNode || doc.body;
+    if (parent) parent.appendChild(input);
+
+    const sync = () => {
+      const target = this.keyboardTarget;
+      if (!target) return;
+      const value = input.value;
+      const selection = input.selectionStart ?? value.length;
+      target.setText(value);
+      target.selectionStart = selection;
+      target.selectionEnd = input.selectionEnd ?? selection;
+      this.invalidate();
+    };
+
+    input.addEventListener('input', sync);
+    input.addEventListener('keydown', (event) => {
+      const target = this.keyboardTarget;
+      if (!target) return;
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sync();
+        if (target.singleLine !== false && target.maxLines === 1) {
+          this.hideKeyboard();
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.hideKeyboard();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (this.keyboardTarget) {
+        this.keyboardTarget.focused = false;
+        this.keyboardTarget.invalidate?.();
+        this.invalidate();
+      }
+    });
+
+    this.keyboardInput = input;
+    return input;
+  }
+
+  showKeyboard(view) {
+    const input = this.ensureKeyboardInput();
+    this.keyboardTarget = view;
+    if (!input) return false;
+    input.value = view.getText ? view.getText() : '';
+    try {
+      input.focus({ preventScroll: true });
+      const length = input.value.length;
+      input.setSelectionRange(length, length);
+    } catch {
+      input.focus?.();
+    }
+    view.showCursor = true;
+    view.invalidate?.();
+    this.invalidate();
+    return true;
+  }
+
+  hideKeyboard() {
+    const view = this.keyboardTarget;
+    this.keyboardTarget = null;
+    if (view) {
+      view.showCursor = false;
+      view.invalidate?.();
+    }
+    if (this.keyboardInput) {
+      try {
+        this.keyboardInput.blur();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.invalidate();
+    return true;
+  }
+
+  isKeyboardShown() {
+    return !!this.keyboardTarget;
+  }
+
+  /**
+   * Dispatch a hardware-style key press to the currently focused editable view.
+   * Supports printable characters, Backspace and Enter.
+   */
+  sendKey(event) {
+    const target = this.keyboardTarget;
+    if (!target) return false;
+    let text = target.getText ? target.getText() : '';
+    let caret = target.selectionEnd ?? text.length;
+    if (event.key === 'Backspace') {
+      if (caret > 0) {
+        text = text.slice(0, caret - 1) + text.slice(caret);
+        caret -= 1;
+      }
+    } else if (event.key === 'Delete') {
+      text = text.slice(0, caret) + text.slice(caret + 1);
+    } else if (event.key === 'ArrowLeft') {
+      caret = Math.max(0, caret - 1);
+    } else if (event.key === 'ArrowRight') {
+      caret = Math.min(text.length, caret + 1);
+    } else if (event.key === 'Enter') {
+      if (target.singleLine !== false && target.maxLines === 1) {
+        this.hideKeyboard();
+        return true;
+      }
+      text = text.slice(0, caret) + '\n' + text.slice(caret);
+      caret += 1;
+    } else if (event.key && event.key.length === 1) {
+      text = text.slice(0, caret) + event.key + text.slice(caret);
+      caret += 1;
+    } else {
+      return false;
+    }
+    target.setText(text);
+    target.selectionStart = caret;
+    target.selectionEnd = caret;
+    if (this.keyboardInput) {
+      this.keyboardInput.value = text;
+      try {
+        this.keyboardInput.setSelectionRange(caret, caret);
+      } catch {
+        /* ignore */
+      }
+    }
+    target.invalidate?.();
+    this.invalidate();
+    return true;
   }
 
   addOverlay(overlay) {

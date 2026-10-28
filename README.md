@@ -9,8 +9,11 @@
 - **纯前端**：解压、解析、执行、渲染都在浏览器内完成，不需后端服务
 - **DEX 解释器**：支持 Dalvik 指令集主体、异常处理、switch/数组/字段/方法调用
 - **资源解析**：二进制 `AndroidManifest.xml`（AXML）与 `resources.arsc` 资源表
-- **Framework 子集**：`Activity` 生命周期、`View` 树与测量布局、`LinearLayout`/`FrameLayout`/`RelativeLayout`、`TextView`/`Button`/`ImageView`、`ActionBar`/`Toolbar`、`Toast`、`Context`/`Intent`/`Bundle` 等
-- **可执行示例**：仓库自带 `samples/hello-dex.apk`，打开页面即可运行
+- **Framework 子集**：`Activity` 生命周期、`View` 树与测量布局、`LinearLayout`/`FrameLayout`/`RelativeLayout`/`ScrollView`、`TextView`/`Button`/`EditText`/`ImageView`/`ProgressBar`、`ActionBar`/`Toolbar`、`Toast`、`Context`/`Intent`/`Bundle` 等
+- **可绘制资源与主题**：`shape`/`vector`/`ripple`/`selector` 绘制、`RippleDrawable` 内容解包、`GradientDrawable`、`backgroundTint`、`@android:color/*` 解析、`Context.setTheme` 主题继承链
+- **软键盘输入**：点击 `EditText` 聚焦并弹出系统键盘（隐藏输入框桥接），支持 `InputMethodManager`、光标闪烁与 `getSelectionStart`/`setSelection`
+- **系统与反射**：`android.os.Build`/`VERSION`、`Class.forName`/`getMethod`/`Method.invoke`（含基本类型参数拆箱）、`startActivity` 携带 `Intent` 参数的多 Activity 跳转
+- **可执行示例**：仓库自带 `samples/hello-dex.apk`，打开页面即可运行，涵盖计数、输入回显、动态添加视图、进度条、形状背景按钮、Build 信息、反射调用与第二个 Activity 跳转
 
 ## 快速开始
 
@@ -152,7 +155,7 @@ npm test
 npm run check
 ```
 
-`npm test` 会解析 `samples/hello-dex.apk`、构建 View 树、模拟点击按钮并检查事件回调是否生效。
+`npm test` 会解析 `samples/hello-dex.apk`、构建 View 树，并依次模拟：点击计数按钮、聚焦编辑框并用键盘输入回显、动态添加视图、推进进度条、点击形状背景按钮、读取 `Build` 信息、运行反射调用、`startActivity` 跳转到第二个 Activity 并校验传递的参数，检查各项事件回调是否生效。
 
 ## 构建示例 APK
 
