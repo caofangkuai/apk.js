@@ -1206,6 +1206,7 @@ export const JAVA_CORE_CLASSES = {
   }),
   'Ljava/util/HashMap;': nativeDef('Ljava/util/HashMap;', {
     super: 'Ljava/lang/Object;',
+    interfaces: ['Ljava/util/Map;'],
     ctor: peerClass(function () {
       this.map = new Map();
     }, { map: new Map() }),

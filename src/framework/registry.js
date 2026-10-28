@@ -18,6 +18,7 @@ import {
   getDefaultSize,
 } from './view.js';
 import {
+  AbsoluteLayout,
   FrameLayout,
   LinearLayout,
   RelativeLayout,
@@ -32,6 +33,7 @@ import {
   ProgressBar,
   ScrollView,
   TextView,
+  WebView,
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window } from './window.js';
 
@@ -49,6 +51,10 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/ImageView;': ImageView,
   'Landroid/widget/ScrollView;': ScrollView,
   'Landroid/widget/ProgressBar;': ProgressBar,
+  'Landroid/widget/AbsoluteLayout;': AbsoluteLayout,
+  'Landroid/widget/Switch;': Button,
+  'Landroid/widget/CompoundButton;': Button,
+  'Landroid/webkit/WebView;': WebView,
   'Landroidx/appcompat/widget/ActionBarContainer;': ActionBarContainer,
   'Landroidx/appcompat/widget/ActionBarOverlayLayout;': ActionBarOverlayLayout,
   'Landroidx/appcompat/widget/Toolbar;': Toolbar,
@@ -120,6 +126,7 @@ function isViewDescriptor(descriptor) {
   return descriptor.startsWith('Landroidx/appcompat/widget/') ||
     descriptor.startsWith('Landroid/widget/') ||
     descriptor.startsWith('Landroid/view/') ||
+    descriptor.startsWith('Landroid/webkit/') ||
     descriptor.startsWith('Lcom/google/android/material/');
 }
 
@@ -278,6 +285,8 @@ function buildFrameworkDefinitions(vm) {
         },
         'getFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile?.('/data/user/0/' + (vm.packageName || 'app') + '/files') ?? null,
         'getCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile?.('/data/user/0/' + (vm.packageName || 'app') + '/cache') ?? null,
+        'getDir(Ljava/lang/String;I)Ljava/io/File;': (self, [name], vm) =>
+          vm.makeFile?.('/data/user/0/' + (vm.packageName || 'app') + '/app_' + jsString(name)) ?? null,
         'getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;': (self, [type], vm) => {
           const suffix = type ? '/' + jsString(type) : '';
           return vm.makeFile?.('/storage/emulated/0/Android/data/' + (vm.packageName || 'app') + '/files' + suffix) ?? null;
@@ -392,6 +401,8 @@ function buildFrameworkDefinitions(vm) {
         },
         'getFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/files'),
         'getCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/cache'),
+        'getDir(Ljava/lang/String;I)Ljava/io/File;': (self, [name], vm) =>
+          vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/app_' + jsString(name)),
         'getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;': (self, [type], vm) => {
           const suffix = type ? '/' + jsString(type) : '';
           return vm.makeFile('/storage/emulated/0/Android/data/' + (vm.packageName || 'app') + '/files' + suffix);
@@ -1632,6 +1643,180 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/webkit/WebView;', {
+      super: 'Landroid/view/View;',
+      ctor: viewPeerConstructor('Landroid/webkit/WebView;'),
+      methods: {
+        'loadUrl(Ljava/lang/String;)V': (self, [url]) => self.view?.loadUrl?.(jsString(url)),
+        'loadData(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V': (self, [data, mime, enc]) =>
+          self.view?.loadData?.(jsString(data), jsString(mime), jsString(enc)),
+        'loadDataWithBaseURL(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V':
+          (self, [baseUrl, data, mime, enc]) => self.view?.loadDataWithBaseURL?.(jsString(baseUrl), jsString(data), jsString(mime), jsString(enc), null),
+        'reload()V': (self) => self.view?.reload?.(),
+        'getUrl()Ljava/lang/String;': (self) => self.view?.getUrl?.() ?? '',
+        'getTitle()Ljava/lang/String;': (self) => self.view?.getTitle?.() ?? '',
+        'getSettings()Landroid/webkit/WebSettings;': (self, _args, vm) => {
+          if (!self.settingsObject) {
+            self.settingsObject = vm.allocateRawObject('Landroid/webkit/WebSettings;');
+            self.settingsObject.$peer = self.view?.settings || {};
+          }
+          return self.settingsObject;
+        },
+        'setWebViewClient(Landroid/webkit/WebViewClient;)V': (self, [client]) => {
+          if (self.view) self.view.webViewClient = client?.$peer || null;
+        },
+        'setWebChromeClient(Landroid/webkit/WebChromeClient;)V': (self, [client]) => {
+          if (self.view) self.view.webChromeClient = client?.$peer || null;
+        },
+        'setBackgroundColor(I)V': (self, [color]) => self.view?.setBackgroundColor?.(color >>> 0),
+        'setLayerType(ILandroid/graphics/Paint;)V': () => undefined,
+        'setInitialScale(I)V': () => undefined,
+        'clearCache(Z)V': () => undefined,
+        'clearHistory()V': () => undefined,
+        'loadUrl(Ljava/lang/String;Ljava/util/Map;)V': (self, [url]) => self.view?.loadUrl?.(jsString(url)),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/webkit/WebViewClient;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'shouldOverrideUrlLoading(Landroid/webkit/WebView;Ljava/lang/String;)Z': () => false,
+        'shouldOverrideUrlLoading(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Z': () => false,
+        'onPageStarted(Landroid/webkit/WebView;Ljava/lang/String;Landroid/graphics/Bitmap;)V': () => undefined,
+        'onPageFinished(Landroid/webkit/WebView;Ljava/lang/String;)V': () => undefined,
+        'onReceivedError(Landroid/webkit/WebView;ILjava/lang/String;Ljava/lang/String;)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/webkit/WebChromeClient;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'onProgressChanged(Landroid/webkit/WebView;I)V': () => undefined,
+        'onReceivedTitle(Landroid/webkit/WebView;Ljava/lang/String;)V': () => undefined,
+        'onJsAlert(Landroid/webkit/WebView;Ljava/lang/String;Ljava/lang/String;Landroid/webkit/JsResult;)Z': () => true,
+        'onJsConfirm(Landroid/webkit/WebView;Ljava/lang/String;Ljava/lang/String;Landroid/webkit/JsResult;)Z': () => true,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/webkit/WebSettings;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'setJavaScriptEnabled(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.javaScriptEnabled = !!value;
+        },
+        'setDomStorageEnabled(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.domStorageEnabled = !!value;
+        },
+        'setDatabaseEnabled(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.databaseEnabled = !!value;
+        },
+        'setUseWideViewPort(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.useWideViewPort = !!value;
+        },
+        'setLoadWithOverviewMode(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.loadWithOverviewMode = !!value;
+        },
+        'setSupportZoom(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.supportZoom = !!value;
+        },
+        'setBuiltInZoomControls(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.builtInZoomControls = !!value;
+        },
+        'setDisplayZoomControls(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.displayZoomControls = !!value;
+        },
+        'setAllowFileAccessFromFileURLs(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.setAllowFileAccessFromFileURLs = !!value;
+        },
+        'setAllowUniversalAccessFromFileURLs(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.setAllowUniversalAccessFromFileURLs = !!value;
+        },
+        'setJavaScriptCanOpenWindowsAutomatically(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.javaScriptCanOpenWindowsAutomatically = !!value;
+        },
+        'setLoadsImagesAutomatically(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.loadsImagesAutomatically = !!value;
+        },
+        'setMediaPlaybackRequiresUserGesture(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.mediaPlaybackRequiresUserGesture = !!value;
+        },
+        'setMixedContentMode(I)V': (self, [value]) => {
+          if (self.$peer) self.$peer.mixedContentMode = value | 0;
+        },
+        'setAppCacheEnabled(Z)V': (self, [value]) => {
+          if (self.$peer) self.$peer.appCacheEnabled = !!value;
+        },
+        'setAppCachePath(Ljava/lang/String;)V': () => undefined,
+        'setCacheMode(I)V': (self, [value]) => {
+          if (self.$peer) self.$peer.cacheMode = value | 0;
+        },
+        'setTextZoom(I)V': (self, [value]) => {
+          if (self.$peer) self.$peer.textZoom = value | 0;
+        },
+        'getUserAgentString()Ljava/lang/String;': (self) => self.$peer?.userAgentString ?? '',
+        'setUserAgentString(Ljava/lang/String;)V': (self, [value]) => {
+          if (self.$peer) self.$peer.userAgentString = jsString(value);
+        },
+        'setTextSize(I)V': () => undefined,
+        'setDefaultFontSize(I)V': () => undefined,
+        'setSavePassword(Z)V': () => undefined,
+        'setSaveFormData(Z)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/CompoundButton;', {
+      super: 'Landroid/widget/Button;',
+      ctor: viewPeerConstructor('Landroid/widget/CompoundButton;'),
+      methods: {
+        'setChecked(Z)V': (self, [value]) => {
+          if (self.object) self.object.$fields?.set('Landroid/widget/CompoundButton;->mChecked:Z', !!value);
+          if (self.view) self.view.checked = !!value;
+        },
+        'isChecked()Z': (self) => {
+          const fromField = self.object?.$fields?.get('Landroid/widget/CompoundButton;->mChecked:Z');
+          if (typeof fromField === 'boolean') return fromField;
+          return !!self.view?.checked;
+        },
+        'toggle()V': (self) => {
+          const current = !!self.object?.$fields?.get('Landroid/widget/CompoundButton;->mChecked:Z');
+          const next = !current;
+          self.object?.$fields?.set('Landroid/widget/CompoundButton;->mChecked:Z', next);
+          if (self.view) self.view.checked = next;
+        },
+        'setOnCheckedChangeListener(Landroid/widget/CompoundButton$OnCheckedChangeListener;)V': (self, [listener]) => {
+          if (self.view) self.view.onCheckedChangeListener = listener ?? null;
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/Switch;', {
+      super: 'Landroid/widget/CompoundButton;',
+      ctor: viewPeerConstructor('Landroid/widget/Switch;'),
+      methods: {
+        'setChecked(Z)V': (self, [value]) => {
+          if (self.object) self.object.$fields?.set('Landroid/widget/CompoundButton;->mChecked:Z', !!value);
+          if (self.view) self.view.checked = !!value;
+        },
+        'isChecked()Z': (self) => {
+          const fromField = self.object?.$fields?.get('Landroid/widget/CompoundButton;->mChecked:Z');
+          if (typeof fromField === 'boolean') return fromField;
+          return !!self.view?.checked;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Button;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Button;'),
@@ -1723,6 +1908,13 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/widget/FrameLayout;', {
       super: 'Landroid/view/ViewGroup;',
       ctor: viewPeerConstructor('Landroid/widget/FrameLayout;'),
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/AbsoluteLayout;', {
+      super: 'Landroid/view/ViewGroup;',
+      ctor: viewPeerConstructor('Landroid/widget/AbsoluteLayout;'),
     })
   );
 
@@ -1919,6 +2111,41 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/AbsoluteLayout$LayoutParams;', {
+      super: 'Landroid/view/ViewGroup$LayoutParams;',
+      ctor: class AbsoluteLayoutParamsPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.object = object;
+          if (!object.$layoutParams) object.$layoutParams = { width: -2, height: -2, x: 0, y: 0 };
+        }
+        get x() { return this.object.$layoutParams.x | 0; }
+        set x(v) { this.object.$layoutParams.x = v | 0; }
+        get y() { return this.object.$layoutParams.y | 0; }
+        set y(v) { this.object.$layoutParams.y = v | 0; }
+      },
+      methods: {
+        '<init>(II)V': (self, [w, h]) => {
+          const p = self.object.$layoutParams;
+          p.width = w | 0;
+          p.height = h | 0;
+        },
+        '<init>(IIII)V': (self, [w, h, x, y]) => {
+          const p = self.object.$layoutParams;
+          p.width = w | 0;
+          p.height = h | 0;
+          p.x = x | 0;
+          p.y = y | 0;
+        },
+      },
+      instanceFields: new Map([
+        ['x:I', 0],
+        ['y:I', 0],
+      ]),
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/GestureDetector$OnGestureListener;', { super: null })
   );
 
@@ -2059,6 +2286,11 @@ function buildFrameworkDefinitions(vm) {
   defs.push(
     nativeDef('Landroid/os/LocaleList;', {
       super: 'Ljava/lang/Object;',
+      ctor: class LocaleListPeer {
+        constructor(locales) {
+          this.locales = Array.isArray(locales) ? locales : [];
+        }
+      },
       staticMethods: {
         'forLanguageTags(Ljava/lang/String;)Landroid/os/LocaleList;': () => ({
           $descriptor: 'Landroid/os/LocaleList;',
@@ -2070,6 +2302,9 @@ function buildFrameworkDefinitions(vm) {
         }),
       },
       methods: {
+        '<init>([Ljava/util/Locale;)V': (self, [locales]) => {
+          self.locales = Array.isArray(locales) ? locales : [];
+        },
         'isEmpty()Z': (self) => !self.locales || self.locales.length === 0,
         'size()I': (self) => (self.locales ? self.locales.length : 1),
         'get(I)Ljava/util/Locale;': (self, [index], vm) => {
@@ -2077,6 +2312,13 @@ function buildFrameworkDefinitions(vm) {
             return self.locales[index | 0] ?? self.locales[0];
           }
           return makeDefaultLocaleObject(vm);
+        },
+        'toLanguageTags()Ljava/lang/String;': (self) => {
+          const list = Array.isArray(self.locales) ? self.locales : [];
+          return list
+            .map((locale) => (locale && locale.$peer && locale.$peer.tag) || locale?.$fields?.tag || '')
+            .filter(Boolean)
+            .join(',');
         },
       },
     })
@@ -2175,6 +2417,26 @@ function buildFrameworkDefinitions(vm) {
         },
         'e(Ljava/lang/String;Ljava/lang/String;)I': (_self, [tag, message], vm) => {
           vm.log('error', jsString(tag), jsString(message));
+          return 0;
+        },
+        'e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I': (_self, [tag, message], vm) => {
+          vm.log('error', jsString(tag), jsString(message));
+          return 0;
+        },
+        'w(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I': (_self, [tag, message], vm) => {
+          vm.log('warn', jsString(tag), jsString(message));
+          return 0;
+        },
+        'i(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I': (_self, [tag, message], vm) => {
+          vm.log('info', jsString(tag), jsString(message));
+          return 0;
+        },
+        'd(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I': (_self, [tag, message], vm) => {
+          vm.log('debug', jsString(tag), jsString(message));
+          return 0;
+        },
+        'v(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I': (_self, [tag, message], vm) => {
+          vm.log('debug', jsString(tag), jsString(message));
           return 0;
         },
       },
@@ -2330,7 +2592,25 @@ function buildFrameworkDefinitions(vm) {
   defs.push(
     nativeDef('Landroid/content/res/Configuration;', {
       super: 'Ljava/lang/Object;',
+      ctor: class ConfigurationPeer {
+        constructor(other) {
+          this.fontScale = other?.$peer?.fontScale ?? 1;
+          this.orientation = other?.$peer?.orientation ?? 1;
+          this.screenWidthDp = other?.$peer?.screenWidthDp ?? 360;
+          this.screenHeightDp = other?.$peer?.screenHeightDp ?? 640;
+          this.densityDpi = other?.$peer?.densityDpi ?? 420;
+        }
+      },
       methods: {
+        '<init>()V': () => undefined,
+        '<init>(Landroid/content/res/Configuration;)V': (self, [other]) => {
+          const peer = other?.$peer || {};
+          self.fontScale = peer.fontScale ?? 1;
+          self.orientation = peer.orientation ?? 1;
+          self.screenWidthDp = peer.screenWidthDp ?? 360;
+          self.screenHeightDp = peer.screenHeightDp ?? 640;
+          self.densityDpi = peer.densityDpi ?? 420;
+        },
         'toString()Ljava/lang/String;': () => 'Configuration{}',
         'getLocales()Landroid/os/LocaleList;': (self, _args, vm) => {
           const object = vm.allocateRawObject('Landroid/os/LocaleList;');
@@ -2502,12 +2782,23 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/content/res/AssetManager;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'open(Ljava/lang/String;)Ljava/io/InputStream;': (self, [path]) => ({
-          $descriptor: 'Ljava/io/InputStream;',
-          path: jsString(path),
-          bytes: self.assets.readBytes(jsString(path)),
-        }),
-        'list(Ljava/lang/String;)[Ljava/lang/String;': (self, [path]) => self.assets.list(jsString(path)),
+        'open(Ljava/lang/String;)Ljava/io/InputStream;': (self, [path], vm) => {
+          const mgr = resolveAssetManager(self, vm);
+          const name = jsString(path);
+          return {
+            $descriptor: 'Ljava/io/InputStream;',
+            $nativeClass: 'Ljava/io/InputStream;',
+            path: name,
+            bytes: mgr ? mgr.readBytes(name) : new Uint8Array(0),
+            offset: 0,
+          };
+        },
+        'list(Ljava/lang/String;)[Ljava/lang/String;': (self, [path], vm) => {
+          const mgr = resolveAssetManager(self, vm);
+          return mgr ? mgr.list(jsString(path)) : [];
+        },
+        'openFd(Ljava/lang/String;)Landroid/content/res/AssetFileDescriptor;': () => null,
+        'close()V': () => undefined,
       },
     })
   );
@@ -3126,7 +3417,16 @@ function viewMethods() {
       if (!self.view) return;
       const raw = params?.$layoutParams || params;
       if (raw && typeof raw === 'object') {
-        self.view.layoutParams = { ...raw };
+        const merged = { ...raw };
+        const fields = params?.$fields;
+        if (fields) {
+          for (const axis of ['x', 'y', 'leftMargin', 'topMargin']) {
+            for (const [key, value] of fields) {
+              if (key.endsWith(`->${axis}:I`) && typeof value === 'number') merged[axis] = value;
+            }
+          }
+        }
+        self.view.layoutParams = merged;
         self.view.$layoutParamsObject = params || null;
       }
     },
@@ -3601,6 +3901,14 @@ function coerceReflectionArgs(vm, paramDescriptors, args) {
         return arg;
     }
   });
+}
+
+function resolveAssetManager(self, vm) {
+  if (self && typeof self.readBytes === 'function') return self;
+  if (self?.assets && typeof self.assets.readBytes === 'function') return self.assets;
+  const resources = vm?.resources;
+  if (resources?.getAssets) return resources.getAssets();
+  return null;
 }
 
 function contextSystemService(vm, name) {

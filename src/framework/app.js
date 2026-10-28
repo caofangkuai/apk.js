@@ -48,8 +48,16 @@ export class ActivityHost {
   }
 
   setContentView(viewOrObject) {
-    const view = viewOrObject?.$view || viewOrObject;
+    let view = viewOrObject?.$view || viewOrObject;
     if (!view) return;
+    if (typeof view.measure !== 'function' && viewOrObject?.$nativeClass) {
+      const peer = this.vm?.registry?.getPeer?.(viewOrObject, viewOrObject.$nativeClass);
+      if (peer?.view) view = peer.view;
+    }
+    if (typeof view.measure !== 'function') {
+      this.vm?.log?.('warn', 'Activity', `setContentView 收到非视图对象: ${viewOrObject?.$nativeClass || viewOrObject?.constructor?.name || typeof view}`);
+      return;
+    }
     this.ensureWindow();
     this.contentView = view;
     this.window.setContentView(view);

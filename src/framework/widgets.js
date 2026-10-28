@@ -683,3 +683,97 @@ function defaultButtonShape() {
     ],
   };
 }
+
+export class WebView extends View {
+  constructor(context = null) {
+    super(context);
+    this.url = '';
+    this.html = '';
+    this.title = '';
+    this.webViewClient = null;
+    this.webChromeClient = null;
+    this.settings = {
+      javaScriptEnabled: false,
+      domStorageEnabled: false,
+      databaseEnabled: false,
+      useWideViewPort: false,
+      loadWithOverviewMode: false,
+      supportZoom: true,
+      builtInZoomControls: false,
+      displayZoomControls: true,
+      setAllowFileAccessFromFileURLs: false,
+      setAllowUniversalAccessFromFileURLs: false,
+      javaScriptCanOpenWindowsAutomatically: false,
+      loadsImagesAutomatically: true,
+      mediaPlaybackRequiresUserGesture: true,
+      mixedContentMode: 0,
+      appCacheEnabled: false,
+      cacheMode: -1,
+      textZoom: 100,
+      userAgentString: 'Mozilla/5.0 (Linux; Android 12; Browser) AppleWebKit/537.36',
+    };
+  }
+
+  loadUrl(url) {
+    this.url = String(url ?? '');
+    this.onPageStarted(this.url);
+    this.invalidate();
+    return this;
+  }
+
+  loadData(data, mimeType, encoding) {
+    this.html = String(data ?? '');
+    this.onPageStarted('about:blank');
+    this.invalidate();
+    return this;
+  }
+
+  loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl) {
+    this.url = String(baseUrl ?? '');
+    this.html = String(data ?? '');
+    this.onPageStarted(this.url);
+    this.invalidate();
+    return this;
+  }
+
+  reload() {
+    return this;
+  }
+
+  onPageStarted(url) {
+    const client = this.webViewClient;
+    if (client && typeof client.onPageStarted === 'function') {
+      client.onPageStarted(this, url);
+    }
+  }
+
+  getUrl() {
+    return this.url;
+  }
+
+  getTitle() {
+    return this.title;
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    const width = resolveSize(320, widthSpec);
+    const height = resolveSize(480, heightSpec);
+    this.setMeasuredDimension(width, height);
+  }
+
+  onDraw(canvas) {
+    const width = this.getWidth();
+    const height = this.getHeight();
+    const ctx = canvas.context;
+    ctx.save();
+    ctx.fillStyle = '#ffffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#ff5f6368';
+    const paint = new Paint();
+    paint.textSize = 14;
+    paint.color = 0xff5f6368;
+    const label = this.title || this.url || 'WebView';
+    canvas.drawText(label, 12, Math.min(height, 30), paint);
+    ctx.restore();
+  }
+}

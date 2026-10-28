@@ -125,6 +125,22 @@ export class ClassRegistry {
     this.wrappers = new Map();
   }
 
+  findDexClass(descriptor) {
+    if (this.dexFile) {
+      const fromPrimary = this.dexFile.findClass(descriptor);
+      if (fromPrimary) return fromPrimary;
+    }
+    const dexFiles = this.vm?.dexFiles;
+    if (Array.isArray(dexFiles)) {
+      for (const dex of dexFiles) {
+        if (!dex || dex === this.dexFile) continue;
+        const found = dex.findClass ? dex.findClass(descriptor) : null;
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
   registerNative(def) {
     this.nativeDefs.set(def.descriptor, def);
     this.cache.delete(def.descriptor);
@@ -147,7 +163,7 @@ export class ClassRegistry {
     if (!descriptor) return null;
     let found = this.cache.get(descriptor);
     if (found) return found;
-    const dexClass = this.dexFile ? this.dexFile.findClass(descriptor) : null;
+    const dexClass = this.findDexClass(descriptor);
     const nativeDef = this.nativeDefs.get(descriptor) || null;
     if (!dexClass && !nativeDef) {
       if (descriptor.startsWith('[')) {

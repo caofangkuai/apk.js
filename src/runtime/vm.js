@@ -367,7 +367,7 @@ export class JavaVM {
       );
     }
     const descriptor = `L${className.replace(/\./g, '/')};`;
-    const declaredClass = this.dex?.findClass ? this.dex.findClass(descriptor) : this.registry.dexFile?.findClass?.(descriptor);
+    const declaredClass = this.registry.findDexClass?.(descriptor) ?? (this.dex?.findClass ? this.dex.findClass(descriptor) : null);
     const isFrameworkClass = !!this.registry.nativeDefs?.has?.(descriptor);
     if (!declaredClass && !isFrameworkClass) {
       this.throwException(

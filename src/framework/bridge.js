@@ -1,6 +1,7 @@
 import { View, ViewGroup } from './view.js';
 import {
   FrameLayout,
+  AbsoluteLayout,
   LinearLayout,
   RelativeLayout,
 } from './layouts.js';
@@ -11,6 +12,7 @@ import {
   ProgressBar,
   ScrollView,
   TextView,
+  WebView,
 } from './widgets.js';
 import { DecorView } from './window.js';
 
@@ -20,12 +22,14 @@ const DESCRIPTOR_BY_CLASS = new Map([
   ['LinearLayout', 'Landroid/widget/LinearLayout;'],
   ['FrameLayout', 'Landroid/widget/FrameLayout;'],
   ['RelativeLayout', 'Landroid/widget/RelativeLayout;'],
+  ['AbsoluteLayout', 'Landroid/widget/AbsoluteLayout;'],
   ['TextView', 'Landroid/widget/TextView;'],
   ['Button', 'Landroid/widget/Button;'],
   ['EditText', 'Landroid/widget/EditText;'],
   ['ImageView', 'Landroid/widget/ImageView;'],
   ['ScrollView', 'Landroid/widget/ScrollView;'],
   ['ProgressBar', 'Landroid/widget/ProgressBar;'],
+  ['WebView', 'Landroid/webkit/WebView;'],
   ['DecorView', 'Landroid/view/ViewGroup;'],
 ]);
 
@@ -39,9 +43,11 @@ export function descriptorOfView(view) {
     ImageView,
     ScrollView,
     ProgressBar,
+    WebView,
     LinearLayout,
     FrameLayout,
     RelativeLayout,
+    AbsoluteLayout,
     DecorView,
     ViewGroup,
     View,

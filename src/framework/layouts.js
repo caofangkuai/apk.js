@@ -724,3 +724,75 @@ export class Toolbar extends FrameLayout {
     super.draw(canvas);
   }
 }
+
+export class AbsoluteLayout extends ViewGroup {
+  constructor(context = null) {
+    super(context);
+  }
+
+  generateDefaultLayoutParams() {
+    return { width: -2, height: -2, x: 0, y: 0 };
+  }
+
+  static resolveOffset(lp, axis) {
+    if (!lp) return 0;
+    const direct = lp[axis];
+    if (typeof direct === 'number') return direct;
+    if (lp.$layoutParams && typeof lp.$layoutParams[axis] === 'number') return lp.$layoutParams[axis];
+    const field = lp.$fields?.get(`Landroid/widget/AbsoluteLayout$LayoutParams;->${axis}:I`);
+    if (typeof field === 'number') return field;
+    return 0;
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    const widthMode = MeasureSpec.getMode(widthSpec);
+    const heightMode = MeasureSpec.getMode(heightSpec);
+    let maxWidth = 0;
+    let maxHeight = 0;
+    const count = this.children.length;
+    for (let i = 0; i < count; i++) {
+      const child = this.children[i];
+      if (isGone(child)) continue;
+      const lp = child.layoutParams || this.generateDefaultLayoutParams();
+      let childWidthSpec;
+      let childHeightSpec;
+      if (widthMode === MeasureSpec.UNSPECIFIED) {
+        childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      } else {
+        childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, lp.width);
+      }
+      if (heightMode === MeasureSpec.UNSPECIFIED) {
+        childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      } else {
+        childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, lp.height);
+      }
+      child.measure(childWidthSpec, childHeightSpec);
+      const x = AbsoluteLayout.resolveOffset(lp, 'x');
+      const y = AbsoluteLayout.resolveOffset(lp, 'y');
+      maxWidth = Math.max(maxWidth, x + child.getMeasuredWidth());
+      maxHeight = Math.max(maxHeight, y + child.getMeasuredHeight());
+    }
+    maxWidth += this.paddingLeft + this.paddingRight;
+    maxHeight += this.paddingTop + this.paddingBottom;
+    maxWidth = Math.max(maxWidth, this.minWidth);
+    maxHeight = Math.max(maxHeight, this.minHeight);
+    this.setMeasuredDimension(
+      resolveSizeSafe(maxWidth, widthSpec),
+      resolveSizeSafe(maxHeight, heightSpec)
+    );
+  }
+
+  onLayout(changed, left, top, right, bottom) {
+    const count = this.children.length;
+    for (let i = 0; i < count; i++) {
+      const child = this.children[i];
+      if (isGone(child)) continue;
+      const lp = child.layoutParams || this.generateDefaultLayoutParams();
+      const x = this.paddingLeft + AbsoluteLayout.resolveOffset(lp, 'x');
+      const y = this.paddingTop + AbsoluteLayout.resolveOffset(lp, 'y');
+      const width = child.getMeasuredWidth();
+      const height = child.getMeasuredHeight();
+      child.layout(x, y, x + width, y + height);
+    }
+  }
+}

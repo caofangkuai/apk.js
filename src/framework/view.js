@@ -1157,7 +1157,7 @@ export class ViewGroup extends View {
       child.layoutParams = this.generateDefaultLayoutParams();
     }
     this.children.splice(index, 0, child);
-    child.onAttachedToWindow();
+    if (typeof child.onAttachedToWindow === 'function') child.onAttachedToWindow();
     this.requestLayout();
     this.invalidate();
     return this;
@@ -1168,7 +1168,7 @@ export class ViewGroup extends View {
     if (index >= 0) {
       this.children.splice(index, 1);
       child.parent = null;
-      child.onDetachedFromWindow();
+      if (typeof child.onDetachedFromWindow === 'function') child.onDetachedFromWindow();
       this.requestLayout();
       this.invalidate();
     }
