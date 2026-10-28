@@ -402,12 +402,10 @@ export const JAVA_CORE_CLASSES = {
     super: 'Ljava/lang/Object;',
     methods: {
       'newInstance([Ljava/lang/Object;)Ljava/lang/Object;': (self, [args], vm) => {
-        console.error('CTOR-HIT ' + JSON.stringify(Object.keys(self || {})));
         const peer = self.$peer || self;
         if (!peer || !peer.classDesc) return null;
         const values = args?.$data ? [...args.$data] : [];
         const made = vm.instantiate(peer.classDesc, values);
-        console.error('CTOR-NEWINST ' + peer.classDesc + ' -> ' + (made === null ? 'NULL' : (made?.$dexClass?.descriptor || made?.$nativeClass || typeof made)));
         return made;
       },
       'getName()Ljava/lang/String;': (self) => descriptorToName((self.$peer || self)?.classDesc || ''),

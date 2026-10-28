@@ -137,6 +137,17 @@ function injectViewConstructors(vm) {
     for (const signature of VIEW_CONSTRUCTOR_SIGNATURES) {
       const key = `<init>${signature}`;
       if (def.methods.has(key)) continue;
+      if (signature === '(Landroid/content/Context;)V' || signature === '(Landroid/content/Context;Landroid/util/AttributeSet;)V' || signature === '(Landroid/content/Context;Landroid/util/AttributeSet;I)V') {
+        def.methods.set(key, (self, args) => {
+          const context = args && args[0];
+          if (self && self.$view && context) {
+            self.$view.context = context;
+            if (context.vm || context.$vm) self.$view.vm = context.vm || context.$vm;
+          }
+          return undefined;
+        });
+        continue;
+      }
       def.methods.set(key, () => undefined);
     }
   }
