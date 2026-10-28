@@ -59,7 +59,6 @@ export class ActivityHost {
   findViewById(id) {
     const target = id >>> 0;
     if (target === 0x01020002) {
-      if (globalThis.FV_DBG) { const ch = this.window?.decorView?.contentHost; console.error('FINDV content host=', !!ch, 'children=', ch?.children?.length, 'javaObjViewSame=', ch?.$javaObject?.$view === ch); }
       this.ensureWindow();
       const host = this.window?.decorView?.contentHost;
       if (host) {

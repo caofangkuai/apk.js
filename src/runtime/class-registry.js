@@ -281,7 +281,7 @@ export class ClassRegistry {
   }
 
   checkCast(value, descriptor) {
-    if (value === null) return null;
+    if (value === null || value === undefined || value === 0) return null;
     const actual = this.classNameOf(value);
     if (!this.isAssignable(actual, descriptor)) {
       if (this.vm.debugCast) console.error('CASTFAIL obj=' + actual + ' -> ' + descriptor + ' peer=' + (value?.$peer?.constructor?.$descriptor) + ' d=' + value?.$descriptor + ' keys=' + (value && typeof value === 'object' ? Object.keys(value).slice(0,8).join('|') : typeof value) + ' isVM=' + (value === this.vm) + ' ctor=' + (value?.constructor?.name) + ' stack=' + (this.vm.methodStack||[]).slice(-8).join(' <- '));
@@ -294,7 +294,7 @@ export class ClassRegistry {
   }
 
   instanceOf(value, descriptor) {
-    if (value === null) return false;
+    if (value === null || value === undefined) return false;
     return this.isAssignable(this.classNameOf(value), descriptor);
   }
 }

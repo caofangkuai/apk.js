@@ -248,13 +248,19 @@ export class View {
     return this;
   }
 
-  setTag(tag) {
-    this.tag = tag;
+  setTag(tag, key) {
+    if (key === undefined) {
+      this.tag = tag;
+      return this;
+    }
+    if (!this.tags) this.tags = new Map();
+    this.tags.set(key >>> 0, tag);
     return this;
   }
 
-  getTag() {
-    return this.tag;
+  getTag(key) {
+    if (key === undefined) return this.tag;
+    return this.tags ? this.tags.get(key >>> 0) : undefined;
   }
 
   setOnClickListener(listener) {
@@ -765,11 +771,20 @@ export class View {
     if (!this.viewTreeObserver) {
       this.viewTreeObserver = {
         addOnGlobalLayoutListener: () => undefined,
+        addOnGlobalLayoutListenerOnMainThread: () => undefined,
         removeOnGlobalLayoutListener: () => undefined,
         addOnPreDrawListener: () => undefined,
         removeOnPreDrawListener: () => undefined,
+        addOnDrawListener: () => undefined,
+        removeOnDrawListener: () => undefined,
+        addOnScrollChangedListener: () => undefined,
+        removeOnScrollChangedListener: () => undefined,
+        addOnTouchModeChangeListener: () => undefined,
+        removeOnTouchModeChangeListener: () => undefined,
         isAlive: () => true,
         dispatchOnGlobalLayout: () => undefined,
+        dispatchOnPreDraw: () => true,
+        dispatchOnDraw: () => undefined,
       };
     }
     return this.viewTreeObserver;
@@ -1242,8 +1257,24 @@ class ViewPropertyAnimator {
     return this;
   }
 
+  withStartAction(action) {
+    this.startAction = action;
+    return this;
+  }
+
+  setListener(listener) {
+    this.listener = listener;
+    return this;
+  }
+
+  cancel() {
+    this.cancelled = true;
+  }
+
   start() {
     const view = this.view;
+    if (this.cancelled) return;
+    if (this.startAction) this.startAction();
     const target = { ...this.props };
     for (const [key, value] of Object.entries(target)) {
       if (key === 'alpha') view.alpha = value;
@@ -1251,7 +1282,17 @@ class ViewPropertyAnimator {
       else if (key === 'translationY') view.translationY = value;
     }
     view.invalidate();
-    if (this.endAction) setTimeout(() => this.endAction(), this.durationValue);
+    const finish = () => {
+      if (this.endAction) this.endAction();
+      const listeners = Array.isArray(this.listener) ? this.listener : (this.listener ? [this.listener] : []);
+      for (const listener of listeners) {
+        if (typeof listener?.onAnimationEnd === 'function') listener.onAnimationEnd();
+        else if (typeof listener === 'function') listener();
+      }
+    };
+    const duration = Number(this.durationValue) || 0;
+    if (duration > 0) setTimeout(finish, duration);
+    else finish();
   }
 }
 

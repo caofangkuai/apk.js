@@ -92,7 +92,7 @@ export class LayoutInflater {
     if (node.name === 'include') return this.inflateInclude(node, parent);
     const view = this.createView(node);
     this.applyAttributes(view, node);
-    if (view instanceof ViewGroup) {
+    if (view instanceof ViewGroup || typeof view.addView === 'function') {
       for (const childNode of node.children) {
         if (childNode.type !== 'element') continue;
         const child = this.inflateNode(childNode, view);
@@ -209,7 +209,7 @@ export class LayoutInflater {
     for (const [name, ...targets] of marginAttrs) {
       const attr = get(ATTR_IDS[name]);
       if (!attr) continue;
-      const value = convertDimension(attr.value, density);
+      const value = resolveDimensionAttr(attr, resources, density);
       for (const target of targets) lp[target] = value;
     }
 
@@ -252,17 +252,17 @@ export class LayoutInflater {
 
     const paddingAttr = get(ATTR_IDS.padding);
     if (paddingAttr) {
-      const value = convertDimension(paddingAttr.value, density);
+      const value = resolveDimensionAttr(paddingAttr, resources, density);
       view.setPadding(value, value, value, value);
     }
     const paddingLeft = get(ATTR_IDS.paddingLeft);
-    if (paddingLeft) view.paddingLeft = convertDimension(paddingLeft.value, density);
+    if (paddingLeft) view.paddingLeft = resolveDimensionAttr(paddingLeft, resources, density);
     const paddingTop = get(ATTR_IDS.paddingTop);
-    if (paddingTop) view.paddingTop = convertDimension(paddingTop.value, density);
+    if (paddingTop) view.paddingTop = resolveDimensionAttr(paddingTop, resources, density);
     const paddingRight = get(ATTR_IDS.paddingRight);
-    if (paddingRight) view.paddingRight = convertDimension(paddingRight.value, density);
+    if (paddingRight) view.paddingRight = resolveDimensionAttr(paddingRight, resources, density);
     const paddingBottom = get(ATTR_IDS.paddingBottom);
-    if (paddingBottom) view.paddingBottom = convertDimension(paddingBottom.value, density);
+    if (paddingBottom) view.paddingBottom = resolveDimensionAttr(paddingBottom, resources, density);
 
     const backgroundAttr = get(ATTR_IDS.background);
     if (backgroundAttr) {
@@ -306,10 +306,10 @@ export class LayoutInflater {
     }
 
     if (view instanceof TextView) {
-      const textAttr = get(ATTR_IDS.text);
+      const textAttr = get(ATTR_IDS.text) || getByName('text');
       if (textAttr) view.setText(resolvedString(textAttr, resources));
       const textSizeAttr = get(ATTR_IDS.textSize);
-      if (textSizeAttr) view.setTextSize(convertDimension(textSizeAttr.value, density));
+      if (textSizeAttr) view.setTextSize(resolveDimensionAttr(textSizeAttr, resources, density));
       const textColorAttr = get(ATTR_IDS.textColor);
       if (textColorAttr) {
         const resolved = resolveAttrValue(textColorAttr, resources);
@@ -329,11 +329,11 @@ export class LayoutInflater {
       if (singleLineAttr) view.singleLine = Boolean(singleLineAttr.value);
     }
 
-    if (view instanceof Button) {
-      const minWidthAttr = get(ATTR_IDS.minWidth);
-      if (minWidthAttr) view.minWidth = convertDimension(minWidthAttr.value, density);
-      const minHeightAttr = get(ATTR_IDS.minHeight);
-      if (minHeightAttr) view.minHeight = convertDimension(minHeightAttr.value, density);
+    {
+      const minWidthAttr = get(ATTR_IDS.minWidth) || getByName('minWidth');
+      if (minWidthAttr) view.minWidth = resolveDimensionAttr(minWidthAttr, resources, density);
+      const minHeightAttr = get(ATTR_IDS.minHeight) || getByName('minHeight');
+      if (minHeightAttr) view.minHeight = resolveDimensionAttr(minHeightAttr, resources, density);
     }
 
     if (view instanceof ImageView) {
@@ -386,6 +386,11 @@ function resolveAttrValue(attr, resources) {
     return resources.resolve(value.reference);
   }
   return value;
+}
+
+function resolveDimensionAttr(attr, resources, density) {
+  if (!attr) return 0;
+  return convertDimension(resolveAttrValue(attr, resources), density);
 }
 
 function resolvedString(attr, resources) {

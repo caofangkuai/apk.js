@@ -98,6 +98,49 @@ export class JavaVM {
     return object;
   }
 
+  makeFile(path) {
+    const object = this.allocateRawObject('Ljava/io/File;');
+    object.$peer = { path: String(path ?? '') };
+    return object;
+  }
+
+  getSystemService(name) {
+    const key = String(name ?? '');
+    if (!this.$systemServices) this.$systemServices = new Map();
+    const services = this.$systemServices;
+    if (services.has(key)) return services.get(key);
+    const descriptorByService = {
+      'notification': 'Landroid/app/NotificationManager;',
+      'clipboard': 'Landroid/content/ClipboardManager;',
+      'activity': 'Landroid/app/ActivityManager;',
+      'window': 'Landroid/view/WindowManager;',
+      'layout_inflater': 'Landroid/view/LayoutInflater;',
+      'input_method': 'Landroid/view/inputmethod/InputMethodManager;',
+      'connectivity': 'Landroid/net/ConnectivityManager;',
+      'wifi': 'Landroid/net/wifi/WifiManager;',
+      'audio': 'Landroid/media/AudioManager;',
+      'vibrator': 'Landroid/os/Vibrator;',
+      'power': 'Landroid/os/PowerManager;',
+      'keyguard': 'Landroid/app/KeyguardManager;',
+      'telephony': 'Landroid/telephony/TelephonyManager;',
+      'accessibility': 'Landroid/view/accessibility/AccessibilityManager;',
+      'download': 'Landroid/app/DownloadManager;',
+      'uimode': 'Landroid/app/UiModeManager;',
+      'display': 'Landroid/hardware/display/DisplayManager;',
+      'sensor': 'Landroid/hardware/SensorManager;',
+      'location': 'Landroid/location/LocationManager;',
+    };
+    const descriptor = descriptorByService[key];
+    if (!descriptor) {
+      services.set(key, null);
+      return null;
+    }
+    const object = this.allocateRawObject(descriptor);
+    object.$peer = { vm: this };
+    services.set(key, object);
+    return object;
+  }
+
   newArray(typeDescriptor, length, initial) {
     if (length < 0) this.throwException('Ljava/lang/NegativeArraySizeException;', String(length));
     let fill = undefined;
@@ -331,7 +374,6 @@ export class JavaVM {
   }
 
   throwException(descriptor, message) {
-    if (descriptor === 'Ljava/lang/NullPointerException;') console.error('THROW-NPE msg=' + message + ' stack=' + (this.methodStack || []).slice(-8).join(' <- '));
     const exception = this.allocateRawObject(descriptor);
     exception.$exceptionMessage = message;
     const rc = this.registry.resolve(descriptor);
@@ -377,8 +419,7 @@ export class JavaVM {
       if (!rc) return null;
       if (rc.dexClass) {
         const found = rc.dexClass.findDeclaredMethod(name, proto);
-        if (found && found.code) { if (name === 'i0') console.error('FINDV i0 via ' + descriptor + ' proto=' + proto); return { kind: 'dex', method: found }; }
-        if (found && !found.code && !rc.superDescriptor) return { kind: 'dex', method: found };
+        if (found && found.code) return { kind: 'dex', method: found };
       }
       if (rc.nativeDef) {
         const fn = rc.nativeDef.findInstanceMethod(name, proto);
@@ -416,26 +457,12 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
-    args = args || [];
+    args = normalizeReferenceArgs(args, ref?.proto?.parameters);
     this.invocationCount++;
     if (!this._invokeStats) this._invokeStats = new Map();
     const _k = (ref.classDesc || '?') + '.' + ref.name;
     this._invokeStats.set(_k, (this._invokeStats.get(_k) || 0) + 1);
-    if (this.methodStack.includes('Landroidx/activity/result/ActivityResultRegistry;.e')) {
-      this._ck = (this._ck || 0) + 1;
-      if (this._ck <= 8) console.error('CALL', ref.classDesc + '.' + ref.name, 'args=' + (args||[]).map(jsStringDump).join(','));
-    }
-    if (this.invocationCount === 5_000_000) {
-      const top = [...this._invokeStats.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8);
-      console.error('INVOKE-STATS', JSON.stringify(top));
-    }
-    if (this.invocationCount === 5_000_000) {
-      const top = {};
-      for (const f of (this.methodStack || [])) top[f] = (top[f] || 0) + 1;
-      console.error('INVOKE-5M depth=' + this.methodStack.length + ' top=' + JSON.stringify(Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,6)));
-    }
     if (this.invocationCount > 8_000_000) {
-      console.error('INFINITE-LOOP depth=' + this.methodStack.length + ' full:'); console.error((this.methodStack || []).join('\n  <- '));
       throw new Error('执行指令超限，疑似死循环');
     }
     let resolution = null;
@@ -490,13 +517,10 @@ export class JavaVM {
   }
 
   invokeNative(resolution, receiver, args, ref, mode) {
-    if (String(ref.name).includes('booleanValue')) console.error('INV-BV recv=' + (receiver === null ? 'null' : typeof receiver) + ' desc=' + (ref.classDesc) + ' kind=' + resolution.kind);
     const isStatic = mode === 'static';
     let self = null;
     if (!isStatic) {
       if (receiver === null || receiver === undefined) {
-        if (ref.name === 'hasNext' || ref.name === 'next') console.error('HASNEXT-NULL ref=' + ref.classDesc + ' proto=' + ref.proto.descriptor + ' caller=' + (this.methodStack||[]).slice(-2).join(' <- ') + ' pc=' + this.currentPc);
-        console.error('NPE-ANY name=' + ref.name + ' keys=' + Object.keys(ref).join('|') + ' stack=' + (this.methodStack||[]).slice(-3).join(' <- '));
         if (DBG.npe) console.error('NPE', ref.name, 'ref=' + (ref.classDesc || '?'), 'args=' + (args?.length || 0), 'pc=' + this.currentPc, 'from', (this.methodStack||[]).slice(-8).join(' <- '));
         this.throwException('Ljava/lang/NullPointerException;', `调用 ${ref.name} 时对象为空`);
       }
@@ -512,6 +536,7 @@ export class JavaVM {
       return normalizeNativeResult(result, ref?.proto?.returnType);
     } catch (error) {
       if (error instanceof VMRuntimeError) throw error;
+      if (error && error.message === 'vm-thread-exit') throw error;
       this.throwException('Ljava/lang/RuntimeException;', `${ref.name}: ${error.message}`);
     }
   }
@@ -531,8 +556,8 @@ export class JavaVM {
       this.throwException('Ljava/lang/StackOverflowError;', `调用层级超过 ${this.maxFrames}`);
     }
     this.frameDepth++;
+    if (this.frameDepth === 1) this.invocationCount = 0;
     if (!this.methodStack) this.methodStack = [];
-    if (method.classDesc === 'Lf7/a;' && method.name === 'h') { this._hCount = (this._hCount || 0) + 1; if (this._hCount === 20000) console.error('H-CALL-20000 caller=' + this.methodStack.slice(-4).join(' <- ')); }
     this.methodStack.push(`${descriptorToName(method.classDesc)}.${method.name}`);
     try {
       const _r = this.interpreter.execute(method, thisArg, args);
@@ -623,7 +648,14 @@ export class JavaVM {
       runnable();
       return;
     }
-    this.invokeInterface(runnable, 'run', '()V', []);
+    try {
+      this.invokeInterface(runnable, 'run', '()V', []);
+    } catch (error) {
+      if (error && error.message === 'vm-thread-exit') return;
+      throw error;
+    } finally {
+      this.__loopDepth = 0;
+    }
   }
 
   invokeHandlerMessage(handler, message) {
@@ -689,6 +721,22 @@ export class JavaVM {
     }
     return application.findAll('activity')[0] || null;
   }
+}
+
+function normalizeReferenceArgs(args, parameters) {
+  if (!Array.isArray(args) || !Array.isArray(parameters) || args.length === 0) return args;
+  let changed = false;
+  const out = args.slice();
+  for (let i = 0; i < out.length && i < parameters.length; i++) {
+    const descriptor = parameters[i];
+    if (!descriptor || (descriptor[0] !== 'L' && descriptor[0] !== '[')) continue;
+    const value = out[i];
+    if (typeof value === 'number' && value === 0) {
+      out[i] = null;
+      changed = true;
+    }
+  }
+  return changed ? out : args;
 }
 
 function normalizeNativeResult(result, returnType) {

@@ -20,7 +20,8 @@ export function jsString(value) {
   if (isJavaObject(value)) {
     if (value.$string !== undefined) return value.$string;
     if (Array.isArray(value.$peer?.parts)) return value.$peer.parts.join('');
-    if (value.$peer && typeof value.$peer.toString === 'function') {
+    if (value.$peer && typeof value.$peer.text === 'string') return value.$peer.text;
+    if (value.$peer && typeof value.$peer.toString === 'function' && value.$peer.toString !== Object.prototype.toString) {
       const result = value.$peer.toString();
       if (typeof result === 'string') return result;
     }
@@ -668,6 +669,16 @@ export const JAVA_CORE_CLASSES = {
       'getLocalizedMessage()Ljava/lang/String;': (self) => self.message ?? null,
       'toString()Ljava/lang/String;': (self) => self.message ?? 'Throwable',
       'printStackTrace()V': (self, _args, vm) => vm.log('error', 'java', self.message || 'Throwable'),
+      'printStackTrace(Ljava/io/PrintWriter;)V': (self, [writer], vm) => {
+        const text = self.message || 'Throwable';
+        if (writer?.$peer?.writer !== undefined) {
+          writeThrough(writer.$peer, text);
+        }
+        vm.log('error', 'java', text);
+      },
+      'printStackTrace(Ljava/io/PrintStream;)V': (self, [_stream], vm) => {
+        vm.log('error', 'java', self.message || 'Throwable');
+      },
       'getStackTrace()[Ljava/lang/StackTraceElement;': (self, _args, vm) => {
         const frames = (vm.methodStack || []).slice().reverse();
         const array = vm.newArray('[Ljava/lang/StackTraceElement;', frames.length);
@@ -1119,7 +1130,20 @@ export const JAVA_CORE_CLASSES = {
         if (self.runnable) vm.runRunnable(self.runnable);
       },
       'start()V': (self, _args, vm) => {
-        if (self.runnable) vm.runRunnable(self.runnable);
+        if (!self.runnable) return;
+        const runnable = self.runnable;
+        const queue = vm.messageQueue;
+        if (queue && typeof queue.post === 'function') {
+          queue.post(runnable, 0);
+          return;
+        }
+        setTimeout(() => {
+          try {
+            vm.runRunnable(runnable);
+          } catch (error) {
+            if (!error || error.message !== 'vm-thread-exit') throw error;
+          }
+        }, 0);
       },
       'getName()Ljava/lang/String;': (self) => self.threadName || 'main',
       'setName(Ljava/lang/String;)V': (self, [name]) => {
@@ -1162,6 +1186,14 @@ export const JAVA_CORE_CLASSES = {
         if (v === null) vm.throwException('Ljava/lang/NullPointerException;', 'requireNonNull');
         return v;
       },
+      'requireNonNull(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;': (_self, [v, message], vm) => {
+        if (v === null) vm.throwException('Ljava/lang/NullPointerException;', jsString(message));
+        return v;
+      },
+      'requireNonNull(Ljava/lang/Object;Ljava/util/function/Supplier;)Ljava/lang/Object;': (_self, [v, _supplier], vm) => {
+        if (v === null) vm.throwException('Ljava/lang/NullPointerException;', 'requireNonNull');
+        return v;
+      },
       'toString(Ljava/lang/Object;)Ljava/lang/String;': (_self, [v]) => (v === null ? 'null' : jsString(v)),
     },
   }),
@@ -1198,7 +1230,36 @@ export const JAVA_CORE_CLASSES = {
   'Ljava/util/Map;': nativeDef('Ljava/util/Map;', { super: null }),
 };
 
-JAVA_CORE_CLASSES['Ljava/util/List;'] = nativeDef('Ljava/util/List;', { super: null });
+JAVA_CORE_CLASSES['Ljava/util/List;'] = nativeDef('Ljava/util/List;', {
+  super: null,
+  methods: {
+    'iterator()Ljava/util/Iterator;': (self, _args, vm) => makeIterator(vm, self.items || []),
+    'listIterator()Ljava/util/ListIterator;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+      object.$peer = { cursor: 0, abstractList: self.$object ?? self };
+      return object;
+    },
+    'listIterator(I)Ljava/util/ListIterator;': (self, [index], vm) => {
+      const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+      object.$peer = { cursor: toInt(index), abstractList: self.$object ?? self };
+      return object;
+    },
+    'size()I': (self) => (self.items || []).length,
+    'isEmpty()Z': (self) => (self.items || []).length === 0,
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.items || []).includes(value),
+    'indexOf(Ljava/lang/Object;)I': (self, [value]) => (self.items || []).indexOf(value),
+    'lastIndexOf(Ljava/lang/Object;)I': (self, [value]) => (self.items || []).lastIndexOf(value),
+    'get(I)Ljava/lang/Object;': (self, [index]) => (self.items || [])[toInt(index)] ?? null,
+    'set(ILjava/lang/Object;)Ljava/lang/Object;': (self, [index, value]) => {
+      const list = self.items || [];
+      const previous = list[toInt(index)];
+      list[toInt(index)] = value;
+      return previous ?? null;
+    },
+    'toArray()[Ljava/lang/Object;': (self, _args, vm) => vm.newArray('[Ljava/lang/Object;', [...(self.items || [])]),
+    'subList(II)Ljava/util/List;': (self, [from, to], vm) => makeList(vm, (self.items || []).slice(toInt(from), toInt(to))),
+  },
+});
 JAVA_CORE_CLASSES['Ljava/util/Set;'] = nativeDef('Ljava/util/Set;', { super: 'Ljava/util/Collection;' });
 JAVA_CORE_CLASSES['Ljava/util/Collection;'] = nativeDef('Ljava/util/Collection;', {
   super: null,
@@ -1240,12 +1301,13 @@ JAVA_CORE_CLASSES['Ljava/util/Collection;'] = nativeDef('Ljava/util/Collection;'
     },
     'toArray([Ljava/lang/Object;)[Ljava/lang/Object;': (self, [target], vm) => {
       const list = self.items || self.setItems || [];
-      if (target && target.$data) {
+      const descriptor = target?.$type || target?.$descriptor || '[Ljava/lang/Object;';
+      if (target && target.$data && target.$data.length >= list.length) {
         for (let i = 0; i < list.length; i++) target.$data[i] = list[i];
         if (target.$data.length > list.length) target.$data[list.length] = null;
         return target;
       }
-      const array = vm.newArray('[Ljava/lang/Object;', list.length);
+      const array = vm.newArray(descriptor, list.length);
       for (let i = 0; i < list.length; i++) array.$data[i] = list[i];
       return array;
     },
@@ -1255,17 +1317,765 @@ JAVA_CORE_CLASSES['Ljava/util/Collection;'] = nativeDef('Ljava/util/Collection;'
     },
   },
 });
+JAVA_CORE_CLASSES['Ljava/util/AbstractList;'] = nativeDef('Ljava/util/AbstractList;', {
+  super: 'Ljava/util/AbstractCollection;',
+  interfaces: ['Ljava/util/List;'],
+  methods: {
+    'iterator()Ljava/util/Iterator;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/util/Iterator;');
+      object.$peer = { cursor: 0, abstractList: self };
+      return object;
+    },
+  },
+});
+
 JAVA_CORE_CLASSES['Ljava/util/Iterator;'] = nativeDef('Ljava/util/Iterator;', {
   super: null,
   methods: {
-    'hasNext()Z': (self) => self.cursor < self.snapshot.length,
-    'next()Ljava/lang/Object;': (self) => {
+    'hasNext()Z': (self, _args, vm) => {
+      if (self.abstractList) {
+        const size = Number(vm.invokeByName('size', '()I', self.abstractList, [])) | 0;
+        return self.cursor < size;
+      }
+      return self.cursor < self.snapshot.length;
+    },
+    'next()Ljava/lang/Object;': (self, _args, vm) => {
+      if (self.abstractList) {
+        const size = Number(vm.invokeByName('size', '()I', self.abstractList, [])) | 0;
+        if (self.cursor >= size) return null;
+        return vm.invokeByName('get', '(I)Ljava/lang/Object;', self.abstractList, [self.cursor++]) ?? null;
+      }
       if (self.cursor >= self.snapshot.length) return null;
       return self.snapshot[self.cursor++] ?? null;
     },
     'remove()V': () => undefined,
   },
 });
+JAVA_CORE_CLASSES['Ljava/util/ListIterator;'] = nativeDef('Ljava/util/ListIterator;', {
+  super: null,
+  methods: {
+    'hasNext()Z': (self, _args, vm) => {
+      const size = Number(vm.invokeByName('size', '()I', self.abstractList, [])) | 0;
+      return self.cursor < size;
+    },
+    'next()Ljava/lang/Object;': (self, _args, vm) => {
+      const size = Number(vm.invokeByName('size', '()I', self.abstractList, [])) | 0;
+      if (self.cursor >= size) return null;
+      return vm.invokeByName('get', '(I)Ljava/lang/Object;', self.abstractList, [self.cursor++]) ?? null;
+    },
+    'hasPrevious()Z': (self) => (self.cursor | 0) > 0,
+    'previous()Ljava/lang/Object;': (self, _args, vm) => {
+      if ((self.cursor | 0) <= 0) return null;
+      self.cursor -= 1;
+      return vm.invokeByName('get', '(I)Ljava/lang/Object;', self.abstractList, [self.cursor]) ?? null;
+    },
+    'nextIndex()I': (self) => self.cursor | 0,
+    'previousIndex()I': (self) => (self.cursor | 0) - 1,
+    'remove()V': () => undefined,
+    'set(Ljava/lang/Object;)V': () => undefined,
+    'add(Ljava/lang/Object;)V': () => undefined,
+  },
+});
+function sharedPrefsStore(vm, name) {
+  if (!vm.$sharedPrefs) vm.$sharedPrefs = new Map();
+  const store = vm.$sharedPrefs;
+  if (!store.has(name)) store.set(name, new Map());
+  return store.get(name);
+}
+
+JAVA_CORE_CLASSES['Landroid/content/SharedPreferences;'] = nativeDef('Landroid/content/SharedPreferences;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, name) {
+    this.name = String(name ?? 'default');
+  }, { name: 'default' }),
+  methods: {
+    'getString(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? (fallback ?? null) : value;
+    },
+    'getInt(Ljava/lang/String;I)I': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? toInt(fallback) : toInt(value);
+    },
+    'getLong(Ljava/lang/String;J)J': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? toLong(fallback) : toLong(value);
+    },
+    'getFloat(Ljava/lang/String;F)F': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? Number(fallback) || 0 : Number(value) || 0;
+    },
+    'getBoolean(Ljava/lang/String;Z)Z': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? (fallback ? 1 : 0) : (value ? 1 : 0);
+    },
+    'getStringSet(Ljava/lang/String;Ljava/util/Set;)Ljava/util/Set;': (self, [key, fallback], vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const value = store.get(jsString(key));
+      return value === undefined ? (fallback ?? null) : value;
+    },
+    'contains(Ljava/lang/String;)Z': (self, [key], vm) => (sharedPrefsStore(vm, self.name).has(jsString(key)) ? 1 : 0),
+    'getAll()Ljava/util/Map;': (self, _args, vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      const map = makeMap(vm);
+      for (const [k, v] of store) map.$peer.map.set(k, v);
+      return map;
+    },
+    'edit()Landroid/content/SharedPreferences$Editor;': (self, _args, vm) => {
+      const editor = vm.allocateRawObject('Landroid/content/SharedPreferences$Editor;');
+      editor.$peer = { name: self.name, pending: new Map(), clear: false };
+      return editor;
+    },
+    'registerOnSharedPreferenceChangeListener(Landroid/content/SharedPreferences$OnSharedPreferenceChangeListener;)V': () => undefined,
+    'unregisterOnSharedPreferenceChangeListener(Landroid/content/SharedPreferences$OnSharedPreferenceChangeListener;)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/content/SharedPreferences$Editor;'] = nativeDef('Landroid/content/SharedPreferences$Editor;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.name = 'default';
+    this.pending = new Map();
+    this.clear = false;
+  }, { name: 'default', pending: null, clear: false }),
+  methods: {
+    'putString(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), value ?? null);
+      return self.$object ?? self;
+    },
+    'putInt(Ljava/lang/String;I)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), toInt(value));
+      return self.$object ?? self;
+    },
+    'putLong(Ljava/lang/String;J)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), toLong(value));
+      return self.$object ?? self;
+    },
+    'putFloat(Ljava/lang/String;F)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), Number(value) || 0);
+      return self.$object ?? self;
+    },
+    'putBoolean(Ljava/lang/String;Z)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), value ? 1 : 0);
+      return self.$object ?? self;
+    },
+    'putStringSet(Ljava/lang/String;Ljava/util/Set;)Landroid/content/SharedPreferences$Editor;': (self, [key, value]) => {
+      self.pending.set(jsString(key), value ?? null);
+      return self.$object ?? self;
+    },
+    'remove(Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;': (self, [key]) => {
+      self.pending.set(jsString(key), undefined);
+      return self.$object ?? self;
+    },
+    'clear()Landroid/content/SharedPreferences$Editor;': (self) => {
+      self.clear = true;
+      return self.$object ?? self;
+    },
+    'commit()Z': (self, _args, vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      if (self.clear) store.clear();
+      for (const [key, value] of self.pending) {
+        if (value === undefined) store.delete(key);
+        else store.set(key, value);
+      }
+      self.pending.clear();
+      self.clear = false;
+      return 1;
+    },
+    'apply()V': (self, _args, vm) => {
+      const store = sharedPrefsStore(vm, self.name);
+      if (self.clear) store.clear();
+      for (const [key, value] of self.pending) {
+        if (value === undefined) store.delete(key);
+        else store.set(key, value);
+      }
+      self.pending.clear();
+      self.clear = false;
+    },
+  },
+});
+
+function makeExecutor(vm, descriptor = 'Ljava/util/concurrent/ExecutorService;') {
+  const object = vm.allocateRawObject(descriptor);
+  object.$peer = { vm, shutdown: false };
+  return object;
+}
+
+function executorDef(descriptor) {
+  return nativeDef(descriptor, {
+    super: 'Ljava/lang/Object;',
+    interfaces: ['Ljava/util/concurrent/Executor;'],
+    ctor: peerClass(function (vm) {
+      this.vm = vm;
+      this.shutdown = false;
+    }, { shutdown: false }),
+    methods: {
+      'execute(Ljava/lang/Runnable;)V': (self, [runnable]) => {
+        if (self.shutdown || !runnable) return;
+        self.vm.runRunnable(runnable);
+      },
+      'submit(Ljava/lang/Runnable;)Ljava/util/concurrent/Future;': (self, [runnable], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/Future;');
+        future.$peer = { done: true, cancelled: false, result: null };
+        if (!self.shutdown && runnable) {
+          try { vm.runRunnable(runnable); } catch (_) {}
+        }
+        return future;
+      },
+      'submit(Ljava/lang/Runnable;Ljava/lang/Object;)Ljava/util/concurrent/Future;': (self, [runnable, result], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/Future;');
+        future.$peer = { done: true, cancelled: false, result: result ?? null };
+        if (!self.shutdown && runnable) {
+          try { vm.runRunnable(runnable); } catch (_) {}
+        }
+        return future;
+      },
+      'submit(Ljava/util/concurrent/Callable;)Ljava/util/concurrent/Future;': (self, [callable], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/Future;');
+        future.$peer = { done: true, cancelled: false, result: null };
+        if (!self.shutdown && callable) {
+          try { future.$peer.result = vm.invokeInterface(callable, 'call', '()Ljava/lang/Object;', []); } catch (_) {}
+        }
+        return future;
+      },
+      'shutdown()V': (self) => { self.shutdown = true; },
+      'shutdownNow()Ljava/util/List;': (self, _args, vm) => {
+        self.shutdown = true;
+        return makeList(vm, []);
+      },
+      'isShutdown()Z': (self) => (self.shutdown ? 1 : 0),
+      'isTerminated()Z': (self) => (self.shutdown ? 1 : 0),
+      'awaitTermination(JLjava/util/concurrent/TimeUnit;)Z': () => 1,
+      'schedule(Ljava/lang/Runnable;JLjava/util/concurrent/TimeUnit;)Ljava/util/concurrent/ScheduledFuture;': (self, [runnable], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/ScheduledFuture;');
+        future.$peer = { done: true, cancelled: false };
+        if (!self.shutdown && runnable) { try { self.vm.runRunnable(runnable); } catch (_) {} }
+        return future;
+      },
+      'scheduleAtFixedRate(Ljava/lang/Runnable;JJLjava/util/concurrent/TimeUnit;)Ljava/util/concurrent/ScheduledFuture;': (self, [runnable], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/ScheduledFuture;');
+        future.$peer = { done: false, cancelled: false, periodic: true };
+        return future;
+      },
+      'scheduleWithFixedDelay(Ljava/lang/Runnable;JJLjava/util/concurrent/TimeUnit;)Ljava/util/concurrent/ScheduledFuture;': (self, [runnable], vm) => {
+        const future = vm.allocateRawObject('Ljava/util/concurrent/ScheduledFuture;');
+        future.$peer = { done: false, cancelled: false, periodic: true };
+        return future;
+      },
+    },
+  });
+}
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/Executor;'] = nativeDef('Ljava/util/concurrent/Executor;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Ljava/util/concurrent/ExecutorService;'] = executorDef('Ljava/util/concurrent/ExecutorService;');
+JAVA_CORE_CLASSES['Ljava/util/concurrent/ScheduledExecutorService;'] = nativeDef('Ljava/util/concurrent/ScheduledExecutorService;', {
+  super: 'Ljava/util/concurrent/ExecutorService;',
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/ScheduledFuture;'] = nativeDef('Ljava/util/concurrent/ScheduledFuture;', {
+  super: 'Ljava/util/concurrent/Future;',
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/Future;'] = nativeDef('Ljava/util/concurrent/Future;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.done = true;
+    this.cancelled = false;
+    this.result = null;
+  }, { done: true, cancelled: false, result: null }),
+  methods: {
+    'get()Ljava/lang/Object;': (self) => self.result ?? null,
+    'get(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;': (self) => self.result ?? null,
+    'cancel(Z)Z': (self) => { self.cancelled = true; return 1; },
+    'isCancelled()Z': (self) => (self.cancelled ? 1 : 0),
+    'isDone()Z': (self) => (self.done ? 1 : 0),
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/TimeUnit;'] = nativeDef('Ljava/util/concurrent/TimeUnit;', {
+  super: 'Ljava/lang/Enum;',
+  ctor: peerClass(function (vm, object, name, ordinal) {
+    this.name = String(name ?? 'NANOSECONDS');
+    this.ordinal = toInt(ordinal);
+  }, { name: 'NANOSECONDS', ordinal: 0 }),
+  methods: {
+    'toNanos(J)J': (self, [value]) => {
+      const scale = { NANOSECONDS: 1n, MICROSECONDS: 1000n, MILLISECONDS: 1000000n, SECONDS: 1000000000n, MINUTES: 60000000000n, HOURS: 3600000000000n, DAYS: 86400000000000n };
+      return toLong(value) * (scale[self.name] ?? 1n);
+    },
+    'toMillis(J)J': (self, [value]) => {
+      const scale = { NANOSECONDS: 0n, MICROSECONDS: 0n, MILLISECONDS: 1n, SECONDS: 1000n, MINUTES: 60000n, HOURS: 3600000n, DAYS: 86400000n };
+      return toLong(value) * (scale[self.name] ?? 1n);
+    },
+    'toSeconds(J)J': (self, [value]) => toLong(value),
+    'name()Ljava/lang/String;': (self) => self.name || '',
+  },
+  staticFields: new Map(
+    ['NANOSECONDS', 'MICROSECONDS', 'MILLISECONDS', 'SECONDS', 'MINUTES', 'HOURS', 'DAYS'].map((n, i) => [
+      n + ':Ljava/util/concurrent/TimeUnit;',
+      {
+        lazy: (vm) => {
+          const object = vm.allocateRawObject('Ljava/util/concurrent/TimeUnit;');
+          object.$peer = { name: n, ordinal: i };
+          return object;
+        },
+      },
+    ])
+  ),
+  staticMethods: {
+    'values()[Ljava/util/concurrent/TimeUnit;': (_self, _args, vm) => {
+      const names = ['NANOSECONDS', 'MICROSECONDS', 'MILLISECONDS', 'SECONDS', 'MINUTES', 'HOURS', 'DAYS'];
+      const def = vm.registry.resolve('Ljava/util/concurrent/TimeUnit;');
+      const items = names.map((n, i) => {
+        const key = n + ':Ljava/util/concurrent/TimeUnit;';
+        let object = def?.staticValues?.get(key);
+        if (!object) {
+          object = vm.allocateRawObject('Ljava/util/concurrent/TimeUnit;');
+          object.$peer = { name: n, ordinal: i };
+          def?.staticValues?.set(key, object);
+        }
+        return object;
+      });
+      return vm.newArray('[Ljava/util/concurrent/TimeUnit;', items.length, items);
+    },
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/Executors;'] = nativeDef('Ljava/util/concurrent/Executors;', {
+  super: 'Ljava/lang/Object;',
+  staticMethods: {
+    'newSingleThreadExecutor()Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newSingleThreadExecutor(Ljava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newCachedThreadPool()Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newCachedThreadPool(Ljava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newFixedThreadPool(I)Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newFixedThreadPool(ILjava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'newSingleThreadScheduledExecutor()Ljava/util/concurrent/ScheduledExecutorService;': (_self, _args, vm) => makeExecutor(vm, 'Ljava/util/concurrent/ScheduledExecutorService;'),
+    'newSingleThreadScheduledExecutor(Ljava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ScheduledExecutorService;': (_self, _args, vm) => makeExecutor(vm, 'Ljava/util/concurrent/ScheduledExecutorService;'),
+    'newScheduledThreadPool(I)Ljava/util/concurrent/ScheduledExecutorService;': (_self, _args, vm) => makeExecutor(vm, 'Ljava/util/concurrent/ScheduledExecutorService;'),
+    'newScheduledThreadPool(ILjava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ScheduledExecutorService;': (_self, _args, vm) => makeExecutor(vm, 'Ljava/util/concurrent/ScheduledExecutorService;'),
+    'newWorkStealingPool()Ljava/util/concurrent/ExecutorService;': (_self, _args, vm) => makeExecutor(vm),
+    'defaultThreadFactory()Ljava/util/concurrent/ThreadFactory;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/util/concurrent/ThreadFactory;');
+      object.$peer = { vm };
+      return object;
+    },
+  },
+});
+
+function animatorFinish(vm, self) {
+  if (self.running) return;
+  self.running = true;
+  const listeners = self.listeners || [];
+  try { if (typeof self.startAction === 'function') self.startAction(); } catch (_) {}
+  if (!self.listenersTold) {
+    self.listenersTold = true;
+    for (const l of listeners) {
+      try { vm.invokeInterface(l, 'onAnimationStart', '(Landroid/animation/Animator;)V', [self.$object ?? self]); } catch (_) {}
+    }
+  }
+  try { if (typeof self.endAction === 'function') self.endAction(); } catch (_) {}
+  for (const l of listeners) {
+    const target = self.$object ?? self;
+    try { l?.$peer?.onAnimationEnd && l.$peer.onAnimationEnd(); } catch (_) {}
+    try { vm.invokeInterface(l, 'onAnimationEnd', '(Landroid/animation/Animator;)V', [target]); } catch (_) {}
+  }
+}
+
+function animatorDef(descriptor) {
+  return nativeDef(descriptor, {
+    super: 'Ljava/lang/Object;',
+    ctor: peerClass(function () {
+      this.running = false;
+      this.listeners = [];
+      this.listenersTold = false;
+      this.duration = 300;
+      this.startAction = null;
+      this.endAction = null;
+    }, { running: false, listeners: null, listenersTold: false, duration: 300, startAction: null, endAction: null }),
+    methods: {
+      'setDuration(J)Landroid/animation/Animator;': (self, [duration]) => {
+        self.duration = Number(toLong(duration));
+        return self.$object ?? self;
+      },
+      'getDuration()J': (self) => toLong(self.duration ?? 300),
+      'setStartDelay(J)V': () => undefined,
+      'getStartDelay()J': () => 0n,
+      'setInterpolator(Landroid/animation/TimeInterpolator;)V': () => undefined,
+      'addListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
+        if (listener) self.listeners.push(listener);
+      },
+      'removeListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
+        const index = self.listeners.indexOf(listener);
+        if (index >= 0) self.listeners.splice(index, 1);
+      },
+      'removeAllListeners()V': (self) => { self.listeners.length = 0; },
+      'addUpdateListener(Landroid/animation/ValueAnimator$AnimatorUpdateListener;)V': () => undefined,
+      'start()V': (self, _args, vm) => animatorFinish(vm, self),
+      'start(J)V': (self, _args, vm) => animatorFinish(vm, self),
+      'cancel()V': (self) => { self.cancelled = true; },
+      'end()V': (self, _args, vm) => animatorFinish(vm, self),
+      'pause()V': () => undefined,
+      'resume()V': () => undefined,
+      'isRunning()Z': (self) => (self.running ? 1 : 0),
+      'isStarted()Z': (self) => (self.running ? 1 : 0),
+      'getListeners()Ljava/util/ArrayList;': (self) => self.listeners,
+      'setupStartValues()V': () => undefined,
+      'setTarget(Ljava/lang/Object;)V': (self, [target]) => { self.target = target; },
+      'getTarget()Ljava/lang/Object;': (self) => self.target ?? null,
+      'setValues([Landroid/animation/PropertyValuesHolder;)V': () => undefined,
+    },
+  });
+}
+
+JAVA_CORE_CLASSES['Landroid/animation/Animator;'] = animatorDef('Landroid/animation/Animator;');
+JAVA_CORE_CLASSES['Landroid/animation/ValueAnimator;'] = nativeDef('Landroid/animation/ValueAnimator;', {
+  super: 'Landroid/animation/Animator;',
+  ctor: peerClass(function () {
+    this.running = false;
+    this.listeners = [];
+    this.duration = 300;
+  }, { running: false, listeners: null, duration: 300 }),
+  staticMethods: {
+    'ofFloat([F)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
+      object.$peer = { running: false, listeners: [], duration: 300 };
+      return object;
+    },
+    'ofInt([I)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
+      object.$peer = { running: false, listeners: [], duration: 300 };
+      return object;
+    },
+    'ofPropertyValuesHolder([Landroid/animation/PropertyValuesHolder;)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
+      object.$peer = { running: false, listeners: [], duration: 300 };
+      return object;
+    },
+  },
+});
+JAVA_CORE_CLASSES['Landroid/animation/ObjectAnimator;'] = nativeDef('Landroid/animation/ObjectAnimator;', {
+  super: 'Landroid/animation/ValueAnimator;',
+  ctor: peerClass(function () {
+    this.running = false;
+    this.listeners = [];
+    this.duration = 300;
+  }, { running: false, listeners: null, duration: 300 }),
+  staticMethods: {
+    'ofFloat(Ljava/lang/Object;Landroid/util/Property;[F)Landroid/animation/ObjectAnimator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Landroid/animation/ObjectAnimator;');
+      object.$peer = { running: false, listeners: [], duration: 300 };
+      return object;
+    },
+    'ofInt(Ljava/lang/Object;Landroid/util/Property;[I)Landroid/animation/ObjectAnimator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Landroid/animation/ObjectAnimator;');
+      object.$peer = { running: false, listeners: [], duration: 300 };
+      return object;
+    },
+  },
+});
+JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet;'] = nativeDef('Landroid/animation/AnimatorSet;', {
+  super: 'Landroid/animation/Animator;',
+  ctor: peerClass(function () {
+    this.running = false;
+    this.listeners = [];
+    this.duration = 0;
+    this.children = [];
+  }, { running: false, listeners: null, duration: 0, children: null }),
+  methods: {
+    'playTogether([Landroid/animation/Animator;)V': (self, [animators], vm) => {
+      const items = arrayValues(animators) || [];
+      self.children = items;
+    },
+    'playSequentially([Landroid/animation/Animator;)V': (self, [animators]) => {
+      self.children = arrayValues(animators) || [];
+    },
+    'play(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator], vm) => {
+      self.children.push(animator);
+      const builder = vm.allocateRawObject('Landroid/animation/AnimatorSet$Builder;');
+      builder.$peer = { set: self };
+      return builder;
+    },
+    'start()V': (self, _args, vm) => {
+      if (self.running) return;
+      self.running = true;
+      for (const child of self.children || []) {
+        try {
+          const descriptor = vm.registry.classNameOf(child);
+          if (descriptor) vm.invokeByName('start', '()V', child, []);
+        } catch (_) {}
+      }
+      const target = self.$object ?? self;
+      for (const l of self.listeners || []) {
+        try { vm.invokeInterface(l, 'onAnimationEnd', '(Landroid/animation/Animator;)V', [target]); } catch (_) {}
+      }
+      if (typeof self.endAction === 'function') self.endAction();
+    },
+    'setDuration(J)Landroid/animation/AnimatorSet;': (self, [duration]) => {
+      self.duration = Number(toLong(duration));
+      return self.$object ?? self;
+    },
+    'getChildAnimations()Ljava/util/ArrayList;': (self, _args, vm) => makeList(vm, self.children || []),
+  },
+});
+JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet$Builder;'] = nativeDef('Landroid/animation/AnimatorSet$Builder;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {}, {}),
+  methods: {
+    'with(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
+    'before(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
+    'after(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
+    'after(J)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
+  },
+});
+JAVA_CORE_CLASSES['Landroid/animation/TimeInterpolator;'] = nativeDef('Landroid/animation/TimeInterpolator;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Landroid/view/animation/Interpolator;'] = nativeDef('Landroid/view/animation/Interpolator;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Landroid/view/animation/LinearInterpolator;'] = nativeDef('Landroid/view/animation/LinearInterpolator;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Landroid/view/animation/Interpolator;'],
+  ctor: peerClass(function () {}, {}),
+});
+JAVA_CORE_CLASSES['Landroid/animation/Animator$AnimatorListener;'] = nativeDef('Landroid/animation/Animator$AnimatorListener;', { super: 'Ljava/lang/Object;' });
+
+JAVA_CORE_CLASSES['Ljava/util/Locale;'] = nativeDef('Ljava/util/Locale;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, language, country) {
+    this.language = String(language ?? 'en').toLowerCase();
+    this.country = String(country ?? 'US').toUpperCase();
+  }, { language: 'en', country: 'US' }),
+  methods: {
+    'getLanguage()Ljava/lang/String;': (self) => self.language || 'en',
+    'getCountry()Ljava/lang/String;': (self) => self.country || 'US',
+    'toString()Ljava/lang/String;': (self) => (self.language || 'en') + '_' + (self.country || 'US'),
+  },
+  staticMethods: {
+    'getDefault()Ljava/util/Locale;': (_self, _args, vm) => getDefaultLocale(vm),
+    'forLanguageTag(Ljava/lang/String;)Ljava/util/Locale;': (_self, [tag], vm) => {
+      const raw = String(jsString(tag) || '').replace(/_/g, '-');
+      const [lang, country] = raw.split('-');
+      const object = vm.allocateRawObject('Ljava/util/Locale;');
+      object.$peer = { language: (lang || 'en').toLowerCase(), country: (country || '').toUpperCase() };
+      return object;
+    },
+  },
+  staticFields: new Map([['US:Ljava/util/Locale;', null], ['ENGLISH:Ljava/util/Locale;', null], ['ROOT:Ljava/util/Locale;', null]]),
+});
+
+JAVA_CORE_CLASSES['Ljava/lang/ThreadLocal;'] = nativeDef('Ljava/lang/ThreadLocal;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.hasValue = false;
+    this.value = null;
+  }, { hasValue: false, value: null }),
+  methods: {
+    'get()Ljava/lang/Object;': (self) => (self.hasValue ? self.value : null),
+    'set(Ljava/lang/Object;)V': (self, [value]) => {
+      self.hasValue = true;
+      self.value = value;
+    },
+    'remove()V': (self) => {
+      self.hasValue = false;
+      self.value = null;
+    },
+    'initialValue()Ljava/lang/Object;': () => null,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/text/SpannableString;'] = nativeDef('Landroid/text/SpannableString;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Landroid/text/Spannable;', 'Ljava/lang/CharSequence;'],
+  ctor: peerClass(function (vm, object, source) {
+    this.text = jsString(source);
+    this.spans = [];
+  }, { text: '', spans: [] }),
+  methods: {
+    '<init>()V': (self) => {
+      self.text = '';
+      self.spans = [];
+    },
+    '<init>(Ljava/lang/CharSequence;)V': (self, [source]) => {
+      self.text = jsString(source);
+      self.spans = [];
+    },
+    '<init>(Ljava/lang/String;)V': (self, [source]) => {
+      self.text = jsString(source);
+      self.spans = [];
+    },
+    'toString()Ljava/lang/String;': (self) => self.text || '',
+    'length()I': (self) => (self.text || '').length,
+    'setSpan(Ljava/lang/Object;III)V': (self, [span, start, end, flags]) => {
+      self.spans.push({ span, start: toInt(start), end: toInt(end), flags: toInt(flags) });
+    },
+    'getSpanStart(Ljava/lang/Object;)I': (self, [span]) => self.spans.find((s) => s.span === span)?.start ?? -1,
+    'getSpanEnd(Ljava/lang/Object;)I': (self, [span]) => self.spans.find((s) => s.span === span)?.end ?? -1,
+    'getSpans(IILjava/lang/Class;)[Ljava/lang/Object;': (self, [start, end, cls], vm) => {
+      const items = self.spans.map((s) => s.span);
+      return vm.newArray('[Ljava/lang/Object;', items);
+    },
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/text/style/ForegroundColorSpan;'] = nativeDef('Landroid/text/style/ForegroundColorSpan;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, color) {
+    this.color = toInt(color) >>> 0;
+  }, { color: 0 }),
+  methods: {
+    '<init>(I)V': (self, [color]) => {
+      self.color = toInt(color) >>> 0;
+    },
+    'getForegroundColor()I': (self) => self.color | 0,
+    'updateDrawState(Landroid/text/TextPaint;)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/text/style/BackgroundColorSpan;'] = nativeDef('Landroid/text/style/BackgroundColorSpan;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, color) {
+    this.color = toInt(color) >>> 0;
+  }, { color: 0 }),
+  methods: {
+    '<init>(I)V': (self, [color]) => {
+      self.color = toInt(color) >>> 0;
+    },
+    'getBackgroundColor()I': (self) => self.color | 0,
+    'updateDrawState(Landroid/text/TextPaint;)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/text/method/LinkMovementMethod;'] = nativeDef('Landroid/text/method/LinkMovementMethod;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {}, {}),
+  staticFields: new Map([['instance:Landroid/text/method/MovementMethod;', null]]),
+  staticMethods: {
+    'getInstance()Landroid/text/method/MovementMethod;': (_self, _args, vm) => {
+      const def = vm.registry.resolve('Landroid/text/method/LinkMovementMethod;');
+      let instance = def?.staticValues?.get('instance:Landroid/text/method/MovementMethod;');
+      if (!instance) {
+        instance = vm.allocateRawObject('Landroid/text/method/LinkMovementMethod;');
+        def?.staticValues?.set('instance:Landroid/text/method/MovementMethod;', instance);
+      }
+      return instance;
+    },
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/graphics/drawable/Drawable;'] = nativeDef('Landroid/graphics/drawable/Drawable;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.bounds = { left: 0, top: 0, right: 0, bottom: 0 };
+    this.alpha = 255;
+  }, { bounds: null, alpha: 255 }),
+  methods: {
+    'setBounds(IIII)V': (self, [l, t, r, b]) => {
+      self.bounds = { left: toInt(l), top: toInt(t), right: toInt(r), bottom: toInt(b) };
+    },
+    'setBounds(Landroid/graphics/Rect;)V': (self, [rect]) => {
+      self.bounds = {
+        left: toInt(rect?.left),
+        top: toInt(rect?.top),
+        right: toInt(rect?.right),
+        bottom: toInt(rect?.bottom),
+      };
+    },
+    'setAlpha(I)V': (self, [alpha]) => { self.alpha = toInt(alpha) & 0xff; },
+    'getAlpha()I': (self) => self.alpha ?? 255,
+    'setColorFilter(Landroid/graphics/ColorFilter;)V': () => undefined,
+    'getIntrinsicWidth()I': () => -1,
+    'getIntrinsicHeight()I': () => -1,
+    'isStateful()Z': () => 0,
+    'mutate()Landroid/graphics/drawable/Drawable;': (self) => self.$object ?? self,
+    'invalidateSelf()V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/graphics/drawable/GradientDrawable;'] = nativeDef('Landroid/graphics/drawable/GradientDrawable;', {
+  super: 'Landroid/graphics/drawable/Drawable;',
+  ctor: peerClass(function () {
+    this.shape = 0;
+    this.color = 0;
+    this.strokeColor = 0;
+    this.strokeWidth = 0;
+    this.cornerRadii = null;
+    this.cornerRadius = 0;
+  }, { shape: 0, color: 0, strokeColor: 0, strokeWidth: 0, cornerRadii: null, cornerRadius: 0 }),
+  methods: {
+    'setShape(I)V': (self, [shape]) => { self.shape = toInt(shape); },
+    'setColor(I)V': (self, [color]) => { self.color = toInt(color) >>> 0; },
+    'setStroke(ILandroid/content/res/ColorStateList;)V': (self, [width]) => { self.strokeWidth = toInt(width); },
+    'setStroke(II)V': (self, [width, color]) => {
+      self.strokeWidth = toInt(width);
+      self.strokeColor = toInt(color) >>> 0;
+    },
+    'setCornerRadius(F)V': (self, [radius]) => { self.cornerRadius = Number(radius) || 0; },
+    'setCornerRadii([F)V': (self, [radii]) => { self.cornerRadii = arrayValues(radii) || null; },
+    'setGradientType(I)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/Arrays;'] = nativeDef('Ljava/util/Arrays;', {
+  super: 'Ljava/lang/Object;',
+  staticMethods: {
+    'copyOf([Ljava/lang/Object;I)[Ljava/lang/Object;': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([II)[I': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([JI)[J': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([BI)[B': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([CI)[C': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([SI)[S': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([ZI)[Z': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([FI)[F': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([DI)[D': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOfRange([Ljava/lang/Object;II)[Ljava/lang/Object;': (_self, [source, from, to], vm) => copyArrayRange(vm, source, from, to),
+    'toString([Ljava/lang/Object;)Ljava/lang/String;': (_self, [source]) => `[${arrayValues(source).join(', ')}]`,
+    'equals([Ljava/lang/Object;[Ljava/lang/Object;)Z': (_self, [a, b]) => {
+      const left = arrayValues(a);
+      const right = arrayValues(b);
+      if (left.length !== right.length) return 0;
+      return left.every((value, index) => value === right[index]) ? 1 : 0;
+    },
+    'hashCode([Ljava/lang/Object;)I': (_self, [source]) => {
+      let result = 1;
+      for (const value of arrayValues(source)) result = ((31 * result) + (value === null ? 0 : 1)) | 0;
+      return result;
+    },
+    'asList([Ljava/lang/Object;)Ljava/util/List;': (_self, [source], vm) => makeList(vm, arrayValues(source).slice()),
+    'sort([Ljava/lang/Object;)V': (_self, [source]) => {
+      if (!source || !Array.isArray(source.$data)) return undefined;
+      source.$data.sort((a, b) => (a === null ? -1 : b === null ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
+      return undefined;
+    },
+  },
+});
+
+function arrayValues(array) {
+  if (!array) return [];
+  if (Array.isArray(array.$data)) return array.$data;
+  return [];
+}
+
+function copyArrayOf(vm, source, length) {
+  const values = arrayValues(source);
+  const size = toInt(length);
+  const descriptor = source?.$type || source?.$descriptor || '[Ljava/lang/Object;';
+  const result = vm.newArray(descriptor, size);
+  for (let i = 0; i < size && i < values.length; i++) result.$data[i] = values[i];
+  return result;
+}
+
+function copyArrayRange(vm, source, from, to) {
+  const values = arrayValues(source);
+  const start = Math.max(0, toInt(from));
+  const end = Math.min(values.length, toInt(to));
+  const descriptor = source?.$type || source?.$descriptor || '[Ljava/lang/Object;';
+  const size = Math.max(0, end - start);
+  const result = vm.newArray(descriptor, size);
+  for (let i = 0; i < size; i++) result.$data[i] = values[start + i];
+  return result;
+}
+
 JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections;', {
   super: 'Ljava/lang/Object;',
   staticFields: new Map([
@@ -1288,6 +2098,25 @@ JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections
     },
     'reverse(Ljava/util/List;)V': (self, [list]) => {
       list?.items?.reverse?.();
+    },
+    'sort(Ljava/util/List;Ljava/util/Comparator;)V': (self, [list, comparator], vm) => {
+      const items = list?.items;
+      if (!Array.isArray(items) || items.length < 2) return;
+      const compare = comparator && typeof comparator === 'object'
+        ? (a, b) => Number(vm.invokeInterface(comparator, 'compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', [a, b])) | 0
+        : (a, b) => String(jsString(a)).localeCompare(String(jsString(b)));
+      items.sort(compare);
+    },
+    'synchronizedMap(Ljava/util/Map;)Ljava/util/Map;': (_self, [map]) => map ?? null,
+    'synchronizedList(Ljava/util/List;)Ljava/util/List;': (_self, [list]) => list ?? null,
+    'synchronizedSet(Ljava/util/Set;)Ljava/util/Set;': (_self, [set]) => set ?? null,
+    'synchronizedCollection(Ljava/util/Collection;)Ljava/util/Collection;': (_self, [collection]) => collection ?? null,
+    'addAll(Ljava/util/Collection;[Ljava/lang/Object;)Z': (_self, [collection, values], vm) => {
+      const list = collection?.items;
+      if (!Array.isArray(list)) return false;
+      const items = arrayValues(values) || [];
+      list.push(...items);
+      return items.length > 0;
     },
   },
 });
@@ -1568,6 +2397,314 @@ JAVA_CORE_CLASSES['Ljava/util/concurrent/atomic/AtomicInteger;'] = nativeDef('Lj
     'toString()Ljava/lang/String;': (self) => String(self.value | 0),
   },
 });
+JAVA_CORE_CLASSES['Ljava/util/concurrent/atomic/AtomicBoolean;'] = nativeDef('Ljava/util/concurrent/atomic/AtomicBoolean;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.value = false;
+  }, { value: false }),
+  methods: {
+    '<init>()V': (self) => {
+      self.value = false;
+    },
+    '<init>(Z)V': (self, [value]) => {
+      self.value = !!value;
+    },
+    'get()Z': (self) => !!self.value,
+    'set(Z)V': (self, [value]) => {
+      self.value = !!value;
+    },
+    'lazySet(Z)V': (self, [value]) => {
+      self.value = !!value;
+    },
+    'getAndSet(Z)Z': (self, [value]) => {
+      const previous = !!self.value;
+      self.value = !!value;
+      return previous;
+    },
+    'compareAndSet(ZZ)Z': (self, [expected, value]) => {
+      if (!!self.value !== !!expected) return false;
+      self.value = !!value;
+      return true;
+    },
+    'weakCompareAndSet(ZZ)Z': (self, [expected, value]) => {
+      if (!!self.value !== !!expected) return false;
+      self.value = !!value;
+      return true;
+    },
+    'compareAndExchange(ZZ)Z': (self, [expected, value]) => {
+      const previous = !!self.value;
+      if (previous === !!expected) self.value = !!value;
+      return previous;
+    },
+    'toString()Ljava/lang/String;': (self) => String(!!self.value),
+  },
+});
+JAVA_CORE_CLASSES['Ljava/lang/Runtime;'] = nativeDef('Ljava/lang/Runtime;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.cached = new Map();
+  }, { cached: new Map() }),
+  staticMethods: {
+    'getRuntime()Ljava/lang/Runtime;': (_self, _args, vm) => getRuntimeSingleton(vm),
+  },
+  methods: {
+    'availableProcessors()I': () => 4,
+    'maxMemory()J': () => 268435456,
+    'totalMemory()J': () => 268435456,
+    'freeMemory()J': () => 134217728,
+    'gc()V': () => undefined,
+    'runFinalization()V': () => undefined,
+    'exit(I)V': () => undefined,
+    'halt(I)V': () => undefined,
+    'addShutdownHook(Ljava/lang/Thread;)V': () => undefined,
+    'removeShutdownHook(Ljava/lang/Thread;)Z': () => false,
+    'loadLibrary(Ljava/lang/String;)V': () => undefined,
+    'load(Ljava/lang/String;)V': () => undefined,
+  },
+});
+JAVA_CORE_CLASSES['Ljava/io/Writer;'] = nativeDef('Ljava/io/Writer;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/io/Closeable;', 'Ljava/io/Flushable;', 'Ljava/lang/Appendable;'],
+  ctor: peerClass(function () {
+    this.buffer = '';
+    this.lock = this;
+  }, { buffer: '', lock: null }),
+  methods: {
+    'write(I)V': (self, [code]) => {
+      self.buffer = (self.buffer || '') + String.fromCharCode(code | 0);
+    },
+    'write([C)V': (self, [chars]) => {
+      const values = Array.isArray(chars) ? chars : (chars?.$data || []);
+      self.buffer = (self.buffer || '') + values.map((c) => String.fromCharCode(c | 0)).join('');
+    },
+    'write([CII)V': (self, [chars, offset, length]) => {
+      const values = Array.isArray(chars) ? chars : (chars?.$data || []);
+      self.buffer = (self.buffer || '') + values.slice(offset | 0, (offset | 0) + (length | 0)).map((c) => String.fromCharCode(c | 0)).join('');
+    },
+    'write(Ljava/lang/String;)V': (self, [text]) => {
+      self.buffer = (self.buffer || '') + jsString(text);
+    },
+    'write(Ljava/lang/String;II)V': (self, [text, offset, length]) => {
+      self.buffer = (self.buffer || '') + jsString(text).substr(offset | 0, length | 0);
+    },
+    'append(Ljava/lang/CharSequence;)Ljava/io/Writer;': (self, [text]) => {
+      self.buffer = (self.buffer || '') + jsString(text);
+      return self.$object ?? self;
+    },
+    'append(Ljava/lang/CharSequence;II)Ljava/io/Writer;': (self, [text, start, end]) => {
+      self.buffer = (self.buffer || '') + jsString(text).slice(start | 0, end | 0);
+      return self.$object ?? self;
+    },
+    'append(C)Ljava/io/Writer;': (self, [code]) => {
+      self.buffer = (self.buffer || '') + String.fromCharCode(code | 0);
+      return self.$object ?? self;
+    },
+    'flush()V': () => undefined,
+    'close()V': () => undefined,
+  },
+});
+JAVA_CORE_CLASSES['Ljava/io/FileWriter;'] = nativeDef('Ljava/io/FileWriter;', {
+  super: 'Ljava/io/Writer;',
+  ctor: peerClass(function () {
+    this.path = '';
+    this.buffer = '';
+    this.append = false;
+  }, { path: '', buffer: '', append: false }),
+  methods: {
+    '<init>(Ljava/lang/String;)V': (self, [path]) => {
+      self.path = jsString(path);
+      self.buffer = '';
+      self.append = false;
+    },
+    '<init>(Ljava/lang/String;Z)V': (self, [path, append]) => {
+      self.path = jsString(path);
+      self.buffer = '';
+      self.append = !!append;
+    },
+    '<init>(Ljava/io/File;)V': (self, [file]) => {
+      self.path = file?.path ?? '';
+      self.buffer = '';
+      self.append = false;
+    },
+    '<init>(Ljava/io/File;Z)V': (self, [file, append]) => {
+      self.path = file?.path ?? '';
+      self.buffer = '';
+      self.append = !!append;
+    },
+    '<init>(Ljava/io/FileDescriptor;)V': (self) => {
+      self.path = '';
+      self.buffer = '';
+      self.append = false;
+    },
+    'write(I)V': (self, [code]) => {
+      self.buffer = (self.buffer || '') + String.fromCharCode(code | 0);
+    },
+    'write([C)V': (self, [chars]) => {
+      const values = Array.isArray(chars) ? chars : (chars?.$data || []);
+      self.buffer = (self.buffer || '') + values.map((c) => String.fromCharCode(c | 0)).join('');
+    },
+    'write([CII)V': (self, [chars, offset, length]) => {
+      const values = Array.isArray(chars) ? chars : (chars?.$data || []);
+      self.buffer = (self.buffer || '') + values.slice(offset | 0, (offset | 0) + (length | 0)).map((c) => String.fromCharCode(c | 0)).join('');
+    },
+    'write(Ljava/lang/String;)V': (self, [text]) => {
+      self.buffer = (self.buffer || '') + jsString(text);
+    },
+    'write(Ljava/lang/String;II)V': (self, [text, offset, length]) => {
+      self.buffer = (self.buffer || '') + jsString(text).substr(offset | 0, length | 0);
+    },
+    'append(Ljava/lang/CharSequence;)Ljava/io/Writer;': (self, [text]) => {
+      self.buffer = (self.buffer || '') + jsString(text);
+      return self.$object ?? self;
+    },
+    'append(C)Ljava/io/Writer;': (self, [code]) => {
+      self.buffer = (self.buffer || '') + String.fromCharCode(code | 0);
+      return self.$object ?? self;
+    },
+    'flush()V': (self) => flushFileWriter(self),
+    'close()V': (self) => flushFileWriter(self),
+  },
+});
+JAVA_CORE_CLASSES['Ljava/io/StringWriter;'] = nativeDef('Ljava/io/StringWriter;', {
+  super: 'Ljava/io/Writer;',
+  ctor: peerClass(function () {
+    this.buffer = '';
+    this.lock = this;
+  }, { buffer: '', lock: null }),
+  methods: {
+    '<init>()V': (self) => {
+      self.buffer = '';
+    },
+    '<init>(I)V': (self) => {
+      self.buffer = '';
+    },
+    'write(Ljava/lang/String;)V': (self, [text]) => {
+      self.buffer += jsString(text);
+    },
+    'write(Ljava/lang/String;II)V': (self, [text, offset, length]) => {
+      self.buffer += jsString(text).substr(offset | 0, length | 0);
+    },
+    'write(I)V': (self, [code]) => {
+      self.buffer += String.fromCharCode(code | 0);
+    },
+    'write([CII)V': (self, [chars, offset, length]) => {
+      const values = Array.isArray(chars) ? chars : (chars?.$data || []);
+      self.buffer += values.slice(offset | 0, (offset | 0) + (length | 0)).map((c) => String.fromCharCode(c | 0)).join('');
+    },
+    'append(Ljava/lang/CharSequence;)Ljava/io/StringWriter;': (self, [text]) => {
+      self.buffer += jsString(text);
+      return self.$object ?? self;
+    },
+    'append(C)Ljava/io/StringWriter;': (self, [code]) => {
+      self.buffer += String.fromCharCode(code | 0);
+      return self.$object ?? self;
+    },
+    'getBuffer()Ljava/lang/StringBuffer;': (self, _args, vm) => vm.instantiate('Ljava/lang/StringBuffer;', [self.buffer]),
+    'toString()Ljava/lang/String;': (self) => self.buffer,
+    'flush()V': () => undefined,
+    'close()V': () => undefined,
+  },
+});
+JAVA_CORE_CLASSES['Ljava/io/PrintWriter;'] = nativeDef('Ljava/io/PrintWriter;', {
+  super: 'Ljava/io/Writer;',
+  ctor: peerClass(function () {
+    this.writer = null;
+    this.autoFlush = false;
+  }, { writer: null, autoFlush: false }),
+  methods: {
+    '<init>(Ljava/io/Writer;)V': (self, [writer]) => {
+      self.writer = writer;
+      self.autoFlush = false;
+    },
+    '<init>(Ljava/io/Writer;Z)V': (self, [writer, autoFlush]) => {
+      self.writer = writer;
+      self.autoFlush = !!autoFlush;
+    },
+    '<init>(Ljava/io/OutputStream;)V': (self, [stream]) => {
+      self.writer = stream;
+      self.autoFlush = false;
+    },
+    '<init>(Ljava/io/OutputStream;Z)V': (self, [stream, autoFlush]) => {
+      self.writer = stream;
+      self.autoFlush = !!autoFlush;
+    },
+    'print(Ljava/lang/String;)V': (self, [text]) => writeThrough(self, jsString(text)),
+    'print(Ljava/lang/Object;)V': (self, [value]) => writeThrough(self, value === null || value === undefined ? 'null' : String(value)),
+    'print(C)V': (self, [code]) => writeThrough(self, String.fromCharCode(code | 0)),
+    'print(I)V': (self, [value]) => writeThrough(self, String(value | 0)),
+    'print(J)V': (self, [value]) => writeThrough(self, String(Number(value))),
+    'print(Z)V': (self, [value]) => writeThrough(self, String(!!value)),
+    'println()V': (self) => writeThrough(self, '\n'),
+    'println(Ljava/lang/String;)V': (self, [text]) => writeThrough(self, `${jsString(text)}\n`),
+    'println(Ljava/lang/Object;)V': (self, [value]) => writeThrough(self, `${value === null || value === undefined ? 'null' : String(value)}\n`),
+    'println(I)V': (self, [value]) => writeThrough(self, `${value | 0}\n`),
+    'println(J)V': (self, [value]) => writeThrough(self, `${Number(value)}\n`),
+    'println(Z)V': (self, [value]) => writeThrough(self, `${!!value}\n`),
+    'println(C)V': (self, [code]) => writeThrough(self, `${String.fromCharCode(code | 0)}\n`),
+    'write(Ljava/lang/String;)V': (self, [text]) => writeThrough(self, jsString(text)),
+    'flush()V': (self, _args, vm) => {
+      if (self.writer) vm.invokeByName?.('flush', '()V', self.writer, []);
+    },
+    'close()V': (self, _args, vm) => {
+      if (self.writer) vm.invokeByName?.('close', '()V', self.writer, []);
+    },
+    'checkError()Z': () => false,
+  },
+});
+JAVA_CORE_CLASSES['Ljava/sql/Timestamp;'] = nativeDef('Ljava/sql/Timestamp;', {
+  super: 'Ljava/util/Date;',
+  ctor: peerClass(function () {
+    this.time = 0;
+    this.nanos = 0;
+  }, { time: 0, nanos: 0 }),
+  methods: {
+    '<init>(J)V': (self, [time]) => {
+      self.time = Number(time) | 0;
+      self.nanos = 0;
+    },
+    'getTime()J': (self) => self.time,
+    'setTime(J)V': (self, [time]) => {
+      self.time = Number(time) | 0;
+    },
+    'getNanos()I': (self) => self.nanos | 0,
+    'setNanos(I)V': (self, [nanos]) => {
+      self.nanos = nanos | 0;
+    },
+    'toString()Ljava/lang/String;': (self) => new Date(self.time).toISOString().replace('T', ' ').replace('Z', ''),
+  },
+  staticMethods: {
+    'valueOf(Ljava/lang/String;)Ljava/sql/Timestamp;': (self) => self,
+  },
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock;'] = nativeDef('Ljava/util/concurrent/locks/ReentrantReadWriteLock;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/util/concurrent/locks/ReadWriteLock;'],
+  ctor: peerClass(function () {
+    this.readLockObject = null;
+    this.writeLockObject = null;
+  }, { readLockObject: null, writeLockObject: null }),
+  methods: {
+    '<init>()V': () => undefined,
+    '<init>(Z)V': () => undefined,
+    'readLock()Ljava/util/concurrent/locks/Lock;': (self, _args, vm) => getNamedLock(vm, self, 'read'),
+    'writeLock()Ljava/util/concurrent/locks/Lock;': (self, _args, vm) => getNamedLock(vm, self, 'write'),
+  },
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/Lock;'] = nativeDef('Ljava/util/concurrent/locks/Lock;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.owner = null;
+    this.held = false;
+  }, { owner: null, held: false }),
+  methods: {
+    'lock()V': () => undefined,
+    'lockInterruptibly()V': () => undefined,
+    'tryLock()Z': () => true,
+    'tryLock(JLjava/util/concurrent/TimeUnit;)Z': () => true,
+    'unlock()V': () => undefined,
+    'newCondition()Ljava/util/concurrent/locks/Condition;': () => null,
+  },
+});
 JAVA_CORE_CLASSES['Ljava/util/concurrent/CopyOnWriteArrayList;'] = nativeDef('Ljava/util/concurrent/CopyOnWriteArrayList;', {
   super: 'Ljava/lang/Object;',
   interfaces: ['Ljava/util/List;', 'Ljava/util/Collection;'],
@@ -1697,10 +2834,124 @@ function makeList(vm, items) {
   return object;
 }
 
+function getRuntimeSingleton(vm) {
+  if (!vm.__runtimeSingleton) {
+    vm.__runtimeSingleton = vm.instantiate('Ljava/lang/Runtime;', []);
+  }
+  return vm.__runtimeSingleton;
+}
+
+function writeThrough(writer, text) {
+  const target = writer.writer;
+  if (!target) return;
+  if (typeof target.write === 'function') {
+    target.write(text);
+  } else if (target.buffer !== undefined) {
+    target.buffer += text;
+  }
+}
+
+function getNamedLock(vm, owner, kind) {
+  const key = kind === 'read' ? 'readLockObject' : 'writeLockObject';
+  if (!owner[key]) {
+    owner[key] = vm.instantiate('Ljava/util/concurrent/locks/Lock;', []);
+  }
+  return owner[key];
+}
+
 function makeSet(vm, items) {
   const object = vm.allocateRawObject('Ljava/util/HashSet;');
   object.$peer = { setItems: [...items] };
   return object;
+}
+
+function iterableValues(source, vm) {
+  if (!source) return [];
+  if (Array.isArray(source.$data)) return [...source.$data];
+  const peer = source.$peer || source;
+  if (Array.isArray(peer.items)) return [...peer.items];
+  if (Array.isArray(peer.setItems)) return [...peer.setItems];
+  if (Array.isArray(peer.snapshot)) return [...peer.snapshot];
+  if (source.$data !== undefined && typeof source.$data?.[Symbol.iterator] === 'function') return [...source.$data];
+  if (typeof source.forEach === 'function' && !Array.isArray(peer)) return peer;
+  return [];
+}
+
+function collectionValues(collection) {
+  if (!collection) return [];
+  if (Array.isArray(collection.$data)) return [...collection.$data];
+  const peer = collection.$peer || collection;
+  if (Array.isArray(peer.items)) return [...peer.items];
+  if (Array.isArray(peer.setItems)) return [...peer.setItems];
+  return [];
+}
+
+function appendIterable(vm, builder, iterable) {
+  for (const item of iterableValues(iterable, vm)) builder.add(item);
+  return builder;
+}
+
+function invokeOrUndefined(vm, receiver, name, proto, args) {
+  try {
+    const classDesc = receiver?.$dexClass?.descriptor || receiver?.$nativeClass?.$descriptor || 'Ljava/lang/Object;';
+    return vm.invoke({ classDesc, name, proto: { descriptor: proto, parameters: [], returnType: 'Ljava/lang/Object;' } }, receiver, args, 'virtual');
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function kotlinJoinToString(vm, iterable, separator, prefix, postfix, limit, truncated, transform) {
+  const items = iterableValues(iterable, vm);
+  const sep = jsString(separator) ?? ', ';
+  const pre = jsString(prefix) ?? '';
+  const post = jsString(postfix) ?? '';
+  const max = toInt(limit);
+  const tail = jsString(truncated) ?? '...';
+  const parts = [];
+  const bound = max < 0 ? items.length : Math.min(items.length, max);
+  for (let i = 0; i < bound; i++) {
+    let value = items[i];
+    if (transform) {
+      const rendered = invokeOrUndefined(vm, transform, 'invoke', '(Ljava/lang/Object;)Ljava/lang/Object;', [value]);
+      if (rendered !== undefined) value = rendered;
+    }
+    parts.push(jsString(value) ?? String(value ?? ''));
+  }
+  if (max >= 0 && items.length > max) parts.push(tail);
+  return pre + parts.join(sep) + post;
+}
+
+JAVA_CORE_CLASSES['Lk7/t;'] = nativeDef('Lk7/t;', {
+  super: 'Ljava/lang/Object;',
+  staticMethods: {
+    'A(Ljava/lang/Iterable;)Ljava/util/Set;': (_self, [iterable], vm) => makeSet(vm, [...new Set(iterableValues(iterable, vm))]),
+    'B(Ljava/lang/Iterable;Ljava/lang/Iterable;)Ljava/util/List;': (_self, [first, second], vm) => makeList(vm, [...iterableValues(first, vm), ...iterableValues(second, vm)]),
+    'o(Ljava/lang/Iterable;Ljava/lang/Object;)Z': (self, [iterable, value], vm) => iterableValues(iterable, vm).includes(value),
+    'p(Ljava/util/List;)Ljava/lang/Object;': (self, [list]) => collectionValues(list)[0] ?? null,
+    'q(Ljava/lang/Iterable;Ljava/lang/Object;)I': (self, [iterable, value], vm) => iterableValues(iterable, vm).lastIndexOf(value),
+    's(Ljava/lang/Iterable;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ILjava/lang/CharSequence;Lq7/l;)Ljava/lang/String;': (_self, [iterable, separator, prefix, postfix, limit, truncated, transform], vm) => kotlinJoinToString(vm, iterable, separator, prefix, postfix, limit, truncated, transform),
+    'u(Ljava/util/List;)Ljava/lang/Object;': (self, [list]) => collectionValues(list).at(-1) ?? null,
+    'v(Ljava/lang/Iterable;)Ljava/lang/Comparable;': (self, [iterable], vm) => {
+      const values = iterableValues(iterable, vm).filter((value) => value !== null && value !== undefined);
+      if (values.length === 0) return null;
+      return values.reduce((max, value) => (value > max ? value : max));
+    },
+    'w(Ljava/lang/Iterable;Ljava/util/Collection;)Ljava/util/Collection;': (_self, [iterable, target], vm) => appendIterable(vm, target, iterable),
+    'x(Ljava/lang/Iterable;)Ljava/util/List;': (_self, [iterable], vm) => makeList(vm, iterableValues(iterable, vm)),
+    'y(Ljava/lang/Iterable;)Ljava/util/List;': (_self, [iterable], vm) => makeList(vm, [...new Set(iterableValues(iterable, vm))]),
+    'z(Ljava/util/Collection;)Ljava/util/List;': (_self, [collection], vm) => makeList(vm, collectionValues(collection)),
+  },
+});
+
+function getDefaultLocale(vm) {
+  const def = vm.registry.resolve('Ljava/util/Locale;');
+  let instance = def?.staticValues?.get('DEFAULT:Ljava/util/Locale;');
+  if (!instance) {
+    instance = vm.allocateRawObject('Ljava/util/Locale;');
+    instance.$peer = { language: 'zh', country: 'CN' };
+    def?.staticValues?.set('DEFAULT:Ljava/util/Locale;', instance);
+  }
+  return instance;
 }
 
 function makeMap(vm) {
@@ -1742,6 +2993,31 @@ function integerDef(descriptor, bits) {
       'toString(I)Ljava/lang/String;': (_self, [value]) => String(toInt(value)),
       'toString(J)Ljava/lang/String;': (_self, [value]) => toLong(value).toString(),
       'toHexString(I)Ljava/lang/String;': (_self, [value]) => (toInt(value) >>> 0).toString(16),
+      'toBinaryString(I)Ljava/lang/String;': (_self, [value]) => (toInt(value) >>> 0).toString(2),
+      'toOctalString(I)Ljava/lang/String;': (_self, [value]) => (toInt(value) >>> 0).toString(8),
+      'numberOfLeadingZeros(I)I': (_self, [value]) => Math.clz32(toInt(value)) | 0,
+      'numberOfTrailingZeros(I)I': (_self, [value]) => {
+        const v = toInt(value) >>> 0;
+        return v === 0 ? 32 : (31 - Math.clz32(v & -v)) | 0;
+      },
+      'bitCount(I)I': (_self, [value]) => {
+        let v = toInt(value) >>> 0;
+        let count = 0;
+        while (v) { count += v & 1; v >>>= 1; }
+        return count;
+      },
+      'highestOneBit(I)I': (_self, [value]) => {
+        const v = toInt(value) >>> 0;
+        return v === 0 ? 0 : (1 << (31 - Math.clz32(v))) | 0;
+      },
+      'lowestOneBit(I)I': (_self, [value]) => (toInt(value) & -toInt(value)) | 0,
+      'compare(II)I': (_self, [a, b]) => (toInt(a) < toInt(b) ? -1 : toInt(a) > toInt(b) ? 1 : 0),
+      'reverse(I)I': (_self, [value]) => {
+        let v = toInt(value) >>> 0;
+        let out = 0;
+        for (let i = 0; i < 32; i += 1) { out = (out << 1) | (v & 1); v >>>= 1; }
+        return out | 0;
+      },
       'getInteger(Ljava/lang/String;)Ljava/lang/Integer;': (_self, [name], vm) => {
         const system = vm.getSystemProperty ? vm.getSystemProperty(jsString(name)) : null;
         if (system === null || system === undefined) return null;
@@ -1825,6 +3101,9 @@ function listMethods() {
     '<init>(I)V': (self) => {
       self.items = [];
     },
+    '<init>(Ljava/util/Collection;)V': (self, [other]) => {
+      self.items = [...(other?.items || other?.setItems || [])];
+    },
     'add(Ljava/lang/Object;)Z': (self, [value]) => {
       self.items.push(value);
       return true;
@@ -1891,6 +3170,14 @@ function mapMethods() {
       self.map.set(k, value);
       self.rawKeys.set(k, key);
       return previous ?? null;
+    },
+    'putAll(Ljava/util/Map;)V': (self, [other]) => {
+      if (!other || !other.map) return;
+      if (!self.rawKeys) self.rawKeys = new Map();
+      for (const [k, v] of other.map) {
+        self.map.set(k, v);
+        self.rawKeys.set(k, other.rawKeys?.get(k) ?? k);
+      }
     },
     'putIfAbsent(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
       const k = mapKey(key);
@@ -2020,6 +3307,23 @@ function filePeerClass() {
   return peerClass(function (path) {
     this.path = typeof path === 'string' ? path : String(path ?? '');
   }, { path: '' });
+}
+
+function flushFileWriter(self) {
+  const text = self.buffer || '';
+  self.buffer = '';
+  if (!self.path) return;
+  const encoded = new TextEncoder().encode(text);
+  const existing = self.append ? VIRTUAL_FS.read(self.path) : null;
+  if (existing) {
+    const merged = new Uint8Array(existing.length + encoded.length);
+    merged.set(existing, 0);
+    merged.set(encoded, existing.length);
+    VIRTUAL_FS.write(self.path, merged);
+  } else {
+    VIRTUAL_FS.write(self.path, encoded);
+  }
+  self.append = true;
 }
 
 JAVA_CORE_CLASSES['Ljava/io/Serializable;'] ??= nativeDef('Ljava/io/Serializable;', { super: null });

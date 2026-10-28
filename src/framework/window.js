@@ -1,6 +1,6 @@
-import { ViewGroup, VISIBILITY, MeasureSpec } from './view.js';
+import { ViewGroup, VISIBILITY, MeasureSpec, getChildMeasureSpec, resolveSize } from './view.js';
 import { FrameLayout } from './layouts.js';
-import { cssColor, Paint } from './graphics.js';
+import { cssColor, Paint, drawVectorRaw } from './graphics.js';
 
 export class Window {
   constructor(context, decorView, screen) {
@@ -119,18 +119,22 @@ export class DecorView extends ViewGroup {
   onMeasure(widthSpec, heightSpec) {
     const width = MeasureSpec.getSize(widthSpec);
     const height = MeasureSpec.getSize(heightSpec);
-    if (this.contentView) {
-      this.contentView.measure(
-        MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-        MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
-      );
+    for (const child of this.children) {
+      if (child.visibility === VISIBILITY.GONE) continue;
+      const params = child.layoutParams || { width: -1, height: -1 };
+      const childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, params.width);
+      const childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, params.height);
+      child.measure(childWidthSpec, childHeightSpec);
     }
     this.setMeasuredDimension(width, height);
   }
 
   onLayout(changed, left, top, right, bottom) {
-    if (this.contentView) {
-      this.contentView.layout(0, 0, right - left, bottom - top);
+    const width = right - left;
+    const height = bottom - top;
+    for (const child of this.children) {
+      if (child.visibility === VISIBILITY.GONE) continue;
+      child.layout(0, 0, width, height);
     }
   }
 
@@ -342,6 +346,8 @@ export class SurfaceScreen {
           const sh = src ? src.height() : bitmap.height;
           ctx.drawImage(bitmap.image, sx, sy, sw, sh, dst.left, dst.top, dst.width(), dst.height());
         },
+        drawVector: (drawable, left, top, width, height) =>
+          drawVectorRaw(ctx, 0, 0, drawable, left, top, width, height),
       };
       this.decorView.draw(canvas);
     }

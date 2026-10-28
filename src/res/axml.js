@@ -124,27 +124,19 @@ export class StringPool {
   }
 }
 
+function readPoolUtf8Length(reader, offset) {
+  const first = reader.view.getUint8(offset);
+  if ((first & 0x80) === 0) return { length: first, next: offset + 1 };
+  const second = reader.view.getUint8(offset + 1);
+  return { length: ((first & 0x7f) << 8) | second, next: offset + 2 };
+}
+
 function readUtf8String(reader, offset) {
-  let cursor = offset;
-  let utf16Length = 0;
-  let shift = 0;
-  for (;;) {
-    const b = reader.view.getUint8(cursor++);
-    utf16Length |= (b & 0x7f) << shift;
-    if ((b & 0x80) === 0) break;
-    shift += 7;
-  }
-  shift = 0;
-  let byteLength = 0;
-  for (;;) {
-    const b = reader.view.getUint8(cursor++);
-    byteLength |= (b & 0x7f) << shift;
-    if ((b & 0x80) === 0) break;
-    shift += 7;
-  }
+  const utf16 = readPoolUtf8Length(reader, offset);
+  const byteInfo = readPoolUtf8Length(reader, utf16.next);
   const bytes = reader.bytes;
-  const dataStart = bytes.byteOffset + cursor;
-  return decodeMutf8(bytes, dataStart, byteLength);
+  const dataStart = bytes.byteOffset + byteInfo.next;
+  return decodeMutf8(bytes, dataStart, byteInfo.length);
 }
 
 function readUtf16String(reader, offset) {

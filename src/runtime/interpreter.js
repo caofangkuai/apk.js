@@ -39,22 +39,22 @@ export class DexInterpreter {
       regIndex += isWideType(param) ? 2 : 1;
     }
 
-    let pc = 0;
     const handlers = buildTryMap(code);
+    const savedPendingException = this.vm.pendingException;
+    this.vm.pendingException = null;
+    try {
+      return this.runLoop(method, registers, handlers, insns, code);
+    } finally {
+      this.vm.pendingException = savedPendingException;
+    }
+  }
 
+  runLoop(method, registers, handlers, insns, code) {
+    let pc = 0;
     let _lastPc = -1, _samePc = 0;
     const _pcs = [];
     for (;;) {
       if (pc >= insns.length) return undefined;
-      if (method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'p1' && pc <= 40) { console.error('P1-TRACE pc=' + pc + ' op=0x' + (insns[pc]&0xff).toString(16) + ' regs=' + registers.map((r,i)=>i+':'+(r===null?'N':(r===undefined?'U':(typeof r==='object'?(r.$dexClass?.descriptor||(r.items?'L'+r.items.length:'o')):String(r))))).join(' ')); }
-      if (method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && pc === 0 && ['C','X','f0','p1','i0','Z0','p'].includes(method.name)) { const th = registers[method.code.registersSize - method.code.insSize]; console.error('FM-THIS ' + method.name + ' this=' + (th===null?'NULL':(typeof th==='object'?(th.$dexClass?.descriptor||th.$nativeClass||'obj'):String(th))) + ' stack=' + (this.vm.methodStack||[]).slice(-4).join(' <- ')); }
-      if (method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'i0' && pc === 0) { const d=(l)=>l?(l.items||[]).map(x=>x===null?'NULL':(x?.$dexClass?.descriptor||x?.$nativeClass||'obj')).join(','):'NOLIST'; const L=(x)=>({type:(x===null?'NULL':typeof x),dex:(x&&x.$dexClass&&x.$dexClass.descriptor)||null,nat:(x&&x.$nativeClass)||null,keys:(x&&typeof x==='object')?Object.keys(x).slice(0,6):[],items:(x&&x.items)?('arr'+x.items.length):'none',peer:(x&&x.$peer)?Object.keys(x.$peer).slice(0,6):null}); console.error('I0-ENTER a='+JSON.stringify(L(registers[9]))+' b='+JSON.stringify(L(registers[10]))+' v11='+registers[11]+' v12='+registers[12]); }
-      if (method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'Z0' && (pc === 17 || pc === 21 || pc === 25)) { const rr = registers.map(x => x===null?'n':(x===undefined?'u':(typeof x==='object' ? ((x.$descriptor||x.$nativeClass||'o') + (x.$peer ? '' : '{nopeer}')) : String(x)))).join(','); console.error('Z0 pc=' + pc + ' ' + rr); }
-      if (method.classDesc === 'Landroidx/fragment/app/l0;' && method.name === 'p' && pc === 31) { const cls = registers[0]; console.error('L0p31 name=' + (cls && (cls.$name || cls.$descriptor)) + ' isMember=' + (cls && cls.$name && cls.$name.includes('$'))); }
-      if (method.classDesc === 'Landroidx/fragment/app/l0;' && method.name === 'p') { this._lp = (this._lp||0)+1; if (this._lp <= 40) console.error('L0p pc=' + pc + ' r=' + registers.map(x => x===null?'n':(x===undefined?'u':(typeof x==='object'?'o':String(x)))).join(',')); }
-      if (method.classDesc === 'Landroidx/fragment/app/l0;' && (method.name === 't' || method.name === 'u')) { this._ft = (this._ft||0)+1; if (this._ft <= 30) console.error('L0' + method.name + ' pc=' + pc + ' regs=' + registers.map(r => r===null?'n':(r===undefined?'u':(typeof r==='object'?'o':String(r)))).join(',')); }
-      if (method.classDesc === 'Landroidx/fragment/app/l0;' && method.name === 'm') { this._fp = (this._fp||0)+1; if (this._fp <= 40) console.error('L0M pc=' + pc + ' regs=' + registers.map(r => r===null?'n':(r===undefined?'u':(typeof r==='object'?'o':String(r)))).join(',')); }
-      if (method.classDesc === 'Landroidx/activity/result/ActivityResultRegistry;' && method.name === 'e') { this._ep = (this._ep || 0) + 1; if (this._ep <= 24) console.error('EPC', pc); }
       if (DBG.npe && method.name === 'h' && method.classDesc === 'Lf7/a;') { _pcs.push(pc); if (_pcs.length > 64) { const s = _pcs.join(','); const half = s.slice(0, Math.floor(s.length/2)); if (s.slice(half.length+1) === half) console.error('PC-CYCLE', s); _pcs.length = 0; } }
       if (pc === _lastPc) { if (++_samePc > 20000) { console.error('PC-STUCK at', method.classDesc + '.' + method.name, 'pc', pc, 'op=0x' + (insns[pc]&0xff).toString(16), 'regs', registers.map((r,i)=>'v'+i+'='+(r===null?'n':typeof r==='object'?'obj':r)).join(',')); throw new Error('PC-STUCK'); } } else { _lastPc = pc; _samePc = 0; }
       const unit = insns[pc];
@@ -468,8 +468,6 @@ export class DexInterpreter {
             const ref = method.dex.methods[refIndex];
             if (this.vm.dbgInvoke) this.vm.dbgInvoke(method, ref, pc, argRegs, registers, insns, this.vm);
             const args2 = argRegs.map((index) => registers[index]);
-            if (method.classDesc === 'Landroidx/activity/result/ActivityResultRegistry;' && method.name === 'e' && ref.name === 'containsKey') { console.error('CK-RECV desc=' + this.vm.registry.classNameOf(args2[0]) + ' peer=' + (args2[0]?.$peer && Object.keys(args2[0].$peer).join('|')) + ' mapSize=' + (args2[0]?.$peer?.map?.size) + ' keys=' + [...(args2[0]?.$peer?.map?.keys()||[])].join('|') + ' probe=' + (args2[1]?.$peer ? ('peer:' + String(args2[1].$peer.value)) : String(args2[1]))); }
-            if (method.classDesc === 'Landroidx/activity/result/ActivityResultRegistry;' && method.name === 'e') { this._ec = (this._ec||0)+1; if (this._ec <= 20) console.error('E-INV pc=' + pc + ' ' + ref.classDesc + '.' + ref.name + ' proto=' + ref.protoDescriptor + ' argc=' + args2.length + ' a0=' + (typeof args2[0] === 'number' ? args2[0] : (args2[0]?.$descriptor || String(args2[0])))); }
             const mode =
               op === 0x71 || op === 0x77 ? 'static'
               : op === 0x6f || op === 0x75 ? 'super'

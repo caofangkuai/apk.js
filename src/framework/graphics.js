@@ -253,6 +253,10 @@ export class Canvas {
     ctx.restore();
   }
 
+  drawVector(drawable, left, top, width, height) {
+    drawVectorRaw(this.context, this.originX, this.originY, drawable, left, top, width, height);
+  }
+
   drawBitmapRect(bitmap, src, dst, paint) {
     if (!bitmap || !bitmap.image) return;
     const ctx = this.context;
@@ -418,4 +422,286 @@ function roundedRectPath(ctx, x, y, w, h, rx, ry = rx) {
   ctx.lineTo(x, y + radiusY);
   ctx.quadraticCurveTo(x, y, x + radiusX, y);
   ctx.closePath();
+}
+
+export function drawVectorRaw(ctx, originX, originY, drawable, left, top, width, height) {
+  const root = drawable?.xml;
+  if (!root || root.name !== 'vector') return false;
+  const attrs = attrsToMap(root.attrs);
+  const viewportWidth = Number(attrs.viewportWidth) || 0;
+  const viewportHeight = Number(attrs.viewportHeight) || 0;
+  if (!viewportWidth || !viewportHeight || !width || !height) return false;
+  ctx.save();
+  ctx.translate(originX + left, originY + top);
+  ctx.scale(width / viewportWidth, height / viewportHeight);
+  for (const child of root.children || []) drawVectorNode(ctx, child);
+  ctx.restore();
+  return true;
+}
+
+function attrsToMap(attrs) {
+  const map = {};
+  for (const attr of attrs || []) {
+    if (!attr) continue;
+    const name = attr.name || attr.namespaceName;
+    let value = attr.value;
+    if (value && typeof value === 'object') {
+      if (value.dimension) value = value.dimension.value;
+      else if (value.reference !== undefined) value = value.reference;
+    }
+    map[name] = value;
+  }
+  return map;
+}
+
+function drawVectorNode(ctx, node) {
+  if (!node) return;
+  if (node.name === 'group') {
+    const attrs = attrsToMap(node.attrs);
+    const rotation = Number(attrs.rotation) || 0;
+    const pivotX = Number(attrs.pivotX) || 0;
+    const pivotY = Number(attrs.pivotY) || 0;
+    const scaleX = attrs.scaleX === undefined ? 1 : Number(attrs.scaleX) || 0;
+    const scaleY = attrs.scaleY === undefined ? 1 : Number(attrs.scaleY) || 0;
+    const translateX = Number(attrs.translateX) || 0;
+    const translateY = Number(attrs.translateY) || 0;
+    ctx.save();
+    if (translateX || translateY) ctx.translate(translateX, translateY);
+    if (rotation) {
+      ctx.translate(pivotX, pivotY);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.translate(-pivotX, -pivotY);
+    }
+    if (scaleX !== 1 || scaleY !== 1) {
+      ctx.translate(pivotX, pivotY);
+      ctx.scale(scaleX, scaleY);
+      ctx.translate(-pivotX, -pivotY);
+    }
+    for (const child of node.children || []) drawVectorNode(ctx, child);
+    ctx.restore();
+    return;
+  }
+  if (node.name === 'path') {
+    drawVectorPath(ctx, node);
+  }
+}
+
+function drawVectorPath(ctx, node) {
+  const attrs = attrsToMap(node.attrs);
+  const pathData = attrs.pathData;
+  if (!pathData) return;
+  const fillColor = attrs.fillColor;
+  const strokeColor = attrs.strokeColor;
+  const fillAlpha = attrs.fillAlpha === undefined ? 1 : Number(attrs.fillAlpha);
+  const strokeAlpha = attrs.strokeAlpha === undefined ? 1 : Number(attrs.strokeAlpha);
+  const strokeWidth = attrs.strokeWidth === undefined ? 0 : Number(attrs.strokeWidth);
+  const strokeLineCap = attrs.strokeLineCap;
+  const strokeLineJoin = attrs.strokeLineJoin;
+  const fillType = attrs.fillType;
+  ctx.save();
+  ctx.beginPath();
+  applyPathData(ctx, pathData);
+  if (fillColor !== undefined && fillColor !== null && fillAlpha > 0) {
+    ctx.globalAlpha = fillAlpha;
+    ctx.fillStyle = cssColor(normalizeColor(fillColor));
+    if (fillType === 'evenOdd' || fillType === 1) ctx.fill('evenodd');
+    else ctx.fill();
+  }
+  if (strokeColor !== undefined && strokeColor !== null && strokeWidth > 0 && strokeAlpha > 0) {
+    ctx.globalAlpha = strokeAlpha;
+    ctx.strokeStyle = cssColor(normalizeColor(strokeColor));
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = ['butt', 'round', 'square'][strokeLineCap] || 'butt';
+    ctx.lineJoin = ['miter', 'round', 'bevel'][strokeLineJoin] || 'miter';
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function applyPathData(ctx, data) {
+  const tokens = tokenizePathData(data);
+  let i = 0;
+  let command = null;
+  let currentX = 0;
+  let currentY = 0;
+  let startX = 0;
+  let startY = 0;
+  let lastControlX = 0;
+  let lastControlY = 0;
+  let lastCommand = null;
+  const read = () => tokens[i++];
+  const isCommand = (t) => typeof t === 'string';
+  const nextNumber = () => {
+    while (i < tokens.length && isCommand(tokens[i]) && tokens[i] !== command) return null;
+    return read();
+  };
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (isCommand(token)) {
+      command = token;
+      i++;
+      if (command === 'Z' || command === 'z') {
+        ctx.closePath();
+        currentX = startX;
+        currentY = startY;
+        lastCommand = 'Z';
+        continue;
+      }
+    } else if (!command) {
+      i++;
+      continue;
+    }
+    const relative = command === command.toLowerCase();
+    switch (command.toUpperCase()) {
+      case 'M': {
+        let x = Number(read());
+        let y = Number(read());
+        if (relative) { x += currentX; y += currentY; }
+        ctx.moveTo(x, y);
+        currentX = x; currentY = y; startX = x; startY = y;
+        command = relative ? 'l' : 'L';
+        break;
+      }
+      case 'L': {
+        let x = Number(read());
+        let y = Number(read());
+        if (relative) { x += currentX; y += currentY; }
+        ctx.lineTo(x, y);
+        currentX = x; currentY = y;
+        break;
+      }
+      case 'H': {
+        let x = Number(read());
+        if (relative) x += currentX;
+        ctx.lineTo(x, currentY);
+        currentX = x;
+        break;
+      }
+      case 'V': {
+        let y = Number(read());
+        if (relative) y += currentY;
+        ctx.lineTo(currentX, y);
+        currentY = y;
+        break;
+      }
+      case 'C': {
+        let x1 = Number(read()); let y1 = Number(read());
+        let x2 = Number(read()); let y2 = Number(read());
+        let x = Number(read()); let y = Number(read());
+        if (relative) { x1 += currentX; y1 += currentY; x2 += currentX; y2 += currentY; x += currentX; y += currentY; }
+        ctx.bezierCurveTo(x1, y1, x2, y2, x, y);
+        lastControlX = x2; lastControlY = y2;
+        currentX = x; currentY = y;
+        break;
+      }
+      case 'S': {
+        let x2 = Number(read()); let y2 = Number(read());
+        let x = Number(read()); let y = Number(read());
+        if (relative) { x2 += currentX; y2 += currentY; x += currentX; y += currentY; }
+        const cx1 = (lastCommand === 'C' || lastCommand === 'S') ? 2 * currentX - lastControlX : currentX;
+        const cy1 = (lastCommand === 'C' || lastCommand === 'S') ? 2 * currentY - lastControlY : currentY;
+        ctx.bezierCurveTo(cx1, cy1, x2, y2, x, y);
+        lastControlX = x2; lastControlY = y2;
+        currentX = x; currentY = y;
+        break;
+      }
+      case 'Q': {
+        let x1 = Number(read()); let y1 = Number(read());
+        let x = Number(read()); let y = Number(read());
+        if (relative) { x1 += currentX; y1 += currentY; x += currentX; y += currentY; }
+        ctx.quadraticCurveTo(x1, y1, x, y);
+        lastControlX = x1; lastControlY = y1;
+        currentX = x; currentY = y;
+        break;
+      }
+      case 'T': {
+        let x = Number(read()); let y = Number(read());
+        if (relative) { x += currentX; y += currentY; }
+        const cx = (lastCommand === 'Q' || lastCommand === 'T') ? 2 * currentX - lastControlX : currentX;
+        const cy = (lastCommand === 'Q' || lastCommand === 'T') ? 2 * currentY - lastControlY : currentY;
+        ctx.quadraticCurveTo(cx, cy, x, y);
+        lastControlX = cx; lastControlY = cy;
+        currentX = x; currentY = y;
+        break;
+      }
+      case 'A': {
+        const rx = Number(read());
+        const ry = Number(read());
+        const xAxisRotation = Number(read());
+        const largeArcFlag = Number(read());
+        const sweepFlag = Number(read());
+        let x = Number(read());
+        let y = Number(read());
+        if (relative) { x += currentX; y += currentY; }
+        drawArcTo(ctx, currentX, currentY, rx, ry, xAxisRotation, largeArcFlag, sweepFlag, x, y);
+        currentX = x; currentY = y;
+        break;
+      }
+      default:
+        i++;
+        break;
+    }
+    lastCommand = command.toUpperCase();
+  }
+}
+
+function tokenizePathData(data) {
+  const tokens = [];
+  const re = /([MmLlHhVvCcSsQqTtAaZz])|(-?\d*\.?\d+(?:[eE][-+]?\d+)?)/g;
+  let match;
+  while ((match = re.exec(data)) !== null) {
+    tokens.push(match[1] ? match[1] : parseFloat(match[2]));
+  }
+  return tokens;
+}
+
+function drawArcTo(ctx, x1, y1, rx, ry, angle, largeArc, sweep, x2, y2) {
+  if (rx === 0 || ry === 0) {
+    ctx.lineTo(x2, y2);
+    return;
+  }
+  const phi = (angle * Math.PI) / 180;
+  const cosPhi = Math.cos(phi);
+  const sinPhi = Math.sin(phi);
+  const dx = (x1 - x2) / 2;
+  const dy = (y1 - y2) / 2;
+  const x1p = cosPhi * dx + sinPhi * dy;
+  const y1p = -sinPhi * dx + cosPhi * dy;
+  let rxSq = rx * rx;
+  let rySq = ry * ry;
+  const x1pSq = x1p * x1p;
+  const y1pSq = y1p * y1p;
+  const lambda = x1pSq / rxSq + y1pSq / rySq;
+  if (lambda > 1) {
+    const scale = Math.sqrt(lambda);
+    rx *= scale;
+    ry *= scale;
+    rxSq = rx * rx;
+    rySq = ry * ry;
+  }
+  const sign = largeArc !== sweep ? 1 : -1;
+  const num = rxSq * rySq - rxSq * y1pSq - rySq * x1pSq;
+  const den = rxSq * y1pSq + rySq * x1pSq;
+  const coef = sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = coef * ((rx * y1p) / ry);
+  const cyp = coef * (-(ry * x1p) / rx);
+  const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+  const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+  const angleBetween = (ux, uy, vx, vy) => {
+    const dot = ux * vx + uy * vy;
+    const len = Math.sqrt(ux * ux + uy * uy) * Math.sqrt(vx * vx + vy * vy);
+    let ang = Math.acos(Math.max(-1, Math.min(1, dot / len)));
+    if (ux * vy - uy * vx < 0) ang = -ang;
+    return ang;
+  };
+  const theta1 = angleBetween(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let deltaTheta = angleBetween((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (!sweep && deltaTheta > 0) deltaTheta -= Math.PI * 2;
+  else if (sweep && deltaTheta < 0) deltaTheta += Math.PI * 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(phi);
+  ctx.scale(1, ry / rx);
+  ctx.arc(0, 0, rx, theta1, theta1 + deltaTheta, !sweep);
+  ctx.restore();
 }

@@ -11,6 +11,21 @@ import { convertDimension } from './resources.js';
 
 const CENTER = 0x11;
 
+function vectorIntrinsicSize(drawable) {
+  const xml = drawable?.xml;
+  if (!xml || xml.name !== 'vector') return null;
+  const attrs = xml.attrs || [];
+  const find = (name) => attrs.find((a) => a.name === name);
+  const w = find('width');
+  const h = find('height');
+  if (!w || !h) return null;
+  const density = drawable.density || 1;
+  const width = convertDimension(w.value, density);
+  const height = convertDimension(h.value, density);
+  if (!width || !height) return null;
+  return { width, height };
+}
+
 export class TextView extends View {
   constructor(context = null) {
     super(context);
@@ -369,8 +384,9 @@ export class ImageView extends View {
 
   onMeasure(widthSpec, heightSpec) {
     const bitmap = this.drawable?.bitmap;
-    const desiredWidth = (bitmap?.width || 0) + this.paddingLeft + this.paddingRight;
-    const desiredHeight = (bitmap?.height || 0) + this.paddingTop + this.paddingBottom;
+    const intrinsic = bitmap ? null : vectorIntrinsicSize(this.drawable);
+    const desiredWidth = (bitmap?.width || intrinsic?.width || 0) + this.paddingLeft + this.paddingRight;
+    const desiredHeight = (bitmap?.height || intrinsic?.height || 0) + this.paddingTop + this.paddingBottom;
     let width = desiredWidth;
     let height = desiredHeight;
     if (MeasureSpec.getMode(widthSpec) === MeasureSpec.EXACTLY) width = MeasureSpec.getSize(widthSpec);
@@ -388,6 +404,20 @@ export class ImageView extends View {
       canvas.context.fillStyle = cssColor(drawable.color);
       canvas.context.fillRect(0, 0, this.getWidth(), this.getHeight());
       canvas.context.restore();
+      return;
+    }
+    if (drawable.type === 'xml' && drawable.xml?.name === 'vector') {
+      const vw = this.getWidth();
+      const vh = this.getHeight();
+      const intrinsic = vectorIntrinsicSize(drawable);
+      if (!intrinsic) {
+        canvas.drawVector(drawable, 0, 0, vw, vh);
+        return;
+      }
+      const scale = Math.min(vw / intrinsic.width, vh / intrinsic.height);
+      const dw = intrinsic.width * scale;
+      const dh = intrinsic.height * scale;
+      canvas.drawVector(drawable, (vw - dw) / 2, (vh - dh) / 2, dw, dh);
       return;
     }
     const bitmap = drawable.bitmap;
@@ -505,6 +535,20 @@ export class ScrollView extends View {
     canvas.translate(0, -this.scrollY);
     this.child.draw(canvas);
     canvas.restore();
+  }
+
+  dispatchTouchEvent(event) {
+    if (this.visibility !== VISIBILITY.VISIBLE) return false;
+    if (this.listeners.touch && this.listeners.touch(this, event)) return true;
+    if (this.onTouchEvent(event)) return true;
+    if (this.child && this.child.visibility === VISIBILITY.VISIBLE) {
+      const x = event.x - this.child.left - this.child.translationX;
+      const y = event.y - this.child.top - this.child.translationY + this.scrollY;
+      if (x >= 0 && y >= 0 && x < this.child.getWidth() && y < this.child.getHeight()) {
+        if (this.child.dispatchTouchEvent({ ...event, x, y })) return true;
+      }
+    }
+    return false;
   }
 }
 

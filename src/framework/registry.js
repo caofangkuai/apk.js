@@ -228,6 +228,9 @@ function buildFrameworkDefinitions(vm) {
         },
         'onStart()V': () => undefined,
         'onResume()V': () => undefined,
+        'invalidateOptionsMenu()V': () => undefined,
+        'getApplication()Landroid/app/Application;': (self, _args, vm) => vm.applicationObject ?? null,
+        'registerActivityLifecycleCallbacks(Landroid/app/Application$ActivityLifecycleCallbacks;)V': () => undefined,
         'onPause()V': () => undefined,
         'onStop()V': () => undefined,
         'onDestroy()V': () => undefined,
@@ -257,6 +260,44 @@ function buildFrameworkDefinitions(vm) {
         'getLayoutInflater()Landroid/view/LayoutInflater;': (self, _args, vm) => { const li = new LayoutInflater(vm.contextObject); li.vm = vm; return li; },
         'getResources()Landroid/content/res/Resources;': (self, _args, vm) => vm.resources,
         'getAssets()Landroid/content/res/AssetManager;': (self, _args, vm) => vm.resources.getAssets(),
+        'getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;': (self, [name], vm) => {
+          const prefs = vm.allocateRawObject('Landroid/content/SharedPreferences;');
+          prefs.$peer = { name: jsString(name) };
+          return prefs;
+        },
+        'getFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile?.('/data/user/0/' + (vm.packageName || 'app') + '/files') ?? null,
+        'getCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile?.('/data/user/0/' + (vm.packageName || 'app') + '/cache') ?? null,
+        'getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;': (self, [type], vm) => {
+          const suffix = type ? '/' + jsString(type) : '';
+          return vm.makeFile?.('/storage/emulated/0/Android/data/' + (vm.packageName || 'app') + '/files' + suffix) ?? null;
+        },
+        'getClassLoader()Ljava/lang/ClassLoader;': (self, _args, vm) => {
+          if (!vm.classLoaderObject) vm.classLoaderObject = vm.allocateRawObject('Ljava/lang/ClassLoader;');
+          return vm.classLoaderObject;
+        },
+        'getPackageName()Ljava/lang/String;': (self, _args, vm) => vm.packageName || '',
+        'getApplicationInfo()Landroid/content/pm/ApplicationInfo;': (self, _args, vm) => {
+          const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
+          info.$peer = { packageName: vm.packageName || '' };
+          return info;
+        },
+        'getPackageManager()Landroid/content/pm/PackageManager;': (self, _args, vm) => {
+          if (!vm.packageManagerObject) {
+            vm.packageManagerObject = vm.allocateRawObject('Landroid/content/pm/PackageManager;');
+            vm.packageManagerObject.$peer = { vm };
+          }
+          return vm.packageManagerObject;
+        },
+        'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => {
+          const key = jsString(name);
+          return vm.getSystemService?.(key) ?? null;
+        },
+        'getMainLooper()Landroid/os/Looper;': (self, _args, vm) => vm.mainLooper ?? null,
+        'getString(I)Ljava/lang/String;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
+        'getString(I[Ljava/lang/Object;)Ljava/lang/String;': (self, [resId, args], vm) => vm.resources.getString(resId >>> 0),
+        'getText(I)Ljava/lang/CharSequence;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
+        'getColor(I)I': (self, [resId], vm) => vm.resources.getColor(resId >>> 0),
+        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => vm.resources.getDrawable(resId >>> 0),
         'getApplicationContext()Landroid/content/Context;': (self, _args, vm) => {
           if (!vm.applicationObject && vm.contextObject) return vm.contextObject;
           return vm.applicationObject ?? vm.contextObject;
@@ -332,7 +373,23 @@ function buildFrameworkDefinitions(vm) {
         'getText(I)Ljava/lang/CharSequence;': (self, [resId], vm) => (self.resources || vm.resources).getString(resId >>> 0),
         'getColor(I)I': (self, [resId], vm) => (self.resources || vm.resources).getColor(resId >>> 0),
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => (self.resources || vm.resources).getDrawable(resId >>> 0),
-        'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': () => null,
+        'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => vm.getSystemService?.(jsString(name)) ?? null,
+        'getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;': (self, [name], vm) => {
+          const prefs = vm.allocateRawObject('Landroid/content/SharedPreferences;');
+          prefs.$peer = { name: jsString(name) };
+          return prefs;
+        },
+        'getFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/files'),
+        'getCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/cache'),
+        'getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;': (self, [type], vm) => {
+          const suffix = type ? '/' + jsString(type) : '';
+          return vm.makeFile('/storage/emulated/0/Android/data/' + (vm.packageName || 'app') + '/files' + suffix);
+        },
+        'getNoBackupFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/no_backup'),
+        'getClassLoader()Ljava/lang/ClassLoader;': (self, _args, vm) => {
+          if (!vm.classLoaderObject) vm.classLoaderObject = vm.allocateRawObject('Ljava/lang/ClassLoader;');
+          return vm.classLoaderObject;
+        },
         'getPackageManager()Landroid/content/pm/PackageManager;': (self, _args, vm) => {
           if (!vm.packageManagerObject) {
             const object = vm.allocateRawObject('Landroid/content/pm/PackageManager;');
@@ -354,6 +411,8 @@ function buildFrameworkDefinitions(vm) {
           vm.startActivity(intent, null);
         },
         'getTheme()Landroid/content/res/Resources$Theme;': (self, _args, vm) => getThemeObject(vm),
+        'setTheme(I)V': () => undefined,
+        'setTheme(Landroid/content/res/Resources$Theme;)V': () => undefined,
         'obtainStyledAttributes([I)Landroid/content/res/TypedArray;': (self, [attrs], vm) => createTypedArray(vm, attrs),
         'obtainStyledAttributes(I[I)Landroid/content/res/TypedArray;': (self, [_style, attrs], vm) => createTypedArray(vm, attrs),
         'obtainStyledAttributes(Landroid/util/AttributeSet;[I)Landroid/content/res/TypedArray;': (self, [_set, attrs], vm) => createTypedArray(vm, attrs),
@@ -586,7 +645,14 @@ function buildFrameworkDefinitions(vm) {
         'getMainLooper()Landroid/os/Looper;': (_self, _args, vm) => vm.mainLooper,
         'myLooper()Landroid/os/Looper;': (_self, _args, vm) => vm.mainLooper,
         'prepare()V': () => undefined,
-        'loop()V': () => undefined,
+        'loop()V': (_self, _args, vm) => {
+          const depth = (vm.__loopDepth = (vm.__loopDepth || 0) + 1);
+          if (depth > 64) {
+            vm.__loopDepth = 0;
+            throw new Error('vm-thread-exit');
+          }
+          return undefined;
+        },
       },
     })
   );
@@ -636,6 +702,9 @@ function buildFrameworkDefinitions(vm) {
         },
         'removeCallbacks(Ljava/lang/Runnable;)V': (self, [runnable]) => {
           self.handler?.removeCallbacks(runnable);
+        },
+        'removeCallbacksAndMessages(Ljava/lang/Object;)V': (self, [token]) => {
+          self.handler?.removeCallbacksAndMessages?.(token);
         },
         'removeMessages(I)V': (self, [what]) => {
           self.handler?.removeMessages(what);
@@ -979,6 +1048,67 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/view/ViewTreeObserver;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class ViewTreeObserverPeer {
+        static $descriptor = 'Landroid/view/ViewTreeObserver;';
+        constructor() {
+          this.onGlobalLayoutListeners = [];
+          this.onPreDrawListeners = [];
+          this.onDrawListeners = [];
+          this.alive = true;
+        }
+      },
+      methods: {
+        'addOnGlobalLayoutListener(Landroid/view/ViewTreeObserver$OnGlobalLayoutListener;)V': (self, [listener]) => {
+          if (listener) self.onGlobalLayoutListeners.push(listener);
+        },
+        'removeOnGlobalLayoutListener(Landroid/view/ViewTreeObserver$OnGlobalLayoutListener;)V': (self, [listener]) => {
+          const index = self.onGlobalLayoutListeners.indexOf(listener);
+          if (index >= 0) self.onGlobalLayoutListeners.splice(index, 1);
+        },
+        'addOnPreDrawListener(Landroid/view/ViewTreeObserver$OnPreDrawListener;)V': (self, [listener]) => {
+          if (listener) self.onPreDrawListeners.push(listener);
+        },
+        'removeOnPreDrawListener(Landroid/view/ViewTreeObserver$OnPreDrawListener;)V': (self, [listener]) => {
+          const index = self.onPreDrawListeners.indexOf(listener);
+          if (index >= 0) self.onPreDrawListeners.splice(index, 1);
+        },
+        'addOnDrawListener(Landroid/view/ViewTreeObserver$OnDrawListener;)V': (self, [listener]) => {
+          if (listener) self.onDrawListeners.push(listener);
+        },
+        'removeOnDrawListener(Landroid/view/ViewTreeObserver$OnDrawListener;)V': (self, [listener]) => {
+          const index = self.onDrawListeners.indexOf(listener);
+          if (index >= 0) self.onDrawListeners.splice(index, 1);
+        },
+        'addOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': () => undefined,
+        'removeOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': () => undefined,
+        'addOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': () => undefined,
+        'removeOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': () => undefined,
+        'isAlive()Z': (self) => !!self.alive,
+        'dispatchOnGlobalLayout()V': (self, _args, vm) => {
+          for (const listener of [...self.onGlobalLayoutListeners]) {
+            vm.invokeByName?.('onGlobalLayout', '()V', listener, []);
+          }
+        },
+        'dispatchOnPreDraw()Z': (self, _args, vm) => {
+          let result = true;
+          for (const listener of [...self.onPreDrawListeners]) {
+            const value = vm.invokeByName?.('onPreDraw', '()Z', listener, []);
+            if (value === false) result = false;
+          }
+          return result;
+        },
+        'dispatchOnDraw()V': (self, _args, vm) => {
+          for (const listener of [...self.onDrawListeners]) {
+            vm.invokeByName?.('onDraw', '()V', listener, []);
+          }
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/View;', {
       super: 'Ljava/lang/Object;',
       ctor: viewPeerConstructor('Landroid/view/View;'),
@@ -1196,6 +1326,11 @@ function buildFrameworkDefinitions(vm) {
         if (self.window) self.window.navigationBarColor = color >>> 0;
       },
       'setSoftInputMode(I)V': () => {},
+      'setDecorFitsSystemWindows(Z)V': () => {},
+      'peekDecorView()Landroid/view/View;': (self, _args, vm) => {
+        if (!self.window) return null;
+        return self.window.decorView ? self.vm.wrapView?.(self.window.decorView) ?? null : null;
+      },
       'setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V': () => {},
       'setBackgroundDrawableResource(I)V': () => {},
       'setLayout(II)V': () => {},
@@ -1429,6 +1564,10 @@ function buildFrameworkDefinitions(vm) {
         'setTextColor(I)V': (self, [color]) => self.view?.setTextColor(color >>> 0),
         'setGravity(I)V': (self, [gravity]) => self.view?.setGravity(gravity | 0),
         'getTransformationMethod()Landroid/text/method/TransformationMethod;': () => null,
+        'setMovementMethod(Landroid/text/method/MovementMethod;)V': (self, [method]) => {
+          self.movementMethod = method ?? null;
+        },
+        'getMovementMethod()Landroid/text/method/MovementMethod;': (self) => self.movementMethod ?? null,
         'setTextColor(Landroid/content/res/ColorStateList;)V': (self, [csl]) => {
           const color = csl?.$peer?.color ?? csl?.color;
           if (typeof color === 'number') self.view?.setTextColor?.(color >>> 0);
@@ -1864,13 +2003,22 @@ function buildFrameworkDefinitions(vm) {
       staticMethods: {
         'forLanguageTags(Ljava/lang/String;)Landroid/os/LocaleList;': () => ({
           $descriptor: 'Landroid/os/LocaleList;',
+          locales: [],
         }),
-        'getDefault()Landroid/os/LocaleList;': () => ({ $descriptor: 'Landroid/os/LocaleList;' }),
+        'getDefault()Landroid/os/LocaleList;': (self, _args, vm) => ({
+          $descriptor: 'Landroid/os/LocaleList;',
+          locales: [makeDefaultLocaleObject(vm)],
+        }),
       },
       methods: {
-        'isEmpty()Z': () => false,
-        'size()I': () => 1,
-        'get(I)Ljava/util/Locale;': () => null,
+        'isEmpty()Z': (self) => !self.locales || self.locales.length === 0,
+        'size()I': (self) => (self.locales ? self.locales.length : 1),
+        'get(I)Ljava/util/Locale;': (self, [index], vm) => {
+          if (self.locales && self.locales.length) {
+            return self.locales[index | 0] ?? self.locales[0];
+          }
+          return makeDefaultLocaleObject(vm);
+        },
       },
     })
   );
@@ -2125,6 +2273,13 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       methods: {
         'toString()Ljava/lang/String;': () => 'Configuration{}',
+        'getLocales()Landroid/os/LocaleList;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Landroid/os/LocaleList;');
+          object.$peer = { locales: [makeDefaultLocaleObject(vm)] };
+          return object;
+        },
+        'getLocale()Ljava/util/Locale;': (self, _args, vm) => makeDefaultLocaleObject(vm),
+        'getLayoutDirection()I': () => 0,
       },
     })
   );
@@ -2171,6 +2326,26 @@ function buildFrameworkDefinitions(vm) {
         ['VERSION:Landroid/os/Build$VERSION;', { $descriptor: 'Landroid/os/Build$VERSION;' }],
         ['MODEL:Ljava/lang/String;', 'Browser'],
         ['MANUFACTURER:Ljava/lang/String;', 'MonkeyCode'],
+        ['BRAND:Ljava/lang/String;', 'MonkeyCode'],
+        ['DEVICE:Ljava/lang/String;', 'browser'],
+        ['PRODUCT:Ljava/lang/String;', 'browser'],
+        ['BOARD:Ljava/lang/String;', 'browser'],
+        ['HARDWARE:Ljava/lang/String;', 'browser'],
+        ['FINGERPRINT:Ljava/lang/String;', 'MonkeyCode/browser/browser:12/SQ3A.220705.004/1:user/release-keys'],
+        ['TYPE:Ljava/lang/String;', 'user'],
+        ['TAGS:Ljava/lang/String;', 'release-keys'],
+        ['ID:Ljava/lang/String;', 'SQ3A.220705.004'],
+        ['DISPLAY:Ljava/lang/String;', 'SQ3A.220705.004'],
+        ['HOST:Ljava/lang/String;', 'monkeycode'],
+        ['USER:Ljava/lang/String;', 'root'],
+        ['CPU_ABI:Ljava/lang/String;', 'arm64-v8a'],
+        ['CPU_ABI2:Ljava/lang/String;', ''],
+        ['RADIO:Ljava/lang/String;', 'unknown'],
+        ['BOOTLOADER:Ljava/lang/String;', 'unknown'],
+        ['SERIAL:Ljava/lang/String;', 'unknown'],
+        ['TIME:I', 0],
+        ['SOC_MANUFACTURER:Ljava/lang/String;', 'MonkeyCode'],
+        ['SOC_MODEL:Ljava/lang/String;', 'browser'],
       ]),
     })
   );
@@ -2255,7 +2430,11 @@ function buildFrameworkDefinitions(vm) {
         'getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I': (self, [name, type, pkg], vm) =>
           vm.resources.getIdentifier(jsString(name), jsString(type), jsString(pkg)),
         'getDisplayMetrics()Landroid/util/DisplayMetrics;': (self, _args, vm) => vm.resources.getDisplayMetrics(),
-        'getConfiguration()Landroid/content/res/Configuration;': (self, _args, vm) => vm.wrapPeer(vm.resources.getConfiguration()),
+        'getConfiguration()Landroid/content/res/Configuration;': (self, _args, vm) => {
+          const config = vm.resources.getConfiguration();
+          config.locale = makeDefaultLocaleObject(vm);
+          return vm.wrapPeer(config);
+        },
       },
     })
   );
@@ -2355,6 +2534,235 @@ function coreGraphicDefs() {
         ['left:I', 0], ['top:I', 0], ['right:I', 0], ['bottom:I', 0],
       ]),
     }),
+    nativeDef('Landroid/graphics/Insets;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class InsetsPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.left = 0;
+          this.top = 0;
+          this.right = 0;
+          this.bottom = 0;
+        }
+      },
+      methods: {
+        '<init>(IIII)V': (self, [left, top, right, bottom]) => {
+          self.left = left | 0;
+          self.top = top | 0;
+          self.right = right | 0;
+          self.bottom = bottom | 0;
+        },
+        'toRect()Landroid/graphics/Rect;': (self, _args, vm) => {
+          const rect = vm.instantiate('Landroid/graphics/Rect;', []);
+          vm.invokeByName('set', '(IIII)V', rect, [self.left | 0, self.top | 0, self.right | 0, self.bottom | 0]);
+          return rect;
+        },
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          const peer = other?.$peer || other;
+          if (!peer) return false;
+          return peer.left === self.left && peer.top === self.top && peer.right === self.right && peer.bottom === self.bottom;
+        },
+        'hashCode()I': (self) => (((self.left * 31 + self.top) * 31 + self.right) * 31 + self.bottom) | 0,
+        'toString()Ljava/lang/String;': (self) => `Insets{left=${self.left | 0}, top=${self.top | 0}, right=${self.right | 0}, bottom=${self.bottom | 0}}`,
+      },
+      staticMethods: {
+        'of(IIII)Landroid/graphics/Insets;': (_self, [left, top, right, bottom], vm) => vm.instantiate('Landroid/graphics/Insets;', [left, top, right, bottom]),
+      },
+      staticFields: new Map([
+        ['NONE:Landroid/graphics/Insets;', { lazy: (vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]) }],
+      ]),
+      instanceFields: new Map([
+        ['left:I', 0], ['top:I', 0], ['right:I', 0], ['bottom:I', 0],
+      ]),
+    }),
+    nativeDef('Landroid/view/WindowInsets;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class WindowInsetsPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.left = 0;
+          this.top = 0;
+          this.right = 0;
+          this.bottom = 0;
+          this.stableLeft = 0;
+          this.stableTop = 0;
+          this.stableRight = 0;
+          this.stableBottom = 0;
+          this.consumed = false;
+        }
+      },
+      methods: {
+        '<init>(Landroid/view/WindowInsets;)V': (self, [other]) => {
+          const peer = other?.$peer || other;
+          if (!peer) return;
+          self.left = peer.left | 0;
+          self.top = peer.top | 0;
+          self.right = peer.right | 0;
+          self.bottom = peer.bottom | 0;
+          self.stableLeft = peer.stableLeft | 0;
+          self.stableTop = peer.stableTop | 0;
+          self.stableRight = peer.stableRight | 0;
+          self.stableBottom = peer.stableBottom | 0;
+        },
+        'getSystemWindowInsetLeft()I': (self) => (self.consumed ? 0 : self.left | 0),
+        'getSystemWindowInsetTop()I': (self) => (self.consumed ? 0 : self.top | 0),
+        'getSystemWindowInsetRight()I': (self) => (self.consumed ? 0 : self.right | 0),
+        'getSystemWindowInsetBottom()I': (self) => (self.consumed ? 0 : self.bottom | 0),
+        'getStableInsetLeft()I': (self) => (self.consumed ? 0 : self.stableLeft | 0),
+        'getStableInsetTop()I': (self) => (self.consumed ? 0 : self.stableTop | 0),
+        'getStableInsetRight()I': (self) => (self.consumed ? 0 : self.stableRight | 0),
+        'getStableInsetBottom()I': (self) => (self.consumed ? 0 : self.stableBottom | 0),
+        'getSystemWindowInsets()Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.left | 0,
+          self.consumed ? 0 : self.top | 0,
+          self.consumed ? 0 : self.right | 0,
+          self.consumed ? 0 : self.bottom | 0,
+        ]),
+        'getStableInsets()Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.stableLeft | 0,
+          self.consumed ? 0 : self.stableTop | 0,
+          self.consumed ? 0 : self.stableRight | 0,
+          self.consumed ? 0 : self.stableBottom | 0,
+        ]),
+        'getInsets(I)Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.left | 0,
+          self.consumed ? 0 : self.top | 0,
+          self.consumed ? 0 : self.right | 0,
+          self.consumed ? 0 : self.bottom | 0,
+        ]),
+        'getInsetsIgnoringVisibility(I)Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.stableLeft | 0, self.stableTop | 0, self.stableRight | 0, self.stableBottom | 0,
+        ]),
+        'getMandatorySystemGestureInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
+        'getTappableElementInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
+        'getSystemGestureInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
+        'isVisible(I)Z': (self) => !self.consumed && (self.left | self.top | self.right | self.bottom) !== 0,
+        'isConsumed()Z': (self) => !!self.consumed,
+        'getDisplayCutout()Landroid/view/DisplayCutout;': () => null,
+        'consumeSystemWindowInsets()Landroid/view/WindowInsets;': (self) => {
+          self.consumed = true;
+          return self.$object ?? self;
+        },
+        'consumeStableInsets()Landroid/view/WindowInsets;': (self) => {
+          self.consumed = true;
+          return self.$object ?? self;
+        },
+        'consumeDisplayCutout()Landroid/view/WindowInsets;': (self) => self.$object ?? self,
+        'replaceSystemWindowInsets(IIII)Landroid/view/WindowInsets;': (self, [left, top, right, bottom]) => {
+          self.left = left | 0;
+          self.top = top | 0;
+          self.right = right | 0;
+          self.bottom = bottom | 0;
+          return self.$object ?? self;
+        },
+        'toString()Ljava/lang/String;': (self) => `WindowInsets{left=${self.left | 0}, top=${self.top | 0}, right=${self.right | 0}, bottom=${self.bottom | 0}}`,
+      },
+      instanceFields: new Map([
+        ['mSystemWindowInsets:Landroid/graphics/Rect;', null],
+      ]),
+      staticFields: new Map([
+        ['NONE:Landroid/view/WindowInsets;', {
+          lazy: (vm) => vm.instantiate('Landroid/view/WindowInsets;', []),
+        }],
+        ['CONSUMED:Landroid/view/WindowInsets;', {
+          lazy: (vm) => {
+            const insets = vm.instantiate('Landroid/view/WindowInsets;', []);
+            const peer = vm.registry.getPeer(insets, 'Landroid/view/WindowInsets;');
+            if (peer) peer.consumed = true;
+            return insets;
+          },
+        }],
+      ]),
+    }),
+    nativeDef('Landroid/view/WindowInsets$Builder;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class WindowInsetsBuilderPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.left = 0;
+          this.top = 0;
+          this.right = 0;
+          this.bottom = 0;
+          this.stableLeft = 0;
+          this.stableTop = 0;
+          this.stableRight = 0;
+          this.stableBottom = 0;
+        }
+      },
+      methods: {
+        '<init>()V': (self) => {
+          self.left = 0;
+          self.top = 0;
+          self.right = 0;
+          self.bottom = 0;
+          self.stableLeft = 0;
+          self.stableTop = 0;
+          self.stableRight = 0;
+          self.stableBottom = 0;
+        },
+        '<init>(Landroid/view/WindowInsets;)V': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (!peer) return;
+          self.left = peer.left | 0;
+          self.top = peer.top | 0;
+          self.right = peer.right | 0;
+          self.bottom = peer.bottom | 0;
+          self.stableLeft = peer.stableLeft | 0;
+          self.stableTop = peer.stableTop | 0;
+          self.stableRight = peer.stableRight | 0;
+          self.stableBottom = peer.stableBottom | 0;
+        },
+        'setSystemWindowInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.left = peer.left | 0;
+            self.top = peer.top | 0;
+            self.right = peer.right | 0;
+            self.bottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setStableInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.stableLeft = peer.left | 0;
+            self.stableTop = peer.top | 0;
+            self.stableRight = peer.right | 0;
+            self.stableBottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setInsets(ILandroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [_type, insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.left = peer.left | 0;
+            self.top = peer.top | 0;
+            self.right = peer.right | 0;
+            self.bottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setDisplayCutout(Landroid/view/DisplayCutout;)Landroid/view/WindowInsets$Builder;': (self) => self.$object ?? self,
+        'build()Landroid/view/WindowInsets;': (self, _args, vm) => {
+          const insets = vm.instantiate('Landroid/view/WindowInsets;', []);
+          const peer = vm.registry.getPeer(insets, 'Landroid/view/WindowInsets;') || insets?.$peer;
+          if (peer) {
+            peer.left = self.left | 0;
+            peer.top = self.top | 0;
+            peer.right = self.right | 0;
+            peer.bottom = self.bottom | 0;
+            peer.stableLeft = self.stableLeft | 0;
+            peer.stableTop = self.stableTop | 0;
+            peer.stableRight = self.stableRight | 0;
+            peer.stableBottom = self.stableBottom | 0;
+          }
+          return insets;
+        },
+      },
+    }),
     nativeDef('Landroid/graphics/Point;', { super: 'Ljava/lang/Object;' }),
     nativeDef('Landroid/graphics/RectF;', { super: 'Ljava/lang/Object;' }),
     nativeDef('Landroid/graphics/drawable/Drawable;', { super: 'Ljava/lang/Object;' }),
@@ -2443,6 +2851,19 @@ function viewMethods() {
     'setTranslationY(F)V': (self, [value]) => self.view?.setTranslationY(value),
     'setTag(Ljava/lang/Object;)V': (self, [tag]) => self.view?.setTag(tag),
     'getTag()Ljava/lang/Object;': (self) => self.view?.getTag() ?? null,
+    'setTag(ILjava/lang/Object;)V': (self, [key, tag]) => self.view?.setTag(tag, key),
+    'getTag(I)Ljava/lang/Object;': (self, [key]) => self.view?.getTag(key) ?? null,
+    'getAlpha()F': (self) => (typeof self.view?.getAlpha === 'function' ? self.view.getAlpha() : (self.view?.alpha ?? 1)),
+    'findFocus()Landroid/view/View;': (self, _a, vm) => {
+      const found = findFocusedView(self.view);
+      return found ? viewObject(vm, found) : null;
+    },
+    'setFocusable(Z)V': (self, [focusable]) => self.view?.setFocusable(focusable !== 0 && focusable !== false),
+    'setFocusableInTouchMode(Z)V': (self, [focusable]) => self.view?.setFocusableInTouchMode?.(focusable !== 0 && focusable !== false),
+    'setAccessibilityDelegate(Landroid/view/View$AccessibilityDelegate;)V': () => undefined,
+    'setSaveFromParentEnabled(Z)V': () => undefined,
+    'requestApplyInsets()V': () => undefined,
+    'setOnKeyListener(Landroid/view/View$OnKeyListener;)V': () => undefined,
     'getWidth()I': (self) => self.view?.getWidth() ?? 0,
     'getHeight()I': (self) => self.view?.getHeight() ?? 0,
     'getMeasuredWidth()I': (self) => self.view?.getMeasuredWidth() ?? 0,
@@ -2567,7 +2988,12 @@ function viewMethods() {
     'getMeasuredHeightAndState()I': (self) => self.view?.getMeasuredHeightAndState() ?? 0,
     'getBaseline()I': (self) => self.view?.getBaseline() ?? -1,
     'isLaidOut()Z': (self) => self.view?.isLaidOut() ?? false,
-    'getViewTreeObserver()Landroid/view/ViewTreeObserver;': (self) => self.view?.getViewTreeObserver() ?? null,
+    'getViewTreeObserver()Landroid/view/ViewTreeObserver;': (self, _args, vm) => {
+      if (!self.viewTreeObserverObject) {
+        self.viewTreeObserverObject = vm.instantiate('Landroid/view/ViewTreeObserver;', []);
+      }
+      return self.viewTreeObserverObject;
+    },
     'getDrawingRect(Landroid/graphics/Rect;)V': (self, [rect]) => self.view?.getDrawingRect(rect),
     'getGlobalVisibleRect(Landroid/graphics/Rect;Landroid/graphics/Point;)Z': (self, [rect, point]) => self.view?.getGlobalVisibleRect(rect, point) ?? false,
     'getLocalVisibleRect(Landroid/graphics/Rect;)Z': (self, [rect]) => self.view?.getLocalVisibleRect(rect) ?? false,
@@ -2590,6 +3016,14 @@ function viewMethods() {
       const root = self.view?.getRootView();
       return root ? viewObject(vm, root) : null;
     },
+    'getRootWindowInsets()Landroid/view/WindowInsets;': (self, _args, vm) => {
+      if (!self.windowInsetsObject) {
+        self.windowInsetsObject = vm.instantiate('Landroid/view/WindowInsets;', []);
+      }
+      return self.windowInsetsObject;
+    },
+    'onApplyWindowInsets(Landroid/view/WindowInsets;)Landroid/view/WindowInsets;': (_self, [insets]) => insets ?? null,
+    'dispatchApplyWindowInsets(Landroid/view/WindowInsets;)Landroid/view/WindowInsets;': (_self, [insets]) => insets ?? null,
     'hasOnClickListeners()Z': (self) => self.view?.hasOnClickListener() ?? false,
     'forceLayout()V': (self) => {
       self.view && (self.view.isLayoutRequested = true);
@@ -2766,9 +3200,9 @@ function makeViewPropertyAnimator(vm, view) {
     setDuration: (d) => { animator.setDuration(d); return object; },
     setStartDelay: (d) => { animator.setStartDelay(d); return object; },
     setInterpolator: () => object,
-    setListener: () => object,
+    setListener: (listener) => { animator.setListener?.(listener); return object; },
     setUpdateListener: () => object,
-    withStartAction: () => object,
+    withStartAction: (action) => { animator.withStartAction?.(() => vm.runRunnable(action)); return object; },
     withEndAction: (action) => { animator.withEndAction(() => vm.runRunnable(action)); return object; },
     start: () => { animator.start(); return object; },
     cancel: () => { animator.cancel?.(); return object; },
@@ -2810,10 +3244,36 @@ function mapContentId(vm, id) {
   return id;
 }
 
+function findFocusedView(view) {
+  if (!view) return null;
+  if (view.isFocused && view.isFocused()) return view;
+  const children = view.children || [];
+  for (const child of children) {
+    const found = findFocusedView(child);
+    if (found) return found;
+  }
+  if (!children.length && typeof view.getChildCount === 'function') {
+    const count = view.getChildCount() | 0;
+    for (let i = 0; i < count; i += 1) {
+      const found = findFocusedView(view.getChildAt(i));
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function findView(view, id) {
   if (!view) return null;
   if (view.id === id) return view;
-  const children = view.children || [];
+  let children = view.children || [];
+  if (!children.length && typeof view.getChildCount === 'function' && typeof view.getChildAt === 'function') {
+    const count = view.getChildCount() | 0;
+    children = [];
+    for (let i = 0; i < count; i += 1) {
+      const child = view.getChildAt(i);
+      if (child) children.push(child);
+    }
+  }
   for (const child of children) {
     const found = findView(child, id);
     if (found) return found;
@@ -3028,6 +3488,12 @@ function contextSystemService(vm, name) {
 
 function mainThreadObject(vm) {
   return vm?.currentThreadObject?.() ?? null;
+}
+
+function makeDefaultLocaleObject(vm) {
+  const object = vm.allocateRawObject('Ljava/util/Locale;');
+  object.$peer = { language: 'zh', country: 'CN' };
+  return object;
 }
 
 function dispatchActivityKeyEvent(self, event, vm) {

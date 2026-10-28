@@ -27,9 +27,9 @@ export async function loadApkFiles(zip) {
   for (const [name, entry] of Object.entries(files)) {
     if (entry.dir) continue;
     if (name === 'AndroidManifest.xml' || name === 'resources.arsc' || /^classes\d*\.dex$/.test(name)) continue;
-    if (name.startsWith('res/')) {
-      resourceBytes.set(name, await entry.async('uint8array'));
-      resourceBytes.set(name.slice('res/'.length), resourceBytes.get(name));
+    if (!name.startsWith('assets/')) {
+      const bytes = await entry.async('uint8array');
+      resourceBytes.set(name, bytes);
     }
     if (!name.startsWith('assets/')) continue;
     assetFiles.set(name.slice('assets/'.length), { name, bytes: await entry.async('uint8array') });
@@ -50,8 +50,8 @@ export async function loadApkFiles(zip) {
   const layoutLoader = async (resId) => {
     if (layoutCache.has(resId)) return layoutCache.get(resId);
     const entry = resourceTable.getEntry(resId);
-    const path = entry?.key ? `res/layout/${entry.key}.xml` : null;
-    const file = path ? zip.file(path) : null;
+    if (!entry || typeof entry.value !== 'string') return null;
+    const file = zip.file(entry.value);
     if (!file) return null;
     const tree = parseBinaryXml(await file.async('uint8array'));
     layoutCache.set(resId, tree);
@@ -242,6 +242,22 @@ export class EmulatorEngine {
         return origExec(method, thisArg, args);
       };
     }
+    this.specialEffectControllers = [];
+    if (typeof vm.executeMethod === 'function' && !vm.$specialEffectsHooked) {
+      vm.$specialEffectsHooked = true;
+      const engineRef = this;
+      const origExecute = vm.executeMethod.bind(vm);
+      vm.executeMethod = function (method, thisArg, args) {
+        const descriptor = String(method.classDesc || '');
+        if (descriptor.endsWith('SpecialEffectsController;') || descriptor.endsWith('DefaultSpecialEffectsController;')) {
+          if (method.name === 'j' || method.name === '<init>') {
+            const known = engineRef.specialEffectControllers;
+            if (!known.includes(thisArg)) known.push(thisArg);
+          }
+        }
+        return origExecute(method, thisArg, args);
+      };
+    }
     const mainLooper = new Looper(vm);
     const queue = mainLooper.queue;
     vm.messageQueue = queue;
@@ -315,8 +331,99 @@ export class EmulatorEngine {
       this.screen.invalidate?.();
     }
 
+    this.flushSpecialEffects(vm);
     this.running = true;
     return this;
+  }
+
+  flushSpecialEffects(vm) {
+    const pending = new Set();
+    const seen = new Set();
+    const visit = (value, depth) => {
+      if (!value || typeof value !== 'object' || depth > 6 || seen.has(value)) return;
+      seen.add(value);
+      const descriptor = value.$dexClass?.descriptor;
+      if (descriptor && /SpecialEffectsController;?$/.test(descriptor)) pending.add(value);
+      const fields = value.$fields;
+      if (fields) {
+        for (const entry of fields.values()) visit(entry, depth + 1);
+      }
+      if (Array.isArray(value.children)) {
+        for (const child of value.children) visit(child, depth + 1);
+      }
+      if (value.child) visit(value.child, depth + 1);
+    };
+    visit(this.activity, 0);
+    visit(this.activity?.$peer, 0);
+    for (const controller of this.specialEffectControllers || []) pending.add(controller);
+
+    for (const controller of pending) {
+      this.runPendingOperations(vm, controller);
+    }
+  }
+
+  runPendingOperations(vm, controller) {
+    const fields = controller.$fields;
+    if (!fields) return;
+    const key = (name, type) => `Landroidx/fragment/app/SpecialEffectsController;->${name}:${type}`;
+    const pendingList = fields.get(key('b', 'Ljava/util/List;'));
+    const queuedList = fields.get(key('c', 'Ljava/util/List;'));
+    if (!pendingList || !queuedList) return;
+
+    const takeItems = (list) => {
+      if (!list) return [];
+      if (Array.isArray(list.$peer?.items)) return list.$peer.items.splice(0, list.$peer.items.length);
+      if (Array.isArray(list.$data)) return list.$data.splice(0, list.$data.length);
+      return [];
+    };
+
+    const pendingItems = takeItems(pendingList);
+    if (pendingItems.length === 0) return;
+
+    const queuedItems = queuedList.$peer?.items || queuedList.$data;
+    if (!Array.isArray(queuedItems)) return;
+    for (const operation of pendingItems) queuedItems.push(operation);
+
+    const descriptor = controller.$dexClass?.descriptor || 'Landroidx/fragment/app/SpecialEffectsController;';
+    const executingFlag = fields.get(key('d', 'Z')) ?? false;
+    try {
+      vm.invokeByName('d', '(Ljava/util/List;Z)V', controller, [queuedList, executingFlag], 'virtual');
+    } catch (error) {
+      this.onLog({ level: 'warn', tag: 'engine', message: `执行待处理动画失败: ${error.message}` });
+    }
+    queuedItems.length = 0;
+    for (const operation of pendingItems) this.completeOperation(vm, operation);
+  }
+
+  completeOperation(vm, operation) {
+    const fields = operation?.$fields;
+    if (!fields) return;
+    const fieldOf = (name) => {
+      for (const [key, value] of fields) {
+        if (key.includes(`->${name}:`)) return value;
+      }
+      return undefined;
+    };
+    if (!this.stateIsVisible(vm, fieldOf('a'))) return;
+    const fragment = fieldOf('c');
+    let targetView = null;
+    for (const [key, value] of fragment?.$fields || new Map()) {
+      if (key.includes('->R:Landroid/view/View;')) targetView = value;
+    }
+    const view = targetView?.$view || targetView;
+    if (!view) return;
+    view.setVisibility?.(0);
+    view.setAlpha?.(1);
+  }
+
+  stateIsVisible(vm, stateObject) {
+    if (!stateObject) return false;
+    try {
+      const name = vm.invokeByName('name', '()Ljava/lang/String;', stateObject, []);
+      return String(name) === 'VISIBLE';
+    } catch (_) {
+      return false;
+    }
   }
 
   stop() {

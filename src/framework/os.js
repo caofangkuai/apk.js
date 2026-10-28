@@ -115,6 +115,16 @@ export class Handler {
     }
   }
 
+  removeCallbacksAndMessages(token) {
+    for (const task of [...this.tasks]) {
+      const matchesToken = token === null || token === undefined || task.meta?.obj === token;
+      if (matchesToken) {
+        this.queue.removeTask(task);
+        this.tasks.delete(task);
+      }
+    }
+  }
+
   sendMessage(message) {
     return this.sendMessageDelayed(message, 0);
   }

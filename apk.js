@@ -215,6 +215,9 @@ function autoInitDemo() {
       setStatus(`运行中：${simulator.vm?.packageName || '未知包名'}`, 'ok');
     } catch (error) {
       appendLog({ level: 'error', tag: 'apk', message: error.message });
+      if (error?.stack) {
+        appendLog({ level: 'error', tag: 'apk', message: error.stack });
+      }
       setStatus(`加载失败：${error.message}`, 'error');
     }
   };
