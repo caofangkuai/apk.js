@@ -66,7 +66,7 @@ export function unwrapView(value) {
 
 export function viewObject(vm, view) {
   if (!view) return null;
-  if (view.$javaObject && view.$javaObject.$view === view && view.$javaObject.$peer?.view === view) return view.$javaObject;
+  if (view.$javaObject && view.$javaObject.$view === view && view.$javaObject.$nativeClass === descriptorOfView(view)) return view.$javaObject;
   const descriptor = descriptorOfView(view);
   const runtimeClass = vm.registry.resolve(descriptor);
   const object = runtimeClass?.dexClass

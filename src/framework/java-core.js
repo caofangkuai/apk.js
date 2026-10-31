@@ -1245,9 +1245,13 @@ JAVA_CORE_CLASSES['Ljava/util/List;'] = nativeDef('Ljava/util/List;', {
     },
     'size()I': (self) => (self.items || []).length,
     'isEmpty()Z': (self) => (self.items || []).length === 0,
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.items || []).includes(value),
-    'indexOf(Ljava/lang/Object;)I': (self, [value]) => (self.items || []).indexOf(value),
-    'lastIndexOf(Ljava/lang/Object;)I': (self, [value]) => (self.items || []).lastIndexOf(value),
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.items || []).some((item) => refsEqual(item, value)),
+    'indexOf(Ljava/lang/Object;)I': (self, [value]) => (self.items || []).findIndex((item) => refsEqual(item, value)),
+    'lastIndexOf(Ljava/lang/Object;)I': (self, [value]) => {
+      const items = self.items || [];
+      for (let i = items.length - 1; i >= 0; i -= 1) if (refsEqual(items[i], value)) return i;
+      return -1;
+    },
     'get(I)Ljava/lang/Object;': (self, [index]) => (self.items || [])[toInt(index)] ?? null,
     'set(ILjava/lang/Object;)Ljava/lang/Object;': (self, [index, value]) => {
       const list = self.items || [];
@@ -1268,7 +1272,7 @@ JAVA_CORE_CLASSES['Ljava/util/Collection;'] = nativeDef('Ljava/util/Collection;'
     'isEmpty()Z': (self) => (self.items || self.setItems || []).length === 0,
     'remove(Ljava/lang/Object;)Z': (self, [value]) => {
       const list = self.items || self.setItems || [];
-      const index = list.indexOf(value);
+      const index = list.findIndex((item) => refsEqual(item, value));
       if (index < 0) return false;
       list.splice(index, 1);
       return true;
@@ -1278,7 +1282,7 @@ JAVA_CORE_CLASSES['Ljava/util/Collection;'] = nativeDef('Ljava/util/Collection;'
       const otherItems = other?.items || other?.setItems || [];
       let changed = false;
       for (let i = list.length - 1; i >= 0; i--) {
-        if (otherItems.includes(list[i])) {
+        if (otherItems.some((item) => refsEqual(item, list[i]))) {
           list.splice(i, 1);
           changed = true;
         }
@@ -1497,6 +1501,76 @@ JAVA_CORE_CLASSES['Landroid/content/SharedPreferences$Editor;'] = nativeDef('Lan
       self.clear = false;
     },
   },
+});
+
+function makeSharedPreferences(vm, name) {
+  const object = vm.allocateRawObject('Landroid/content/SharedPreferences;');
+  object.$peer = { name: String(name ?? 'default') };
+  return object;
+}
+
+JAVA_CORE_CLASSES['Landroid/preference/PreferenceManager;'] = nativeDef('Landroid/preference/PreferenceManager;', {
+  super: 'Ljava/lang/Object;',
+  staticMethods: {
+    'getDefaultSharedPreferences(Landroid/content/Context;)Landroid/content/SharedPreferences;': (_self, _args, vm) =>
+      makeSharedPreferences(vm, (vm.packageName || 'app') + '_preferences'),
+    'getDefaultSharedPreferencesName(Landroid/content/Context;)Ljava/lang/String;': (_self, _args, vm) =>
+      (vm.packageName || 'app') + '_preferences',
+    'setDefaultValues(Landroid/content/Context;ILjava/lang/Boolean;)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/content/pm/ConfigurationInfo;'] = nativeDef('Landroid/content/pm/ConfigurationInfo;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.reqGlEsVersion = 0x00030000;
+    this.glEsVersion = 0x00030000;
+  }, {}),
+  instanceFields: [
+    ['reqGlEsVersion:I', 0x00030000],
+    ['glEsVersion:I', 0x00030000],
+  ],
+  methods: {
+    'getGlEsVersion()Ljava/lang/String;': () => '3.0',
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/app/ActivityManager;'] = nativeDef('Landroid/app/ActivityManager;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm) {
+    this.vm = vm;
+  }, {}),
+  methods: {
+    'getDeviceConfigurationInfo()Landroid/content/pm/ConfigurationInfo;': (_self, _args, vm) =>
+      vm.instantiate('Landroid/content/pm/ConfigurationInfo;', []),
+    'getMemoryClass()I': () => 256,
+    'getLargeMemoryClass()I': () => 512,
+    'isLowRamDevice()Z': () => 0,
+    'getMemoryInfo(Landroid/app/ActivityManager$MemoryInfo;)V': (_self, [info]) => {
+      const peer = info?.$peer || info;
+      if (peer) {
+        peer.availMem = 2 * 1024 * 1024 * 1024;
+        peer.totalMem = 4 * 1024 * 1024 * 1024;
+        peer.threshold = 256 * 1024 * 1024;
+      }
+    },
+    'getRunningAppProcesses()Ljava/util/List;': (_self, _args, vm) => makeList(vm, []),
+    'getRunningServices(I)Ljava/util/List;': (_self, _args, vm) => makeList(vm, []),
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/app/ActivityManager$MemoryInfo;'] = nativeDef('Landroid/app/ActivityManager$MemoryInfo;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.availMem = 2 * 1024 * 1024 * 1024;
+    this.totalMem = 4 * 1024 * 1024 * 1024;
+    this.threshold = 256 * 1024 * 1024;
+  }, {}),
+  instanceFields: [
+    ['availMem:J', 2 * 1024 * 1024 * 1024],
+    ['totalMem:J', 4 * 1024 * 1024 * 1024],
+    ['threshold:J', 256 * 1024 * 1024],
+  ],
 });
 
 function makeExecutor(vm, descriptor = 'Ljava/util/concurrent/ExecutorService;') {
@@ -2985,7 +3059,7 @@ function makeMap(vm) {
 
 function integerDef(descriptor, bits) {
   const isLong = bits === 64;
-  const wrap = (value, vm) => vm.wrapPeer({ value: isLong ? toLong(value) : toInt(value) });
+  const wrap = (value, vm) => vm.wrapPeer({ value: isLong ? toLong(value) : toInt(value), constructor: { $descriptor: descriptor } });
   return nativeDef(descriptor, {
     super: 'Ljava/lang/Object;',
     ctor: peerClass(function (vm, object) {
@@ -3009,6 +3083,14 @@ function integerDef(descriptor, bits) {
     staticMethods: {
       'parseInt(Ljava/lang/String;)I': (_self, [value]) => parseInt(jsString(value).trim(), 10) | 0,
       'parseInt(Ljava/lang/String;I)I': (_self, [value, radix]) => parseInt(jsString(value).trim(), toInt(radix)) | 0,
+      'decode(Ljava/lang/String;)Ljava/lang/Integer;': (_self, [value], vm) => {
+        const text = jsString(value).trim();
+        const parsed = /^[-+]?0[xX]/.test(text) ? parseInt(text.replace(/^[-+]?0[xX]/, (m) => (m.startsWith('-') ? '-' : '')), 16)
+          : /^[-+]?0/.test(text) && text.length > 1 ? parseInt(text, 8)
+          : /^[-+]?#/.test(text) ? parseInt(text.replace('#', ''), 16)
+          : parseInt(text, 10);
+        return wrap(parsed | 0, vm);
+      },
       'parseLong(Ljava/lang/String;)J': (_self, [value]) => BigInt(jsString(value).trim() || '0'),
       'valueOf(I)Ljava/lang/Integer;': (_self, [value], vm) => wrap(value, vm),
       'valueOf(J)Ljava/lang/Long;': (_self, [value], vm) => wrap(value, vm),
@@ -3156,15 +3238,15 @@ function listMethods() {
       return removed.length ? removed[0] : null;
     },
     'remove(Ljava/lang/Object;)Z': (self, [value]) => {
-      const index = self.items.indexOf(value);
+      const index = self.items.findIndex((item) => refsEqual(item, value));
       if (index >= 0) {
         self.items.splice(index, 1);
         return true;
       }
       return false;
     },
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => self.items.includes(value),
-    'indexOf(Ljava/lang/Object;)I': (self, [value]) => self.items.indexOf(value),
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => self.items.some((item) => refsEqual(item, value)),
+    'indexOf(Ljava/lang/Object;)I': (self, [value]) => self.items.findIndex((item) => refsEqual(item, value)),
     'toString()Ljava/lang/String;': (self) => `[${self.items.map(jsString).join(', ')}]`,
   };
 }

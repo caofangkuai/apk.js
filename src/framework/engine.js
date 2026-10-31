@@ -209,6 +209,42 @@ export class EmulatorEngine {
     if (styleId && loadThemeFromStyleId(vm, styleId)) {
       this.onLog({ level: 'info', tag: 'engine', message: `应用主题 0x${styleId.toString(16)}` });
     }
+    vm.loadActivityTheme = (descriptor) => this.applyActivityTheme(vm, apk, descriptor);
+  }
+
+  applyActivityTheme(vm, apk, descriptor) {
+    const manifest = apk.manifest;
+    if (!manifest) return;
+    const desired = String(descriptor || '');
+    const toDescriptor = (name) => (name && name.startsWith('.') ? apk.packageName + name : name);
+    const application = manifest.findChild?.('application');
+    let activityNode = null;
+    for (const activity of application?.findAll?.('activity') || []) {
+      const name = toDescriptor(activity.getAttribute('android:name') || activity.getAttribute('name'));
+      if (name && `L${name.replace(/\./g, '/')};` === desired) {
+        activityNode = activity;
+        break;
+      }
+    }
+    const pick = (node) => {
+      if (!node) return null;
+      for (const key of ['android:theme', 'theme']) {
+        const raw = node.getAttribute(key);
+        if (raw === null || raw === undefined || raw === '') continue;
+        if (typeof raw === 'object' && 'reference' in raw) return raw.reference >>> 0;
+        if (typeof raw === 'string') {
+          const match = raw.match(/@(0x[0-9a-f]+|\d+)/i);
+          if (match) return match[1].startsWith('0x') ? parseInt(match[1], 16) : parseInt(match[1], 10);
+        }
+        if (typeof raw === 'number') return raw >>> 0;
+      }
+      return null;
+    };
+    const styleId = pick(activityNode) ?? pick(application);
+    if (styleId && loadThemeFromStyleId(vm, styleId)) {
+      vm.themeStyleId = styleId;
+      this.onLog({ level: 'info', tag: 'engine', message: `应用主题 0x${styleId.toString(16)}` });
+    }
   }
 
   async start(apk) {

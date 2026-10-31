@@ -14,7 +14,7 @@ import {
   ScrollView,
   TextView,
 } from './widgets.js';
-import { ActionBarContainer, ActionBarOverlayLayout, Toolbar } from './layouts.js';
+import { ActionBarContainer, ActionBarOverlayLayout, Toolbar, ViewStub } from './layouts.js';
 import {
   FrameLayout,
   LinearLayout,
@@ -59,6 +59,9 @@ function inferViewBase(fullName) {
   if (/FrameLayout$/.test(name)) return FrameLayout;
   if (/ContentFrameLayout$/.test(name)) return FrameLayout;
   if (/Toolbar$/.test(name)) return Toolbar;
+  if (/(DrawerLayout|CoordinatorLayout|NestedScrollView|CollapsingToolbarLayout)$/.test(name)) {
+    return FrameLayout;
+  }
   if (/Layout$/.test(name) || /ViewGroup$/.test(name)) {
     return LinearLayout;
   }
@@ -126,22 +129,29 @@ export class LayoutInflater {
   createView(node) {
     const tag = node.name;
     const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
+    if (fullName === 'androidx.appcompat.widget.ViewStubCompat' || fullName === 'android.view.ViewStub') {
+      const stub = new ViewStub(this.context);
+      stub.$descriptor = `L${fullName.replace(/\./g, '/')};`;
+      const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+      if (vm) stub.$vm = vm;
+      return stub;
+    }
     const ctor = RESOLVED_CLASSES[fullName] || RESOLVED_CLASSES[tag] || VIEW_CLASSES[tag];
     if (!ctor) {
       const base = inferViewBase(fullName);
       const fallback = new base(this.context);
       fallback.$unknownTag = fullName;
       fallback.$descriptor = `L${fullName.replace(/\./g, '/')};`;
-      this.runDexConstructor(fallback);
+      this.runDexConstructor(fallback, node);
       return fallback;
     }
     const view = new ctor(this.context);
-    if (fullName.startsWith('androidx.')) view.$descriptor = `L${fullName.replace(/\./g, '/')};`;
-    this.runDexConstructor(view);
+    if (fullName.startsWith('androidx.') || fullName.startsWith('com.google.')) view.$descriptor = `L${fullName.replace(/\./g, '/')};`;
+    this.runDexConstructor(view, node);
     return view;
   }
 
-  runDexConstructor(view) {
+  runDexConstructor(view, node = null) {
     const vm = this.context?.vm || this.context?.$vm || this.vm || null;
     if (!vm || !view?.$descriptor) return null;
     const dexClass = vm.registry.resolve(view.$descriptor)?.dexClass;
@@ -186,6 +196,17 @@ export class LayoutInflater {
       view.id = typeof idAttr.value === 'object' && idAttr.value?.reference !== undefined
         ? idAttr.value.reference
         : (idAttr.data >>> 0);
+    }
+
+    if (view instanceof ViewStub) {
+      const layoutAttr = getByName('layout') || node.attrs.find((a) => a.resId === 0x010100f2);
+      if (layoutAttr) {
+        view.$stubLayout = layoutAttr.value?.reference !== undefined ? (layoutAttr.value.reference >>> 0) : (layoutAttr.data >>> 0);
+      }
+      const inflatedAttr = getByName('inflatedId');
+      if (inflatedAttr) {
+        view.$stubInflatedId = inflatedAttr.value?.reference !== undefined ? (inflatedAttr.value.reference >>> 0) : (inflatedAttr.data >>> 0);
+      }
     }
 
     const widthAttr = get(ATTR_IDS.layout_width);
@@ -357,7 +378,16 @@ export class LayoutInflater {
 }
 
 function toLayoutSize(attr, resources, density) {
-  const value = attr.value;
+  let value = attr.value;
+  if (
+    typeof value === 'number' &&
+    (value >>> 0) >= 0x01000000 &&
+    (value >>> 0) <= 0x7fffffff &&
+    resources?.resolve
+  ) {
+    const resolved = resources.resolve(value >>> 0);
+    if (resolved !== null && resolved !== undefined) value = resolved;
+  }
   if (typeof value === 'number') return value;
   const themeAttrs = resources?.vm?.themeAttributes;
   if (themeAttrs && attr.dataType === 0x01 && (attr.data >>> 0) > 0) {

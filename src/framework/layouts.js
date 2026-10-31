@@ -796,3 +796,42 @@ export class AbsoluteLayout extends ViewGroup {
     }
   }
 }
+
+export class ViewStub extends View {
+  constructor(context = null) {
+    super(context);
+    this.visibility = VISIBILITY.GONE;
+    this.$stubLayout = 0;
+    this.$stubInflatedId = 0;
+    this.$inflated = false;
+  }
+
+  inflate() {
+    if (this.$inflated) return this.children?.[0] || null;
+    const vm = this.$vm;
+    const parent = this.parent;
+    if (!vm || !parent || !this.$stubLayout) {
+      this.visibility = VISIBILITY.VISIBLE;
+      return null;
+    }
+    let view = null;
+    try {
+      view = vm.inflateRaw
+        ? vm.inflateRaw(this.$stubLayout)
+        : null;
+    } catch {
+      view = null;
+    }
+    this.$inflated = true;
+    if (!view) {
+      this.visibility = VISIBILITY.VISIBLE;
+      return null;
+    }
+    const index = parent.children.indexOf(this);
+    parent.removeView(this);
+    if (this.$stubInflatedId && this.$stubInflatedId !== -1) view.id = this.$stubInflatedId >>> 0;
+    view.layoutParams = this.layoutParams || { width: -1, height: -1 };
+    parent.addView(view, index >= 0 ? index : parent.children.length);
+    return view;
+  }
+}

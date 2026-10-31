@@ -172,6 +172,22 @@ export class JavaVM {
     return `${classDescriptor}->${name}:${type}`;
   }
 
+  resolveFieldOwner(object, field) {
+    let cursor = object.$runtimeClass || (object.$dexClass ? this.registry.resolve(object.$dexClass.descriptor) : null);
+    const visited = new Set();
+    let firstMatch = null;
+    for (;;) {
+      if (!cursor || visited.has(cursor.descriptor)) break;
+      visited.add(cursor.descriptor);
+      if (cursor.descriptor === field.classDesc) firstMatch = firstMatch || cursor.descriptor;
+      if (cursor.dexClass?.instanceFields?.some((e) => e.field.name === field.name && e.field.type === field.type)) {
+        return cursor.descriptor;
+      }
+      cursor = cursor.superDescriptor ? this.registry.resolve(cursor.superDescriptor) : null;
+    }
+    return firstMatch || field.classDesc;
+  }
+
   getField(object, field) {
     if (object === null || object === undefined) {
       if (DBG.npe && field.name === 'layoutInDisplayCutoutMode') console.error('IPUT-NULL obj=' + (obj === undefined ? 'undef' : obj === null ? 'null' : '?') + ' from ' + (this.methodStack||[]).slice(-5).join(' <- '));
@@ -187,7 +203,9 @@ export class JavaVM {
       }
       return defaultValueFor(field.type);
     }
-    const key = this.fieldKey(field.classDesc, field.name, field.type);
+    const directKey = this.fieldKey(field.classDesc, field.name, field.type);
+    const ownerKey = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
+    const key = ownerKey;
     const stored = object.$fields.has(key) ? object.$fields.get(key) : undefined;
     if (stored !== undefined && stored !== null) return stored;
     const peer = object.$peer;
@@ -218,7 +236,7 @@ export class JavaVM {
       if (DBG.npe) console.error('NOFIELD', field.name, typeof object, object, (this.methodStack||[]).slice(-6).join(' <- '));
       this.throwException('Ljava/lang/IllegalAccessError;', `对象无字段 ${field.name}`);
     }
-    object.$fields.set(this.fieldKey(field.classDesc, field.name, field.type), value);
+    object.$fields.set(this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type), value);
   }
 
   getSystemProperty(name) {
@@ -376,6 +394,13 @@ export class JavaVM {
       );
     }
     const runtimeClass = this.registry.resolve(descriptor);
+    if (typeof this.loadActivityTheme === 'function') {
+      try {
+        this.loadActivityTheme(descriptor);
+      } catch {
+        // 主题加载失败不影响 Activity 实例化
+      }
+    }
     if (!this.activityStack) this.activityStack = [];
     if (callerPeer) {
       this.savedState = callerPeer;

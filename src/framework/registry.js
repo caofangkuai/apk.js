@@ -1017,23 +1017,25 @@ function buildFrameworkDefinitions(vm) {
     })
   );
 
+  class ViewConfigurationPeer {
+    constructor() {
+      this.touchSlop = 8;
+      this.tapTimeout = 100;
+      this.longPressTimeout = 500;
+      this.doubleTapTimeout = 300;
+      this.doubleTapSlop = 100;
+      this.scrollBarSize = 4;
+      this.pressedStateDuration = 64;
+      this.keyRepeatTimeout = 500;
+      this.windowTouchSlop = 8;
+      this.hoverSlop = 8;
+    }
+  }
+
   defs.push(
     nativeDef('Landroid/view/ViewConfiguration;', {
       super: 'Ljava/lang/Object;',
-      ctor: class ViewConfigurationPeer {
-        constructor() {
-          this.touchSlop = 8;
-          this.tapTimeout = 100;
-          this.longPressTimeout = 500;
-          this.doubleTapTimeout = 300;
-          this.doubleTapSlop = 100;
-          this.scrollBarSize = 4;
-          this.pressedStateDuration = 64;
-          this.keyRepeatTimeout = 500;
-          this.windowTouchSlop = 8;
-          this.hoverSlop = 8;
-        }
-      },
+      ctor: ViewConfigurationPeer,
       methods: {
         'getScaledTouchSlop()I': (self) => self.touchSlop ?? 8,
         'getScaledDoubleTapSlop()I': (self) => self.doubleTapSlop ?? 100,
@@ -1287,7 +1289,7 @@ function buildFrameworkDefinitions(vm) {
         'inflate(ILandroid/view/ViewGroup;)Landroid/view/View;': (self, [resId, root]) => {
           const inflater = new LayoutInflater(self.vm.contextObject);
           inflater.vm = self.vm;
-          return viewObject(self.vm, inflater.inflate(resId, unwrapView(root) || null, false));
+          return viewObject(self.vm, inflater.inflate(resId, unwrapView(root) || null, !!unwrapView(root)));
         },
         'inflate(ILandroid/view/ViewGroup;Z)Landroid/view/View;': (self, [resId, root, attach]) => {
           const inflater = new LayoutInflater(self.vm.contextObject);
@@ -1363,7 +1365,7 @@ function buildFrameworkDefinitions(vm) {
       'getCurrentFocus()Landroid/view/View;': () => null,
       'findViewById(I)Landroid/view/View;': (self, [id]) => {
         const view = self.window?.decorView?.findViewById(id >>> 0);
-        return view ? self.vm.wrapView?.(view) ?? null : null;
+        return view ? viewObject(self.vm, view) : null;
       },
       'requestFeature(I)Z': () => true,
       'addFlags(I)V': () => {},
@@ -1379,7 +1381,7 @@ function buildFrameworkDefinitions(vm) {
       'setDecorFitsSystemWindows(Z)V': () => {},
       'peekDecorView()Landroid/view/View;': (self, _args, vm) => {
         if (!self.window) return null;
-        return self.window.decorView ? self.vm.wrapView?.(self.window.decorView) ?? null : null;
+        return self.window.decorView ? viewObject(self.vm, self.window.decorView) : null;
       },
       'setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V': () => {},
       'setBackgroundDrawableResource(I)V': () => {},
@@ -2382,6 +2384,24 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/graphics/Paint$FontMetricsInt;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class FontMetricsIntPeer {
+        constructor() { this.ascent = 0; this.descent = 0; this.top = 0; this.bottom = 0; this.leading = 0; }
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/text/TextPaint;', {
+      super: 'Landroid/graphics/Paint;',
+      ctor: class TextPaintPeer {
+        constructor() { this.paint = new Paint(); }
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/graphics/Canvas;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -3225,7 +3245,7 @@ function viewMethods() {
     'getContext()Landroid/content/Context;': (self, _a, vm) => (self?.vm || vm)?.contextObject || null,
     'getResources()Landroid/content/res/Resources;': (self) => self.vm.resources,
     'findViewById(I)Landroid/view/View;': (self, [id], vm) => {
-      const found = findView(self.view, mapContentId(vm, id >>> 0));
+      const found = findView(self.view, id >>> 0);
       return found ? viewObject(vm, found) : null;
     },
     'requestLayout()V': (self) => self.view?.requestLayout(),
@@ -3591,16 +3611,6 @@ function makeViewPropertyAnimator(vm, view) {
     zBy: () => object,
   };
   return object;
-}
-
-function mapContentId(vm, id) {
-  if (id !== 0x01020002) return id;
-  const table = vm.resources?.table;
-  if (!table) return id;
-  for (const [resId, entry] of table.entries) {
-    if (entry.typeName === 'id' && entry.key === 'action_bar_activity_content') return resId;
-  }
-  return id;
 }
 
 function findFocusedView(view) {

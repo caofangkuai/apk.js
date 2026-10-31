@@ -105,11 +105,30 @@ export class DecorView extends ViewGroup {
   }
 
   setContentView(view) {
-    if (this.contentView) this.contentFrame.removeView(this.contentView);
+    if (this.contentView && this.contentView !== view) {
+      const parent = this.contentView.parent;
+      if (parent) parent.removeView(this.contentView);
+    }
     this.contentView = view;
     view.layoutParams = { width: -1, height: -1 };
-    this.contentFrame.addView(view);
+    if (this.isAncestor(view, this.contentFrame)) {
+      if (view.parent) view.parent.removeView(view);
+      for (const child of this.children.slice()) this.removeView(child);
+      this.addView(view, { width: -1, height: -1 });
+    } else {
+      this.contentFrame.addView(view);
+    }
     this.requestLayout();
+  }
+
+  isAncestor(maybeAncestor, node) {
+    let cur = node;
+    let guard = 0;
+    while (cur && guard++ < 10000) {
+      if (cur === maybeAncestor) return true;
+      cur = cur.parent;
+    }
+    return false;
   }
 
   getContentView() {

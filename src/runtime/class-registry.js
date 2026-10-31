@@ -300,6 +300,7 @@ export class ClassRegistry {
     if (value === null || value === undefined || value === 0) return null;
     const actual = this.classNameOf(value);
     if (!this.isAssignable(actual, descriptor)) {
+      if (this.coerceLayoutParams(value, actual, descriptor)) return value;
       if (this.vm.debugCast) console.error('CASTFAIL obj=' + actual + ' -> ' + descriptor + ' peer=' + (value?.$peer?.constructor?.$descriptor) + ' d=' + value?.$descriptor + ' keys=' + (value && typeof value === 'object' ? Object.keys(value).slice(0,8).join('|') : typeof value) + ' isVM=' + (value === this.vm) + ' ctor=' + (value?.constructor?.name) + ' stack=' + (this.vm.methodStack||[]).slice(-8).join(' <- '));
       this.vm.throwException(
         'Ljava/lang/ClassCastException;',
@@ -307,6 +308,18 @@ export class ClassRegistry {
       );
     }
     return value;
+  }
+
+  coerceLayoutParams(value, actual, descriptor) {
+    if (!value || typeof value !== 'object') return false;
+    if (!actual || !actual.includes('LayoutParams;')) return false;
+    if (!descriptor || descriptor.length < 3) return false;
+    const targetClass = this.resolve(descriptor);
+    if (!targetClass) return false;
+    if (!this.isAssignable(descriptor, 'Landroid/view/ViewGroup$LayoutParams;')) return false;
+    value.$nativeClass = descriptor;
+    value.$runtimeClass = targetClass;
+    return true;
   }
 
   instanceOf(value, descriptor) {
