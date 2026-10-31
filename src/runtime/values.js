@@ -92,6 +92,19 @@ export function toFloat(value) {
   return Number(value) || 0;
 }
 
+const FLOAT_BITS_VIEW = new DataView(new ArrayBuffer(4));
+
+export function floatBitsToNumber(value) {
+  if (typeof value !== 'number') return Number(value) || 0;
+  FLOAT_BITS_VIEW.setInt32(0, value | 0, false);
+  return FLOAT_BITS_VIEW.getFloat32(0, false);
+}
+
+export function numberToFloatBits(value) {
+  FLOAT_BITS_VIEW.setFloat32(0, Number(value) || 0, false);
+  return FLOAT_BITS_VIEW.getInt32(0, false);
+}
+
 export function toDouble(value) {
   return Number(value) || 0;
 }

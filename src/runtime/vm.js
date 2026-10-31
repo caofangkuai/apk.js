@@ -7,6 +7,9 @@ import {
   hashCode,
   isJavaArray,
   isJavaObject,
+  floatBitsToNumber,
+  numberToFloatBits,
+  isObjectType,
   isWideType,
   stringify,
   toInt,
@@ -129,6 +132,7 @@ export class JavaVM {
       'display': 'Landroid/hardware/display/DisplayManager;',
       'sensor': 'Landroid/hardware/SensorManager;',
       'location': 'Landroid/location/LocationManager;',
+      'camera': 'Landroid/hardware/camera2/CameraManager;',
     };
     const descriptor = descriptorByService[key];
     if (!descriptor) {
@@ -175,20 +179,37 @@ export class JavaVM {
   resolveFieldOwner(object, field) {
     let cursor = object.$runtimeClass || (object.$dexClass ? this.registry.resolve(object.$dexClass.descriptor) : null);
     const visited = new Set();
-    let firstMatch = null;
+    let cursorAtDeclaring = null;
+    while (cursor && !visited.has(cursor.descriptor)) {
+      visited.add(cursor.descriptor);
+      if (cursor.descriptor === field.classDesc) {
+        cursorAtDeclaring = cursor;
+        break;
+      }
+      cursor = cursor.superDescriptor ? this.registry.resolve(cursor.superDescriptor) : null;
+    }
+    const declaring = cursorAtDeclaring || this.registry.resolve(field.classDesc);
+    if (declaring?.dexClass?.instanceFields?.some((e) => e.field.name === field.name && e.field.type === field.type)) {
+      return declaring.descriptor;
+    }
+    cursor = object.$runtimeClass || (object.$dexClass ? this.registry.resolve(object.$dexClass.descriptor) : null);
+    visited.clear();
     for (;;) {
       if (!cursor || visited.has(cursor.descriptor)) break;
       visited.add(cursor.descriptor);
-      if (cursor.descriptor === field.classDesc) firstMatch = firstMatch || cursor.descriptor;
       if (cursor.dexClass?.instanceFields?.some((e) => e.field.name === field.name && e.field.type === field.type)) {
         return cursor.descriptor;
       }
       cursor = cursor.superDescriptor ? this.registry.resolve(cursor.superDescriptor) : null;
     }
-    return firstMatch || field.classDesc;
+    return field.classDesc;
   }
 
   getField(object, field) {
+    if (globalThis.__DBG_CF && field.classDesc === 'Landroidx/coordinatorlayout/widget/CoordinatorLayout$f;') {
+      const v = null;
+      console.error('CF_GET', field.name, field.type);
+    }
     if (object === null || object === undefined) {
       if (DBG.npe && field.name === 'layoutInDisplayCutoutMode') console.error('IPUT-NULL obj=' + (obj === undefined ? 'undef' : obj === null ? 'null' : '?') + ' from ' + (this.methodStack||[]).slice(-5).join(' <- '));
       if (DBG.npe) console.error('NPE_GETFIELD', field.name, (this.methodStack||[]).slice(-6).join(' <- '));
@@ -206,8 +227,9 @@ export class JavaVM {
     const directKey = this.fieldKey(field.classDesc, field.name, field.type);
     const ownerKey = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
     const key = ownerKey;
-    const stored = object.$fields.has(key) ? object.$fields.get(key) : undefined;
-    if (stored !== undefined && stored !== null) return stored;
+    const hasStored = object.$fields.has(key);
+    const stored = hasStored ? object.$fields.get(key) : undefined;
+    if (hasStored) return stored === undefined ? defaultValueFor(field.type) : stored;
     const peer = object.$peer;
     if (peer && Object.prototype.hasOwnProperty.call(peer, field.name)) {
       const peerValue = peer[field.name];
@@ -228,6 +250,7 @@ export class JavaVM {
     if (object === null || object === undefined) {
       this.throwException('Ljava/lang/NullPointerException;', `写入字段 ${field.name} 时对象为空`);
     }
+    if (isObjectType(field.type) && typeof value === 'number') value = null;
     if (!isJavaObject(object)) {
       if (typeof object === 'object' && object !== null) {
         object[field.name] = value;
@@ -236,7 +259,9 @@ export class JavaVM {
       if (DBG.npe) console.error('NOFIELD', field.name, typeof object, object, (this.methodStack||[]).slice(-6).join(' <- '));
       this.throwException('Ljava/lang/IllegalAccessError;', `对象无字段 ${field.name}`);
     }
-    object.$fields.set(this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type), value);
+    const directKey = this.fieldKey(field.classDesc, field.name, field.type);
+    const key = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
+    object.$fields.set(key, value);
   }
 
   getSystemProperty(name) {
@@ -287,6 +312,7 @@ export class JavaVM {
   setStaticField(field, value) {
     const rc = this.registry.resolve(field.classDesc);
     this.ensureClassInitialized(rc);
+    if (isObjectType(field.type) && typeof value === 'number') value = null;
     if (this.debugCast && field.classDesc === 'Lpc/a;') console.error('SETSTATIC', field.name, '=>', value === null ? 'null' : (value?.$data ? 'array['+value.$data.length+']' : typeof value), '| stack:', (this.methodStack||[]).slice(-6).join(' <- '));
     rc.staticValues.set(`${field.name}:${field.type}`, value);
   }
@@ -340,6 +366,7 @@ export class JavaVM {
   }
 
   presentActivity(activityObject, descriptor, intentObject) {
+    if (globalThis.__DBG_PA) console.error('PRESENT', descriptor);
     const peer = this.registry.getPeer(activityObject, descriptor);
     if (!peer) return null;
     if (intentObject) {
@@ -354,13 +381,19 @@ export class JavaVM {
     ];
     for (const [name, proto, args] of lifecycles) {
       const resolution = this.findVirtual(descriptor, name, proto);
+      if (globalThis.__DBG_PA) console.error('  PA', name, '->', resolution ? resolution.kind : 'null');
       if (!resolution) continue;
-      this.invoke(
-        { classDesc: descriptor, name, proto: { descriptor: proto, parameters: [], returnType: 'V' } },
-        activityObject,
-        args,
-        'virtual'
-      );
+      try {
+        this.invoke(
+          { classDesc: descriptor, name, proto: { descriptor: proto, parameters: [], returnType: 'V' } },
+          activityObject,
+          args,
+          'virtual'
+        );
+      } catch (err) {
+        if (globalThis.__DBG_PA) console.error('  PA-THROW', name, err && err.message);
+        throw err;
+      }
     }
     peer.relayout?.();
     this.screen?.invalidate?.();
@@ -451,12 +484,20 @@ export class JavaVM {
   }
 
   findVirtual(classDescriptor, name, proto, { includeThis = true } = {}) {
+    const overrideFor = (rc) => {
+      if (name === 'findViewById' && proto === '(I)Landroid/view/View;' && rc.nativeDef) {
+        return rc.nativeDef.findInstanceMethod(name, proto) || null;
+      }
+      return null;
+    };
     const visited = new Set();
     const walk = (descriptor) => {
       if (!descriptor || visited.has(descriptor)) return null;
       visited.add(descriptor);
       const rc = this.registry.resolve(descriptor);
       if (!rc) return null;
+      const ov = overrideFor(rc);
+      if (ov) return { kind: 'native', fn: ov, def: rc.nativeDef };
       if (rc.dexClass) {
         const found = rc.dexClass.findDeclaredMethod(name, proto);
         if (found && found.code) return { kind: 'dex', method: found };
@@ -497,6 +538,12 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
+    if (globalThis.__DBG_ARG && ref.name === 'a' && ref.proto && ref.proto.descriptor === '(I)Landroid/view/View;' && String(ref.classDesc).indexOf('appcompat/app') >= 0) {
+      console.error('INV_DELEGATE from=' + (this.methodStack||[]).slice(-2,-1).join('') + ' refCls=' + ref.classDesc + ' argc=' + (args ? args.length : -1));
+    }
+    if (globalThis.__DBG_FR && ref.name === 'a' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0 && ref.proto.descriptor.indexOf('ViewGroup') >= 0) {
+      console.error('INV_OCV ref=' + ref.classDesc + ' sig=' + ref.proto.descriptor + ' mode=' + mode + ' recv=' + (receiver === null ? 'null' : 'obj'));
+    }
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
     this.invocationCount++;
     if (!this._invokeStats) this._invokeStats = new Map();
@@ -505,6 +552,7 @@ export class JavaVM {
     if (this.invocationCount > 8_000_000) {
       throw new Error('执行指令超限，疑似死循环');
     }
+    if (globalThis.__DBG_MS && ref.name === 'onMeasure' && /TabLayout/.test(ref.classDesc || '')) console.error('INV_OM mode=' + mode + ' ref=' + ref.classDesc + ' cur=' + (currentMethod?.classDesc));
     let resolution = null;
     switch (mode) {
       case 'static':
@@ -514,6 +562,7 @@ export class JavaVM {
         const rc = currentMethod ? this.registry.resolve(currentMethod.classDesc) : null;
         const superDescriptor = rc?.superDescriptor;
         resolution = superDescriptor ? this.findVirtual(superDescriptor, ref.name, ref.proto.descriptor) : null;
+        if (globalThis.__DBG_MS && /TabLayout/.test(currentMethod?.classDesc || '')) console.error('SUPER_RES ' + ref.name + ' cur=' + currentMethod?.classDesc + ' super=' + superDescriptor + ' -> ' + (resolution ? resolution.kind + ':' + (resolution.method?.classDesc || resolution.def?.descriptor) : 'NULL'));
         break;
       }
       case 'direct':
@@ -525,7 +574,22 @@ export class JavaVM {
       case 'interface':
       case 'virtual':
       default: {
+        if ((receiver === null || receiver === undefined) && ref.name !== '<init>' && ref.name !== '<clinit>') {
+          if (DBG.npe) console.error('NPE530', ref.name, ref.classDesc, 'pc=' + this.currentPc, 'from', (this.methodStack||[]).slice(-3).join('<-'));
+          if (globalThis.__DBG_ARG && ref.name === 'getDisplayMetrics') console.error('GDM_NPE from', (this.methodStack||[]).slice(-5).join('<-'), 'recvReg=', receiver === undefined ? 'undef' : String(receiver), 'pc=', this.currentPc, 'caller=', currentMethod ? (currentMethod.classDesc + '.' + currentMethod.name + currentMethod.proto.descriptor) : 'none');
+          if (globalThis.__DBG_NPE_RV) console.error('NPE_CALL', ref.name, ref.classDesc, 'stack=' + (this.methodStack||[]).slice(-8).join('<'));
+        this.throwException('Ljava/lang/NullPointerException;', `调用 ${ref.name} 时对象为空`);
+        }
         let receiverDescriptor = receiver === null ? ref.classDesc : this.registry.classNameOf(receiver);
+        if (globalThis.__DBG_FR && ref.name === 'a' && ref.classDesc === 'Landroidx/fragment/app/Fragment;' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0) {
+          const rc = this.registry.resolve(receiverDescriptor);
+          const sig = ref.proto.descriptor;
+          const dm = rc && rc.dexClass ? rc.dexClass.findDeclaredMethod('a', sig) : null;
+          const fv = this.findVirtual(receiverDescriptor, 'a', sig);
+          console.error('DISPATCH recvDesc=' + receiverDescriptor + ' dm=' + (dm ? 'hit' : 'miss') + ' fv=' + (fv ? fv.kind + ':' + (fv.method ? fv.method.classDesc : '') : 'NULL') + ' sig=' + JSON.stringify(sig));
+          const decl = rc && rc.dexClass ? rc.dexClass.virtualMethods.filter(m => m.name === 'a') : [];
+          console.error('DISPATCH declA=' + decl.map(m => m.proto.descriptor).join(' || '));
+        }
         if (!receiverDescriptor || receiverDescriptor === 'Ljava/lang/Object;') receiverDescriptor = ref.classDesc;
         resolution = this.findVirtual(receiverDescriptor, ref.name, ref.proto.descriptor);
         if (!resolution) {
@@ -534,6 +598,9 @@ export class JavaVM {
         }
         break;
       }
+    }
+    if (globalThis.__DBG_FR && ref.name === 'a' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0 && ref.proto.descriptor.indexOf('ViewGroup') >= 0) {
+      console.error('RES_OCV -> ' + (resolution ? resolution.kind + ':' + (resolution.method ? resolution.method.classDesc : resolution.def?.descriptor) : 'NULL'));
     }
     if (!resolution) {
       const signature = `${descriptorToName(ref.classDesc)}.${ref.name}${ref.proto.descriptor}`;
@@ -547,6 +614,14 @@ export class JavaVM {
       console.log('GD', ref.proto.descriptor, '->', r === null ? 'NULL' : (r?.$descriptor || typeof r));
       return r;
     }
+    if (process.env.DBG_GLP && ref.name === 'getLayoutParams') { console.error('INV-GLP recvDesc=', this.registry.classNameOf(receiver), 'resKind=', resolution.kind, 'def=', resolution.def?.descriptor, 'methodClass=', resolution.method?.classDesc); }
+    if (process.env.DBG_RVL && ref.classDesc === 'Landroidx/recyclerview/widget/RecyclerView;' && ref.name === 'l') {
+      const v = args && args[0];
+      let lpd = '?', hold = '?';
+      try { const lp = v && v.$peer ? this.getField(v, 'mLayoutParams') : null; lpd = lp ? (lp.$dexClass?.descriptor || lp.$nativeClass || 'obj') : 'NULL'; if (lp) { const hv = this.getField(lp, 'a'); hold = hv ? 'HOLDER' : 'null'; } } catch (e) { lpd = 'ERR:' + e.message; }
+      const jv = v && v.$view;
+      console.error('RVL view=', v ? (v.$dexClass?.descriptor || v.$nativeClass || 'obj') : v, 'lp=', lpd, 'holderField=', hold, 'jvParent=', jv?.parent?.constructor?.name, 'jvParentDesc=', jv?.parent?.$descriptor, 'jvLP=', jv?.layoutParams && jv.layoutParams.width);
+    }
     if (resolution.kind === 'dex') {
       if (mode === 'static') this.ensureClassInitialized(this.registry.resolve(resolution.method.classDesc));
       if (process.env.DBG_INV && ref.name === 'newInstance') console.error('INV-DEX ' + ref.classDesc + ' method=' + resolution.method.classDesc);
@@ -556,12 +631,28 @@ export class JavaVM {
     return this.invokeNative(resolution, receiver, args, ref, mode);
   }
 
+  decodeNativeArgs(ref, args) {
+    const parameters = ref?.proto?.parameters;
+    if (!Array.isArray(parameters) || !Array.isArray(args) || parameters.length !== args.length) return args;
+    let changed = false;
+    const out = args.slice();
+    for (let i = 0; i < parameters.length; i++) {
+      if (parameters[i] !== 'F') continue;
+      const value = out[i];
+      if (typeof value !== 'number' || !Number.isInteger(value)) continue;
+      out[i] = floatBitsToNumber(value);
+      changed = true;
+    }
+    return changed ? out : args;
+  }
+
   invokeNative(resolution, receiver, args, ref, mode) {
     const isStatic = mode === 'static';
     let self = null;
     if (!isStatic) {
       if (receiver === null || receiver === undefined) {
         if (DBG.npe) console.error('NPE', ref.name, 'ref=' + (ref.classDesc || '?'), 'args=' + (args?.length || 0), 'pc=' + this.currentPc, 'from', (this.methodStack||[]).slice(-8).join(' <- '));
+        if (globalThis.__DBG_NPE_RV) console.error('NPE_CALL', ref.name, ref.classDesc, 'stack=' + (this.methodStack||[]).slice(-8).join('<'));
         this.throwException('Ljava/lang/NullPointerException;', `调用 ${ref.name} 时对象为空`);
       }
       if (isJavaObject(receiver)) {
@@ -572,7 +663,8 @@ export class JavaVM {
     }
     if (process.env.DBG_INV && ref.name === 'newInstance') console.error('INV-CALL ' + ref.classDesc + ' fnSrc=' + String(resolution.fn).slice(0,60).replace(/\n/g,' '));
     try {
-      const result = resolution.fn(self, args, this, { ref, receiver, mode });
+      const decodedArgs = this.decodeNativeArgs(ref, args);
+      const result = resolution.fn(self, decodedArgs, this, { ref, receiver, mode });
       return normalizeNativeResult(result, ref?.proto?.returnType);
     } catch (error) {
       if (error instanceof VMRuntimeError) throw error;
@@ -588,7 +680,14 @@ export class JavaVM {
   }
 
   executeMethod(method, thisArg, args) {
+    if (globalThis.__DBG_COORD && method.classDesc === 'Landroidx/coordinatorlayout/widget/CoordinatorLayout;') {
+      console.error('COORD_M', method.name + (method.proto?.descriptor || ''));
+    }
     if (!method) throw new Error('方法不存在');
+    if (method.classDesc === 'Lru/andr7e/deviceinfohw/j/w;' && method.name === 'a' && method.proto && method.proto.descriptor.indexOf('ViewGroup') >= 0) {
+      try { const r = this.interpreter.execute(method, thisArg, args); console.error('EXEC_JW_A ret=' + (r === null ? 'null' : (r && (r.$descriptor || r.constructor?.name)))); return r; }
+      catch (e) { console.error('EXEC_JW_A THROW ' + (e && e.message)); throw e; }
+    }
     if (!method.code) {
       this.throwException('Ljava/lang/AbstractMethodError;', `${descriptorToName(method.classDesc)}.${method.name}`);
     }
@@ -600,6 +699,67 @@ export class JavaVM {
     if (!this.methodStack) this.methodStack = [];
     this.methodStack.push(`${descriptorToName(method.classDesc)}.${method.name}`);
     try {
+      if (method.classDesc === 'Landroidx/fragment/app/Fragment;' && method.name === 'a' && method.proto && method.proto.descriptor === '(Landroid/os/Bundle;)Landroid/view/LayoutInflater;') {
+        try { const r = this.interpreter.execute(method, thisArg, args); console.error('GET_INFLATER ret=' + (r === null ? 'null' : (r.$peer ? 'obj' : String(r)))); return r; }
+        catch (e) { console.error('GET_INFLATER THROW ' + e.message); throw e; }
+      }
+      if (method.classDesc === 'Landroidx/fragment/app/h;' && method.name === 'i') {
+        const cx = thisArg && thisArg.$fields ? thisArg.$fields.get(this.fieldKey('Landroidx/fragment/app/h;', 'c', 'Landroid/content/Context;')) : null;
+        const r = this.interpreter.execute(method, thisArg, args);
+        console.error('HOST_GETLI ctx=' + (cx === null ? 'null' : (cx === undefined ? 'undef' : 'obj')) + ' -> ' + (r === null ? 'null' : (r && r.$descriptor ? 'obj' : String(r))));
+        return r;
+      }
+      if (method.name === 'a' && method.proto && method.proto.descriptor === '(I)Landroid/view/View;' && method.classDesc.indexOf('fragment/app') >= 0) console.error('FA_FINDVIEW cls=' + method.classDesc + ' id=' + args[0]);
+      if (method.classDesc === 'Landroidx/appcompat/app/e;' && method.name === 'findViewById') {
+        console.error('AC_E_FINDVIEW args=' + args.length);
+      }
+      if (method.name === 'a' && method.proto && method.proto.descriptor === '(I)Landroid/view/View;' && method.classDesc.indexOf('appcompat/app') >= 0) {
+        try { const r = this.interpreter.execute(method, thisArg, args); console.error('ACD_FINDVIEW cls=' + method.classDesc + ' argc=' + args.length + ' -> ' + (r === null ? 'null' : (r.$descriptor || 'obj'))); return r; }
+        catch (e) { console.error('ACD_FINDVIEW THROW ' + e.message); throw e; }
+      }
+      if (method.classDesc === 'Landroid/view/LayoutInflater;' && method.name === 'from') {
+        const r = this.interpreter.execute(method, thisArg, args);
+        console.error('LI_FROM ret=' + (r === null ? 'null' : (r && r.$peer ? 'obj' : String(r))));
+        return r;
+      }
+      if (method.classDesc === 'Landroidx/fragment/app/h;' && method.name === 'i') {
+        const r = this.interpreter.execute(method, thisArg, args);
+        console.error('HOST_I ret=' + (r === null ? 'null' : (r && r.$peer ? 'obj' : String(r))));
+        return r;
+      }
+      if (method.name === 'onCreate') console.error('ONCREATE_EXEC cls=' + method.classDesc);
+      if (method.classDesc === 'Lru/andr7e/deviceinfohw/DeviceInfoActivity;' && method.name === 'onCreate') {
+        try { const r = this.interpreter.execute(method, thisArg, args); console.error('DIA_ONCREATE ok'); return r; }
+        catch (e) { console.error('DIA_ONCREATE THROW ' + e.message); throw e; }
+      }
+      if (method.classDesc === 'Landroidx/fragment/app/j;' && method.name === 'a' && args.length === 3) console.error('JM_A3 sig=' + method.proto.descriptor + ' a0=' + (args[0] ? (args[0].$dexClass?.descriptor || args[0].$nativeClass || typeof args[0]) : String(args[0])));
+      if (method.classDesc === 'Landroidx/fragment/app/f;' && method.name === 'a' && args.length === 1) console.error('FC_A1 a0=' + (args[0] === null ? 'null' : (args[0].$dexClass?.descriptor || typeof args[0])));
+      if (globalThis.__DBG_MTS && method.name === 'a' && method.classDesc === 'Landroidx/fragment/app/j;' && args.length === 5) {
+        const f = args[0];
+        const g = f && f.$fields ? f.$fields.get(this.fieldKey(this.resolveFieldOwner(f, { name: 'G', type: 'Landroid/view/ViewGroup;', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'G', 'Landroid/view/ViewGroup;')) : undefined;
+        const cid = f && f.$fields ? f.$fields.get(this.fieldKey(this.resolveFieldOwner(f, { name: 'x', type: 'I', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'x', 'I')) : undefined;
+        let found = 'n/a';
+        try { const mgr = f && f.$fields.get(this.fieldKey(this.resolveFieldOwner(f, { name: 'u', type: 'Landroidx/fragment/app/j;', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'u', 'Landroidx/fragment/app/j;')); const act = mgr && mgr.$fields ? mgr.$fields.get(this.fieldKey(this.resolveFieldOwner(mgr, { name: 's', type: 'Landroidx/fragment/app/e;', classDesc: 'Landroidx/fragment/app/j;' }), 's', 'Landroidx/fragment/app/e;')) : null; if (act && act.view && act.view.ownerDocument) found = 'doc'; } catch (e) { found = 'err'; }
+        let sv = 'na';
+        try { const mgrRef = args[0] && args[0].$fields.get(this.fieldKey(this.resolveFieldOwner(args[0], { name: 'u', type: 'Landroidx/fragment/app/j;', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'u', 'Landroidx/fragment/app/j;')); sv = mgrRef ? JSON.stringify({ d: mgrRef.$dexClass ? mgrRef.$dexClass.descriptor : (mgrRef.$nativeClass || typeof mgrRef), s: mgrRef.$fields ? (mgrRef.$fields.get(this.fieldKey(this.resolveFieldOwner(mgrRef, { name: 's', type: 'Landroidx/fragment/app/e;', classDesc: 'Landroidx/fragment/app/j;' }), 's', 'Landroidx/fragment/app/e;')) ? 'set' : 'unset') : 'nofields' }) : 'null-mgr'; } catch (e) { sv = 'err ' + e.message; }
+        let hostv = 'na';
+        try { const mgrRef = args[0].$fields.get(this.fieldKey(this.resolveFieldOwner(args[0], { name: 'u', type: 'Landroidx/fragment/app/j;', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'u', 'Landroidx/fragment/app/j;')); const rv = mgrRef && mgrRef.$fields.get(this.fieldKey(this.resolveFieldOwner(mgrRef, { name: 'r', type: 'Landroidx/fragment/app/h;', classDesc: 'Landroidx/fragment/app/j;' }), 'r', 'Landroidx/fragment/app/h;')); hostv = rv ? 'set' : String(rv); } catch (e) { hostv = 'err'; }
+        const curSt = f.$fields.get(this.fieldKey(this.resolveFieldOwner(f, { name: 'b', type: 'I', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'b', 'I'));
+        const fromLayout = f.$fields.get(this.fieldKey(this.resolveFieldOwner(f, { name: 'n', type: 'Z', classDesc: 'Landroidx/fragment/app/Fragment;' }), 'n', 'Z'));
+        console.error('MTS newState=' + args[1] + ' curState(b)=' + curSt + ' fromLayout(n)=' + fromLayout + ' fmHost(r)=' + hostv);
+      }
+      if (method.name === 'a' && method.proto && method.proto.descriptor.indexOf('LayoutInflater') >= 0 && method.proto.descriptor.indexOf('ViewGroup') >= 0) {
+        const r = this.interpreter.execute(method, thisArg, args);
+        console.error('OCV_EXEC class=' + method.classDesc + ' ret=' + (r === null ? 'null' : (r && (r.$descriptor || r.constructor?.name))));
+        return r;
+      }
+      if (globalThis.__DBG_FR && method.name === 'b' && method.classDesc === 'Landroidx/fragment/app/Fragment;') {
+        const pre = thisArg.$fields.get(this.fieldKey('Landroidx/fragment/app/Fragment;', 'H', 'Landroid/view/View;'));
+        const r = this.interpreter.execute(method, thisArg, args);
+        const post = thisArg.$fields.get(this.fieldKey('Landroidx/fragment/app/Fragment;', 'H', 'Landroid/view/View;'));
+        console.error('FRAG_MAKEVIEW pre=' + (pre ? 'set' : String(pre)) + ' post=' + (post ? (post.$descriptor || 'obj') : String(post)));
+        return r;
+      }
       const _r = this.interpreter.execute(method, thisArg, args);
       if (process.env.DBG_INV && ((method.classDesc === 'Landroidx/fragment/app/l0;')) ) console.error('L-RET ' + method.classDesc + '.' + method.name + ' ' + (_r === null ? 'null' : (typeof _r === 'object' ? (_r.$dexClass?.descriptor || _r.$nativeClass || 'obj') : String(_r))));
       if (process.env.DBG_INV && method.classDesc === 'Landroidx/fragment/app/FragmentManager$d;' && method.name === 'a') console.error('FMD-CALLER ' + (this.methodStack||[]).slice(-5).join(' <- '));
@@ -630,6 +790,13 @@ export class JavaVM {
       this.invoke(ref, object, args, 'direct');
     }
     return object;
+  }
+
+  displayObject() {
+    if (!this._displayObject) {
+      this._displayObject = this.wrapPeer({ constructor: { $descriptor: 'Landroid/view/Display;' } });
+    }
+    return this._displayObject;
   }
 
   wrapPeer(peer) {
@@ -780,6 +947,10 @@ function normalizeReferenceArgs(args, parameters) {
 }
 
 function normalizeNativeResult(result, returnType) {
+  if (returnType === 'F') {
+    if (typeof result === 'number') return numberToFloatBits(result);
+    return 0;
+  }
   if (returnType === 'Z') {
     if (result === true) return 1;
     if (result === false) return 0;

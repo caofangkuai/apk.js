@@ -59,7 +59,9 @@ export class DexInterpreter {
       if (pc === _lastPc) { if (++_samePc > 20000) { console.error('PC-STUCK at', method.classDesc + '.' + method.name, 'pc', pc, 'op=0x' + (insns[pc]&0xff).toString(16), 'regs', registers.map((r,i)=>'v'+i+'='+(r===null?'n':typeof r==='object'?'obj':r)).join(',')); throw new Error('PC-STUCK'); } } else { _lastPc = pc; _samePc = 0; }
       const unit = insns[pc];
       const op = unit & 0xff;
+      if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_PC ' + pc + ' op=0x' + op.toString(16));
       this.stats.instructions++;
+      this.vm.currentPc = pc;
       if (DBG.npe && method.classDesc === 'Lpc/a;' && (method.name === '<clinit>' || method.name === 'g')) console.error('EXEC', method.name, 'pc=' + pc, 'op=0x' + op.toString(16), method.name==='g' ? 'v0='+registers[0]+' v1='+(registers[1]===null?'null':typeof registers[1]) : '');
       if (this.trace && !globalThis.__TRACED && method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'i0') { globalThis.__TRACED = true; }
       if (this.trace) this.trace(pc, op, method);
@@ -78,8 +80,8 @@ export class DexInterpreter {
             break;
           }
           case 0x02: {
-            const vA = insns[pc + 1];
-            const vB = unit >>> 8;
+            const vA = (unit >>> 8) & 0xff;
+            const vB = insns[pc + 1];
             registers[vA] = registers[vB];
             pc += 2;
             break;
@@ -289,6 +291,7 @@ export class DexInterpreter {
               size = 3;
             }
             const ref = method.dex.methods[refIndex];
+            if (globalThis.__DBG_MS && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INV pc=' + pc + ' op=0x' + op.toString(16) + ' ref=' + ref.name + ' argc=' + argRegs.length);
             const array = this.vm.newArray('[' + ref.classDesc, args2.length, null);
             for (let i = 0; i < args2.length; i++) array.$data[i] = args2[i];
             this.vm.pendingResult = array;
@@ -307,6 +310,7 @@ export class DexInterpreter {
           case 0x27: {
             const value = registers[unit >>> 8];
             if (value === null) this.vm.throwException('Ljava/lang/NullPointerException;', 'throw 空引用');
+            if (process.env.DBG_THROW) { const c = this.vm?.registry?.classNameOf(value); if (c && /IllegalState/.test(c)) console.error('ISE-THROW-SITE', method.classDesc, method.name, 'pc=' + pc, 'msg=' + value?.$exceptionMessage, 'peermsg=' + (value && value.$peer && value.$peer.message), 'objkeys=' + (value && typeof value==='object' ? Object.keys(value).join(',') : typeof value)); }
             throw new VMRuntimeSignal(value);
           }
           case 0x28: {
@@ -459,6 +463,7 @@ export class DexInterpreter {
           }
           case 0x6e: case 0x6f: case 0x70: case 0x71: case 0x72:
           case 0x74: case 0x75: case 0x76: case 0x77: case 0x78: {
+            if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INVOKE_ENTER op=0x' + op.toString(16) + ' pc=' + pc);
             const { refIndex, argRegs, size } = readInvokeArgs(op, insns, pc);
             if (DBG.npe && String(insns[pc] & 0xffff).length && (this.vm.methodStack||[]).slice(-1)[0] === 'mark.via.Shell.onCreate') {
               const _r = this.vm.dexFiles?.[0]?.methods?.[refIndex];
@@ -466,6 +471,8 @@ export class DexInterpreter {
               console.error('INVOKE', _n, 'pc=', pc, 'unit=0x' + (insns[pc]>>>0).toString(16), 'third=0x' + (insns[pc+2]>>>0).toString(16), 'argRegs=', JSON.stringify(argRegs), 'values=', argRegs.map(r => registers[r] === null ? 'null' : (Array.isArray(registers[r]) || registers[r]?.$data ? 'array[' + (registers[r].$data?.length ?? registers[r].length) + ']' : typeof registers[r])).join(','));
             }
             const ref = method.dex.methods[refIndex];
+            if (globalThis.__DBG_MS && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INV pc=' + pc + ' op=0x' + op.toString(16) + ' ref=' + ref.name + ' argc=' + argRegs.length);
+            if (globalThis.__DBG_ARG && method.classDesc === 'Landroidx/appcompat/app/e;' && method.name === 'findViewById') console.error('READINV pc=' + pc + ' unit=0x' + (insns[pc]>>>0).toString(16) + ' argRegs=' + JSON.stringify(argRegs) + ' vals=' + JSON.stringify(argRegs.map(i => registers[i])));
             if (this.vm.dbgInvoke) this.vm.dbgInvoke(method, ref, pc, argRegs, registers, insns, this.vm);
             const args2 = argRegs.map((index) => registers[index]);
             const mode =
@@ -475,9 +482,14 @@ export class DexInterpreter {
               : op === 0x72 || op === 0x78 ? 'interface'
               : 'virtual';
             const receiver = mode === 'static' ? null : args2.shift();
+            if (globalThis.__DBG_CD && String(ref.name)==='findViewById' && pc===6) console.error('CD_PC6 recv=$' + (receiver? 'obj':'null') + ' regs2=$' + (registers[2]? 'obj':'null') + ' same=' + (receiver===registers[2]) + ' recvNative=' + (receiver?.$nativeClass) + ' recvView=' + !!receiver?.$view + ' reg2Native=' + (registers[2]?.$nativeClass) + ' reg2View=' + !!registers[2]?.$view);
+            if (globalThis.__DBG_CD && String(ref.classDesc||'')==='Lru/andr7e/deviceinfohw/l/c$d;' && String(ref.name)==='<init>') console.error('CD_INIT arg=' + (receiver? 'ok':'null') + ' viewArg=' + (args2[0] ? JSON.stringify({t:typeof args2[0], keys: Object.keys(args2[0]).slice(0,8), cls: args2[0].$nativeClass, dex: args2[0].$dexClass?.descriptor, hasViewProp: 'view' in args2[0], $view: !!args2[0].$view}) : String(args2[0])));
+            if (globalThis.__DBG_INIT && String(ref.classDesc||'').includes('RecyclerView$d0')) console.error('D0_INIT recv=' + (receiver?.$descriptor||typeof receiver) + ' arg0=' + (args2[0]?.$descriptor||typeof args2[0]||args2[0]?.id));
+            if (globalThis.__DBG_INIT && String(ref.classDesc||'').includes('deviceinfohw') && String(ref.name||'').includes('<init>')) console.error('INIT_CALL', ref.classDesc, ref.name, 'recv=' + (receiver===null?'null':(receiver?.$descriptor||typeof receiver)), 'arg0=' + (args2[0]?.$descriptor || typeof args2[0]));
             this.stats.invokes++;
             try {
               if (DBG.npe && ref.name === 'longValue') console.error('INVOKE-longValue recv=' + (receiver === null ? 'NULL' : typeof receiver) + ' at ' + method.classDesc + '.' + method.name + ' pc=' + pc);
+              if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure' && op === 0x6f) console.error('TL_SUPER_CALL ref=' + ref.classDesc + '.' + ref.name + ' mode=' + mode + ' recv=' + (receiver===null?'null':typeof receiver));
               this.vm.pendingResult = this.vm.invoke(ref, receiver, args2, mode, method);
 
             } catch (error) {
@@ -513,10 +525,10 @@ export class DexInterpreter {
             let r;
             switch (op) {
               case 0x81: r = BigInt(toInt(value)); break;
-              case 0x82: r = toInt(value); break;
+              case 0x82: r = numberToFloatBits(toInt(value)); break;
               case 0x83: r = toInt(value); break;
               case 0x84: r = Number(BigInt.asIntN(32, toLong(value))); break;
-              case 0x85: r = Number(toLong(value)); break;
+              case 0x85: r = numberToFloatBits(Number(toLong(value))); break;
               case 0x86: r = Number(toLong(value)); break;
               case 0x87: r = floatBitsToNumber(value) | 0; break;
               case 0x88: r = BigInt(floatBitsToNumber(value) | 0); break;
@@ -601,7 +613,7 @@ export class DexInterpreter {
         if (signal instanceof VMRuntimeSignal) {
           if (DBG.exc) {
             const _ex = signal.exception;
-            console.error('JAVA_EXC pc=', pc, 'cls=', this.vm?.registry?.classNameOf(_ex), 'handlers=', handlers.length, 'msg=', _ex?.$exceptionMessage, 'cause=', this.vm?.registry?.classNameOf(_ex?.cause), 'keys=', _ex && typeof _ex === 'object' ? Object.keys(_ex).slice(0,6).join('|') : typeof _ex, (this.vm?.methodStack || []).slice(-6).join(' <- '));
+            console.error('JAVA_EXC pc=', pc, 'cls=', this.vm?.registry?.classNameOf(_ex), 'handlers=', handlers.length, 'msg=', _ex?.$exceptionMessage, 'cause=', this.vm?.registry?.classNameOf(_ex?.cause), 'keys=', _ex && typeof _ex === 'object' ? Object.keys(_ex).slice(0,6).join('|') : typeof _ex, (this.vm?.methodStack || []).slice(-18).join(' <- '));
           }
           throw new VMRuntimeError(signal.exception, signal.exception?.$exceptionMessage || '未捕获的 Java 异常');
         }
@@ -767,16 +779,16 @@ function computeBinop(op, a, b) {
     case 0xa3: return BigInt.asIntN(64, toLong(a) << (toLong(b) & 63n));
     case 0xa4: return BigInt.asIntN(64, toLong(a) >> (toLong(b) & 63n));
     case 0xa5: return BigInt.asIntN(64, BigInt.asUintN(64, toLong(a)) >> (toLong(b) & 63n));
-    case 0xa6: return a + b;
-    case 0xa7: return a - b;
-    case 0xa8: return a * b;
-    case 0xa9: return b === 0 ? 0 : a / b;
-    case 0xaa: return b === 0 ? 0 : a % b;
-    case 0xab: return a + b;
-    case 0xac: return a - b;
-    case 0xad: return a * b;
-    case 0xae: return b === 0 ? 0 : a / b;
-    case 0xaf: return b === 0 ? 0 : a % b;
+    case 0xa6: return numberToFloatBits(floatBitsToNumber(a) + floatBitsToNumber(b));
+    case 0xa7: return numberToFloatBits(floatBitsToNumber(a) - floatBitsToNumber(b));
+    case 0xa8: return numberToFloatBits(floatBitsToNumber(a) * floatBitsToNumber(b));
+    case 0xa9: { const d = floatBitsToNumber(b); return d === 0 ? 0 : numberToFloatBits(floatBitsToNumber(a) / d); }
+    case 0xaa: { const d = floatBitsToNumber(b); return d === 0 ? 0 : numberToFloatBits(floatBitsToNumber(a) % d); }
+    case 0xab: return doubleBitsToNumber(a) + doubleBitsToNumber(b);
+    case 0xac: return doubleBitsToNumber(a) - doubleBitsToNumber(b);
+    case 0xad: return doubleBitsToNumber(a) * doubleBitsToNumber(b);
+    case 0xae: { const d = doubleBitsToNumber(b); return d === 0 ? 0 : doubleBitsToNumber(a) / d; }
+    case 0xaf: { const d = doubleBitsToNumber(b); return d === 0 ? 0 : doubleBitsToNumber(a) % d; }
     default: return 0;
   }
 }

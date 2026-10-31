@@ -59,7 +59,10 @@ function inferViewBase(fullName) {
   if (/FrameLayout$/.test(name)) return FrameLayout;
   if (/ContentFrameLayout$/.test(name)) return FrameLayout;
   if (/Toolbar$/.test(name)) return Toolbar;
-  if (/(DrawerLayout|CoordinatorLayout|NestedScrollView|CollapsingToolbarLayout)$/.test(name)) {
+  if (/(DrawerLayout|CoordinatorLayout|NestedScrollView|CollapsingToolbarLayout|TabLayout|ViewPager|SwipeRefreshLayout|NavigationMenuView|TableLayout|TableRow)$/.test(name)) {
+    return FrameLayout;
+  }
+  if (/HorizontalScrollView$/.test(name)) {
     return FrameLayout;
   }
   if (/Layout$/.test(name) || /ViewGroup$/.test(name)) {
@@ -82,9 +85,21 @@ export class LayoutInflater {
   }
 
   inflate(resId, root = null, attachToRoot = false) {
+    if (globalThis.__DBG_CV) console.error('INFLATE_CALL res=0x' + (resId>>>0).toString(16) + ' root=' + (root?.$descriptor || (root && root.constructor?.name) || 'null') + ' attach=' + attachToRoot);
     const xml = this.resources.getLayout(resId);
     const node = xml.root.children.find((c) => c.type === 'element');
     if (!node) throw new Error('布局 XML 无根节点');
+    if (node.name === 'merge') {
+      if (!(root instanceof ViewGroup)) {
+        throw new Error('merge 布局需要 ViewGroup 作为根');
+      }
+      for (const childNode of node.children) {
+        if (childNode.type !== 'element') continue;
+        const child = this.inflateNode(childNode, root);
+        if (child) root.addView(child);
+      }
+      return root;
+    }
     const view = this.inflateNode(node, root);
     if (root && attachToRoot && root instanceof ViewGroup) root.addView(view);
     return view;
@@ -128,6 +143,7 @@ export class LayoutInflater {
 
   createView(node) {
     const tag = node.name;
+    if (globalThis.__DBG_CV && /DrawerLayout|AppBarLayout|CoordinatorLayout|Toolbar|TabLayout/.test(tag)) console.error('CV tag=' + tag);
     const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
     if (fullName === 'androidx.appcompat.widget.ViewStubCompat' || fullName === 'android.view.ViewStub') {
       const stub = new ViewStub(this.context);
@@ -138,7 +154,7 @@ export class LayoutInflater {
     }
     const ctor = RESOLVED_CLASSES[fullName] || RESOLVED_CLASSES[tag] || VIEW_CLASSES[tag];
     if (!ctor) {
-      const base = inferViewBase(fullName);
+      const base = this.baseFromDexSuperclass(fullName) || inferViewBase(fullName);
       const fallback = new base(this.context);
       fallback.$unknownTag = fullName;
       fallback.$descriptor = `L${fullName.replace(/\./g, '/')};`;
@@ -151,18 +167,69 @@ export class LayoutInflater {
     return view;
   }
 
+  baseFromDexSuperclass(fullName) {
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    if (!vm) return null;
+    const nativeBaseBySuper = {
+      'Landroid/widget/FrameLayout;': FrameLayout,
+      'Lcom/google/android/material/internal/k;': FrameLayout,
+      'Landroid/widget/LinearLayout;': LinearLayout,
+      'Landroid/widget/RelativeLayout;': RelativeLayout,
+      'Landroid/widget/Toolbar;': Toolbar,
+      'Landroid/view/ViewGroup;': FrameLayout,
+      'Landroid/widget/ScrollView;': ScrollView,
+      'Landroid/widget/TextView;': TextView,
+      'Landroid/widget/Button;': Button,
+      'Landroid/widget/ImageView;': ImageView,
+    };
+    let desc = `L${fullName.replace(/\./g, '/')};`;
+    const visited = new Set();
+    for (;;) {
+      if (!desc || visited.has(desc)) return null;
+      visited.add(desc);
+      if (nativeBaseBySuper[desc]) return nativeBaseBySuper[desc];
+      const superDesc = vm.registry.findDexClass?.(desc)?.superclass || null;
+      if (!superDesc) return null;
+      desc = superDesc;
+    }
+  }
+
+  buildAttributeSet(node) {
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    if (!vm || !node) return null;
+    const object = vm.allocateRawObject('Landroid/util/AttributeSet;');
+    object.$peer = {
+      $descriptor: 'Landroid/util/AttributeSet;',
+      node,
+      resources: this.resources,
+      getAttributeCount: () => (node.attrs || []).length,
+      getIdAttributeResourceValue: (index, fallback) => {
+        const attr = (node.attrs || [])[index | 0];
+        return attr ? (attr.resId >>> 0) || fallback : fallback;
+      },
+    };
+    object.$attrNode = node;
+    object.$attrResources = this.resources;
+    return object;
+  }
+
   runDexConstructor(view, node = null) {
     const vm = this.context?.vm || this.context?.$vm || this.vm || null;
     if (!vm || !view?.$descriptor) return null;
     const dexClass = vm.registry.resolve(view.$descriptor)?.dexClass;
     if (!dexClass) return null;
-    const ctor = (dexClass.directMethods || []).find(
-      (m) => m.name === '<init>' && m.proto?.descriptor === '(Landroid/content/Context;)V'
-    );
+    const directMethods = dexClass.directMethods || [];
+    const findCtor = (desc) => directMethods.find((m) => m.name === '<init>' && m.proto?.descriptor === desc);
+    const attrSet = node ? this.buildAttributeSet(node) : null;
+    const contextObject = vm.contextObject || this.context;
+
+    const withAttrs = attrSet ? findCtor('(Landroid/content/Context;Landroid/util/AttributeSet;)V') : null;
+    const ctor = withAttrs || findCtor('(Landroid/content/Context;)V');
     if (!ctor) return null;
     const object = viewObject(vm, view);
+    const args = withAttrs ? [contextObject, attrSet] : [contextObject];
     try {
-      vm.executeMethod(ctor, object, [vm.contextObject || this.context]);
+      vm.executeMethod(ctor, object, args);
       return object;
     } catch (error) {
       if (error?.name === 'VMRuntimeError' || error?.javaException) return object;
@@ -379,18 +446,9 @@ export class LayoutInflater {
 
 function toLayoutSize(attr, resources, density) {
   let value = attr.value;
-  if (
-    typeof value === 'number' &&
-    (value >>> 0) >= 0x01000000 &&
-    (value >>> 0) <= 0x7fffffff &&
-    resources?.resolve
-  ) {
-    const resolved = resources.resolve(value >>> 0);
-    if (resolved !== null && resolved !== undefined) value = resolved;
-  }
-  if (typeof value === 'number') return value;
   const themeAttrs = resources?.vm?.themeAttributes;
-  if (themeAttrs && attr.dataType === 0x01 && (attr.data >>> 0) > 0) {
+  if (globalThis.__DBG_TLS) console.error('TLS name=' + attr.name + ' dt=' + attr.dataType + ' data=0x' + (attr.data>>>0).toString(16) + ' hasTheme=' + !!themeAttrs + ' actBar=' + JSON.stringify(themeAttrs?.actionBarSize) + ' vm=' + !!resources?.vm);
+  if (themeAttrs && (attr.dataType === 0x01 || attr.dataType === 0x02) && (attr.data >>> 0) > 0) {
     const entry = resources.table?.getEntry(attr.data >>> 0);
     const key = entry?.key || attr.name;
     const themeValue = key ? themeAttrs[key] : undefined;
@@ -400,6 +458,19 @@ function toLayoutSize(attr, resources, density) {
         return Math.round(convertDimension(themeValue, density));
       }
     }
+  }
+  if (
+    typeof value === 'number' &&
+    (value >>> 0) >= 0x01000000 &&
+    (value >>> 0) <= 0x7fffffff &&
+    resources?.resolve
+  ) {
+    const resolved = resources.resolve(value >>> 0);
+    if (resolved !== null && resolved !== undefined) value = resolved;
+  }
+  if (typeof value === 'number') {
+    if (attr.dataType === 0x02) return -2;
+    return value;
   }
   if (value && typeof value === 'object' && value.dimension) {
     return Math.round(convertDimension(value, density));
@@ -414,6 +485,17 @@ function resolveAttrValue(attr, resources) {
   const value = attr.value;
   if (value && typeof value === 'object' && value.reference !== undefined) {
     return resources.resolve(value.reference);
+  }
+  if (attr.dataType === 0x02 && (attr.data >>> 0) > 0 && resources?.table) {
+    const entry = resources.table.getEntry(attr.data >>> 0);
+    const key = entry?.key;
+    const themeAttrs = resources?.vm?.themeAttributes;
+    const themeValue = key ? themeAttrs?.[key] : undefined;
+    if (themeValue !== undefined && themeValue !== null) {
+      if (typeof themeValue === 'number') return themeValue;
+      if (typeof themeValue === 'object' && themeValue.dimension !== undefined) return themeValue;
+    }
+    if (key === 'actionBarSize') return { dimension: { value: 56, unit: 'dp', raw: 1 } };
   }
   return value;
 }
