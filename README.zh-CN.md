@@ -4,6 +4,12 @@
 
 [文档站](https://caofangkuai.github.io/apk.js/) · [Playground](https://caofangkuai.github.io/apk.js/playground.html)
 
+[![Deploy site](https://github.com/caofangkuai/apk.js/actions/workflows/deploy.yml/badge.svg)](https://github.com/caofangkuai/apk.js/actions/workflows/deploy.yml)
+[![stars](https://img.shields.io/github/stars/caofangkuai/apk.js?style=social)](https://github.com/caofangkuai/apk.js/stargazers)
+[![forks](https://img.shields.io/github/forks/caofangkuai/apk.js?style=social)](https://github.com/caofangkuai/apk.js/network/members)
+[![visitors](https://visitor-badge.laobi.icu/badge?page_id=caofangkuai.apk.js)](https://github.com/caofangkuai/apk.js)
+[![license](https://img.shields.io/github/license/caofangkuai/apk.js)](https://github.com/caofangkuai/apk.js/blob/main/LICENSE)
+
 在浏览器里运行 Android APK 的纯 JavaScript 模拟器。apk.js 直接解析 APK 里的 `classes.dex`、`AndroidManifest.xml` 和 `resources.arsc`，用 DEX 字节码解释器执行应用逻辑，再用一套 Canvas 版 Android Framework 把界面画出来。整个过程不依赖设备、模拟器或原生库。
 
 > **一切开始，尽在 apk.js**

@@ -4,6 +4,12 @@
 
 [Docs](https://caofangkuai.github.io/apk.js/) · [Playground](https://caofangkuai.github.io/apk.js/playground.html)
 
+[![Deploy site](https://github.com/caofangkuai/apk.js/actions/workflows/deploy.yml/badge.svg)](https://github.com/caofangkuai/apk.js/actions/workflows/deploy.yml)
+[![stars](https://img.shields.io/github/stars/caofangkuai/apk.js?style=social)](https://github.com/caofangkuai/apk.js/stargazers)
+[![forks](https://img.shields.io/github/forks/caofangkuai/apk.js?style=social)](https://github.com/caofangkuai/apk.js/network/members)
+[![visitors](https://visitor-badge.laobi.icu/badge?page_id=caofangkuai.apk.js)](https://github.com/caofangkuai/apk.js)
+[![license](https://img.shields.io/github/license/caofangkuai/apk.js)](https://github.com/caofangkuai/apk.js/blob/main/LICENSE)
+
 Run Android APKs in the browser with plain JavaScript. apk.js parses `classes.dex`, `AndroidManifest.xml` and `resources.arsc` straight from the APK, executes the application logic with a DEX bytecode interpreter, and paints the UI through a Canvas-based subset of the Android Framework. No device, no emulator, no native libraries.
 
 > **一切开始，尽在 apk.js** — Everything starts with apk.js.
