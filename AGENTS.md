@@ -58,8 +58,8 @@ npm run docs:dev
 | `tools/` | 构建与渲染脚本 |
 | `image-debug/` | node-canvas 出图，用于视觉对照 |
 | `docs/` | VitePress 文档源，中英双语 |
-| `site/` | 站点构建产物（文档 + playground），由 `npm run site` 生成 |
-| `dist/` | 浏览器打包产物，已提交 |
+| `site/` | 站点构建产物（文档 + playground），由 `npm run site` 生成，不入库 |
+| `dist/` | 浏览器打包产物，由 CI 构建，不入库 |
 | `samples/` | 示例 APK 与源码 |
 
 ## 代码约定
@@ -96,6 +96,12 @@ npm run docs:dev
 - 临时探针用 `globalThis.__XXX` 开关，或 `debugFlag`。
 - 交付前清理只针对单个 APK 类名的钩子。
 - `tests/debug/` 下的历史脚本不属于测试套件，不要依赖它们。
+
+### 站点与资源引用
+
+- 文档站 VitePress 的 `base` 固定为 `/apk.js/`，对应部署地址 `https://caofangkuai.github.io/apk.js/`。
+- `playground.html` 与 `docs/**/*.md` 里引用 `dist/apk.min.js`、`vendor/jszip.min.js`、`samples/*.apk`、`logo.svg` 时，一律写 `https://caofangkuai.github.io/apk.js/...` 绝对地址，避免相对路径在文档页深链下失效。
+- 站点由 `.github/workflows/deploy.yml` 在 push 到 `main` 后自动构建并发布到 `gh-pages` 分支；`dist/` 与 `site/` 都由 CI 生成，不要提交。
 
 ## 提交前检查
 
