@@ -1,10 +1,11 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
-import { JAVA_CORE_CLASSES, jsString, nativeDef } from './java-core.js';
+import { JAVA_CORE_CLASSES, deviceCapabilities, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
 import { LayoutInflater } from './layout-inflater.js';
 import { Resources, convertDimension } from './resources.js';
 import { Handler, Looper, Message, MessageQueue } from './os.js';
 import { Toast } from './toast.js';
+import { installSensorSources, readSensorValues } from './sensors.js';
 import { ActivityHost } from './app.js';
 import { viewObject, unwrapView } from './bridge.js';
 import { Paint, Canvas, Bitmap, Rect, RectF, Point, cssColor } from './graphics.js';
@@ -38,6 +39,185 @@ import {
 import { DecorView, SurfaceScreen, Window } from './window.js';
 
 export const FRAMEWORK_CLASSES = {};
+
+function readNavigator() {
+  try {
+    if (typeof navigator !== 'undefined' && navigator) return navigator;
+  } catch (error) {
+    void error;
+  }
+  return null;
+}
+
+function detectPlatformName() {
+  const nav = readNavigator();
+  const raw = String(nav?.userAgentData?.platform || nav?.platform || '').trim();
+  if (!raw) return 'browser';
+  return raw.toLowerCase().replace(/\s+/g, '_');
+}
+
+function buildSystemProperties() {
+  const nav = readNavigator();
+  const platform = detectPlatformName();
+  const language = String(nav?.language || 'en-US');
+  return {
+    'ro.product.brand': 'apk.js',
+    'ro.product.manufacturer': 'apk.js',
+    'ro.product.model': 'Browser',
+    'ro.product.nickname': 'apk.js Browser',
+    'ro.product.device': platform,
+    'ro.product.name': platform,
+    'ro.product.board': platform,
+    'ro.product.cpu.abi': 'arm64-v8a',
+    'ro.product.cpu.abilist': 'arm64-v8a,armeabi-v7a,armeabi',
+    'ro.build.version.sdk': '31',
+    'ro.build.version.release': '12',
+    'ro.build.version.incremental': '1',
+    'ro.build.id': 'SQ3A.220705.004',
+    'ro.build.display.id': 'SQ3A.220705.004',
+    'ro.build.fingerprint': `apk.js/${platform}/${platform}:12/SQ3A.220705.004/1:user/release-keys`,
+    'ro.build.type': 'user',
+    'ro.build.tags': 'release-keys',
+    'ro.build.characteristics': 'default',
+    'ro.hardware': platform,
+    'ro.hardware.chipname': platform,
+    'ro.board.platform': platform,
+    'ro.soc.model': 'apk.js SoC',
+    'ro.soc.manufacturer': 'apk.js',
+    'ro.chipname': platform,
+    'ro.serialno': 'unknown',
+    'ro.bootloader': 'unknown',
+    'ro.debuggable': '0',
+    'persist.sys.timezone': 'Asia/Shanghai',
+    'ro.product.locale': language,
+    'ro.product.locale.language': language.split('-')[0] || 'en',
+    'ro.product.locale.region': language.split('-')[1] || 'US',
+  };
+}
+
+let cachedSystemProperties = null;
+
+function systemProperties() {
+  if (cachedSystemProperties) return cachedSystemProperties;
+  const built = buildSystemProperties();
+  if (readNavigator()) cachedSystemProperties = built;
+  return built;
+}
+
+function systemProperty(key) {
+  const properties = systemProperties();
+  if (Object.prototype.hasOwnProperty.call(properties, key)) return properties[key];
+  return '';
+}
+
+const SHELL_LS_LINE = (name) => `lrwxrwxrwx 1 root root 16 2026-01-01 00:00 ${name} -> /dev/block/mmcblk0p1`;
+
+function runShellCommand(command) {
+  const text = String(command || '').trim();
+  if (globalThis.__DBG_SH) console.error('SH: ' + text);
+  if (text.startsWith('ls ')) {
+    const raw = text.slice(3).trim().replace(/^-{1,2}[a-zA-Z]+\s+/, '').trim();
+    if (!raw) return '';
+    const target = raw.replace(/["']/g, '');
+    return VIRTUAL_FS.list(target)
+      .map((name) => SHELL_LS_LINE(name))
+      .join('\n');
+  }
+  if (text.startsWith('cat ')) {
+    const target = text.slice(4).trim().replace(/["']/g, '');
+    const value = readFsText(target);
+    return value ?? '';
+  }
+  if (text.startsWith('getprop')) {
+    const key = text.replace(/^getprop\s*/, '').replace(/["']/g, '').trim();
+    if (!key) {
+      return Object.entries(systemProperties()).map(([k, v]) => `[${k}]: [${v}]`).join('\n');
+    }
+    return systemProperty(key);
+  }
+  if (text.startsWith('echo ')) {
+    return text.slice(5).trim().replace(/["']/g, '') + '\n';
+  }
+  return '';
+}
+
+const RUNTIME_SINGLETON = { current: null };
+
+function ensureRuntimeSingleton(vm) {
+  if (RUNTIME_SINGLETON.current) return RUNTIME_SINGLETON.current;
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const object = vm.allocateRawObject('Ljava/lang/Runtime;');
+  RUNTIME_SINGLETON.current = object;
+  return object;
+}
+
+function makeFakeProcess(vm, command) {
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const object = vm.allocateRawObject('Ljava/lang/Process;');
+  const output = new TextEncoder().encode(runShellCommand(command));
+  object.$command = command;
+  object.$output = output;
+  object.$fields?.set('command', command);
+  return object;
+}
+
+function makeSinkStream(vm) {
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const object = vm.allocateRawObject('Ljava/io/OutputStream;');
+  object.$buffer = [];
+  return object;
+}
+
+const INPUT_DEVICE_DEFINITIONS = [
+  { id: 1, name: 'apk.js Touchscreen', vendorId: 1, productId: 1, descriptor: 'a1b2c3d4e5f60718', sources: 0x00001002 },
+  { id: 2, name: 'apk.js Touch Keys', vendorId: 1, productId: 2, descriptor: 'b1b2c3d4e5f60719', sources: 0x00000101 },
+  { id: 3, name: 'gpio-keys', vendorId: 1, productId: 3, descriptor: 'c1b2c3d4e5f6071a', sources: 0x00000101 },
+];
+
+const SENSOR_DEFINITIONS = [
+  { type: 1, name: 'Accelerometer', vendor: 'apk.js', stringType: 'android.sensor.accelerometer', power: 0.13, resolution: 0.0383, maxRange: 156.8 },
+  { type: 4, name: 'Gyroscope', vendor: 'apk.js', stringType: 'android.sensor.gyroscope', power: 0.13, resolution: 0.0005, maxRange: 34.9 },
+  { type: 2, name: 'Magnetometer', vendor: 'apk.js', stringType: 'android.sensor.magnetic_field', power: 0.75, resolution: 0.3, maxRange: 4912 },
+  { type: 5, name: 'Light sensor', vendor: 'apk.js', stringType: 'android.sensor.light', power: 0.175, resolution: 1, maxRange: 40960 },
+  { type: 8, name: 'Proximity sensor', vendor: 'apk.js', stringType: 'android.sensor.proximity', power: 0.175, resolution: 1, maxRange: 5 },
+  { type: 3, name: 'Orientation sensor', vendor: 'apk.js', stringType: 'android.sensor.orientation', power: 0.25, resolution: 0.1, maxRange: 360 },
+];
+
+function toFloatArray(vm, values) {
+  const numbers = Array.isArray(values)
+    ? values.map((value) => Number(value) || 0)
+    : [Number(values?.x) || 0, Number(values?.y) || 0, Number(values?.z) || 0];
+  const array = vm.newArray('[F', numbers.length, 0);
+  const target = array?.$data || array;
+  for (let i = 0; i < numbers.length; i++) target[i] = numbers[i];
+  return array;
+}
+
+function stopSensorTimer(self, listener) {
+  const timers = self && self.$sensorTimers;
+  if (!timers) return;
+  const timer = timers.get(listener);
+  if (timer !== undefined) {
+    clearInterval(timer);
+    timers.delete(listener);
+  }
+}
+
+function buildSensors(vm) {
+  return SENSOR_DEFINITIONS.map((def) => {
+    const object = vm.allocateRawObject('Landroid/hardware/Sensor;');
+    object.name = def.name;
+    object.type = def.type;
+    object.vendor = def.vendor;
+    object.version = 1;
+    object.power = def.power;
+    object.resolution = def.resolution;
+    object.maxRange = def.maxRange;
+    object.minDelay = 10000;
+    object.stringType = def.stringType;
+    return { ...def, version: 1, minDelay: 10000, $object: object };
+  });
+}
 
 const NATIVE_VIEW_CLASSES = {
   'Landroid/view/View;': View,
@@ -73,31 +253,48 @@ function ruleVerb(rule) {
   return RELATIVE_RULE_NAMES[rule >>> 0] || `rule${rule >>> 0}`;
 }
 
-const DEX_LAYOUT_PARAMS_BY_PARENT = {
-  'Landroidx/drawerlayout/widget/DrawerLayout;': 'Landroidx/drawerlayout/widget/DrawerLayout$e;',
-  'Landroidx/recyclerview/widget/RecyclerView;': 'Landroidx/recyclerview/widget/RecyclerView$p;',
-  'Landroidx/coordinatorlayout/widget/CoordinatorLayout;': 'Landroidx/coordinatorlayout/widget/CoordinatorLayout$f;',
-  'Lcom/google/android/material/appbar/AppBarLayout;': 'Lcom/google/android/material/appbar/AppBarLayout$f;',
-  'Landroidx/viewpager/widget/ViewPager;': 'Landroidx/viewpager/widget/ViewPager$g;',
-  'com.google.android.material.appbar.AppBarLayout': 'Lcom/google/android/material/appbar/AppBarLayout$f;',
-};
+function findNestedLayoutParamsClass(vm, parentDescriptor) {
+  const targets = ['Landroid/view/ViewGroup$LayoutParams;', 'Landroid/view/ViewGroup$MarginLayoutParams;'];
+  let best = null;
+  let bestDepth = -1;
+  const sources = [vm?.dexFile, ...(Array.isArray(vm?.dexFiles) ? vm.dexFiles : [])];
+  for (const dex of sources) {
+    if (!dex || !Array.isArray(dex.classes)) continue;
+    for (const cls of dex.classes) {
+      const descriptor = cls?.descriptor;
+      if (typeof descriptor !== 'string') continue;
+      if (!descriptor.startsWith(parentDescriptor.slice(0, -1) + '$')) continue;
+      const superDescriptor = cls.superclass;
+      if (!superDescriptor) continue;
+      let depth = 0;
+      let cursor = superDescriptor;
+      const seen = new Set();
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        if (targets.includes(cursor)) break;
+        const resolved = vm?.registry?.resolve(cursor);
+        cursor = resolved?.superDescriptor || resolved?.dexClass?.superclass || null;
+        depth += 1;
+      }
+      if (!targets.includes(cursor)) continue;
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        best = descriptor;
+      }
+    }
+  }
+  return best;
+}
 
 function layoutParamsDescriptorFor(view, vm) {
   const parent = view?.parent;
   const parentName = parent?.constructor?.name;
-  let parentDescriptor = parent?.$descriptor;
-  if (parentDescriptor && DEX_LAYOUT_PARAMS_BY_PARENT[parentDescriptor]) {
-    return DEX_LAYOUT_PARAMS_BY_PARENT[parentDescriptor];
-  }
+  const parentDescriptor = parent?.$descriptor;
   if (parentDescriptor && vm?.registry?.resolve) {
-    const seen = new Set();
-    let desc = parentDescriptor;
-    while (desc && !seen.has(desc)) {
-      seen.add(desc);
-      if (DEX_LAYOUT_PARAMS_BY_PARENT[desc]) return DEX_LAYOUT_PARAMS_BY_PARENT[desc];
-      const rc = vm.registry.resolve(desc);
-      desc = rc?.superDescriptor || rc?.dexClass?.superclass || null;
-    }
+    const nested = findNestedLayoutParamsClass(vm, parentDescriptor);
+    if (nested) return nested;
+    const declared = generateLayoutParamsReturnType(vm, parentDescriptor);
+    if (declared) return declared;
   }
   if (parentName === 'RelativeLayout') return 'Landroid/widget/RelativeLayout$LayoutParams;';
   if (parentName === 'LinearLayout') return 'Landroid/widget/LinearLayout$LayoutParams;';
@@ -107,6 +304,25 @@ function layoutParamsDescriptorFor(view, vm) {
   return 'Landroid/view/ViewGroup$LayoutParams;';
 }
 
+
+function generateLayoutParamsReturnType(vm, descriptor) {
+  const seen = new Set();
+  let desc = descriptor;
+  while (desc && !seen.has(desc)) {
+    seen.add(desc);
+    const rc = vm.registry.resolve(desc);
+    const dexClass = rc?.dexClass;
+    if (dexClass?.methodsByName) {
+      for (const [key, method] of dexClass.methodsByName) {
+        if (!key.startsWith('generateLayoutParams(')) continue;
+        const type = method?.proto?.returnType;
+        if (type && type !== 'Landroid/view/ViewGroup$LayoutParams;') return type;
+      }
+    }
+    desc = rc?.superDescriptor || null;
+  }
+  return null;
+}
 
 function rectField(rect, name) {
   if (!rect) return 0;
@@ -204,6 +420,28 @@ function buildLayoutParamsViaDex(vm, descriptor, params) {
   } catch {
     return null;
   }
+}
+
+function coerceLayoutParams(params) {
+  if (!params || typeof params !== 'object') return params;
+  if (!params.$fields) {
+    return params;
+  }
+  const out = { ...(params.$layoutParams || {}) };
+  const axes = ['width', 'height', 'x', 'y', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight', 'startMargin', 'endMargin', 'column', 'span', 'margins'];
+  for (const [key, value] of params.$fields) {
+    for (const axis of axes) {
+      if (key.endsWith(`->${axis}:I`) && typeof value === 'number') out[axis] = value;
+      if (key.endsWith(`->${axis}:F`) && typeof value === 'number') out[axis] = value;
+    }
+  }
+  if (params.$dexClass?.descriptor?.endsWith('MarginsLayoutParams$LayoutParams;')) {
+    if (out.width === undefined) out.width = -2;
+    if (out.height === undefined) out.height = -2;
+  }
+  if (out.width === undefined) out.width = -2;
+  if (out.height === undefined) out.height = -2;
+  return out;
 }
 
 function populateDexLayoutParams(object, descriptor, params) {
@@ -667,9 +905,44 @@ function buildFrameworkDefinitions(vm) {
         'getColor(II)I': (self, [index, fallback]) => (self.getColor?.(index | 0, fallback >>> 0) ?? fallback) >>> 0,
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [index]) => self.getDrawable?.(index | 0) ?? null,
         'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [index]) => {
+          const vm = self.$vm || null;
+          const resId = (self.getResourceId?.(index | 0) ?? 0) >>> 0;
+          if (resId && vm?.resources?.getColorStateList) {
+            const fromXml = vm.resources.getColorStateList(resId);
+            if (fromXml) {
+              const object = vm.allocateRawObject ? vm.allocateRawObject('Landroid/content/res/ColorStateList;') : null;
+              if (object) {
+                if (object.$fields instanceof Map) {
+                  object.$fields.set('states', fromXml.states);
+                  object.$fields.set('colors', fromXml.colors);
+                }
+                if (vm?.registry?.getPeer) {
+                  const peer = vm.registry.getPeer(object, 'Landroid/content/res/ColorStateList;');
+                  if (peer) { peer.states = fromXml.states; peer.colors = fromXml.colors; }
+                }
+                object.color = fromXml.color;
+                object.states = fromXml.states;
+                object.colors = fromXml.colors;
+                return object;
+              }
+              return { $descriptor: 'Landroid/content/res/ColorStateList;', color: fromXml.color, states: fromXml.states, colors: fromXml.colors };
+            }
+          }
           const color = self.getColor?.(index | 0);
           if (color === undefined || color === null) return null;
-          return { $descriptor: 'Landroid/content/res/ColorStateList;', color: color >>> 0 };
+          const object = vm?.allocateRawObject ? vm.allocateRawObject('Landroid/content/res/ColorStateList;') : null;
+          const states = [[]];
+          const colors = [color >>> 0];
+          if (object) {
+            if (object.$fields instanceof Map) object.$fields.set('states', states), object.$fields.set('colors', colors);
+            if (vm?.registry?.getPeer) {
+              const peer = vm.registry.getPeer(object, 'Landroid/content/res/ColorStateList;');
+              if (peer) { peer.states = states; peer.colors = colors; }
+            }
+            object.color = color >>> 0;
+            return object;
+          }
+          return { $descriptor: 'Landroid/content/res/ColorStateList;', color: color >>> 0, states, colors };
         },
         'getString(I)Ljava/lang/String;': (self, [index]) => self.getString?.(index | 0) ?? null,
         'getNonResourceString(I)Ljava/lang/String;': (self, [index]) => self.getNonResourceString?.(index | 0) ?? null,
@@ -1080,15 +1353,82 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Lf/a/h/a;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'a(Ljava/lang/String;)Ljava/lang/String;': (_self, [command]) => runShellCommand(jsString(command)),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Ljava/lang/Process;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getInputStream()Ljava/io/InputStream;': (self) => self,
+        'getErrorStream()Ljava/io/InputStream;': (self) => self,
+        'getOutputStream()Ljava/io/OutputStream;': (_self, _args, vm) => makeSinkStream(vm),
+        'waitFor()I': () => 0,
+        'exitValue()I': () => 0,
+        'destroy()V': () => undefined,
+        'available()I': (self) => (self?.$output ? self.$output.length : 0),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Ljava/lang/Runtime;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getRuntime()Ljava/lang/Runtime;': (_self, _args, vm) => ensureRuntimeSingleton(vm),
+        'exec(Ljava/lang/String;)Ljava/lang/Process;': (_self, [command], vm) => makeFakeProcess(vm, jsString(command)),
+        'exec([Ljava/lang/String;)Ljava/lang/Process;': (_self, [argv], vm) => {
+          const parts = argv?.$data || argv?._items || argv?.items || [];
+          return makeFakeProcess(vm, parts.map((p) => jsString(p)).join(' '));
+        },
+        'availableProcessors()I': () => deviceCapabilities().cores,
+        'maxMemory()J': () => BigInt(deviceCapabilities().memoryBytes),
+        'totalMemory()J': () => BigInt(deviceCapabilities().memoryBytes),
+        'freeMemory()J': () => BigInt(deviceCapabilities().availBytes),
+        'gc()V': () => undefined,
+      },
+      staticMethods: {
+        'getRuntime()Ljava/lang/Runtime;': (_self, _args, vm) => ensureRuntimeSingleton(vm),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Lf/a/m/a$a;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'a(Ljava/lang/String;)Ljava/lang/String;': (self, [command]) => runShellCommand(jsString(command)),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/os/SystemProperties;', {
       super: 'Ljava/lang/Object;',
       staticMethods: {
-        'get(Ljava/lang/String;)Ljava/lang/String;': (_self, [key]) => String(key ?? ''),
-        'get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (_self, [key, fallback]) =>
-          fallback === undefined || fallback === null ? String(key ?? '') : String(fallback),
-        'getInt(Ljava/lang/String;I)I': (_self, [_key, fallback]) => fallback ?? 0,
-        'getLong(Ljava/lang/String;J)J': (_self, [_key, fallback]) => fallback ?? 0n,
-        'getBoolean(Ljava/lang/String;Z)Z': (_self, [_key, fallback]) => Boolean(fallback),
+        'get(Ljava/lang/String;)Ljava/lang/String;': (_self, [key]) => systemProperty(jsString(key)),
+        'get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (_self, [key, fallback]) => {
+          const value = systemProperty(jsString(key));
+          return value !== null && value !== '' ? value : (fallback === undefined || fallback === null ? '' : jsString(fallback));
+        },
+        'getInt(Ljava/lang/String;I)I': (_self, [key, fallback]) => {
+          const value = Number.parseInt(systemProperty(jsString(key)) ?? '', 10);
+          return Number.isFinite(value) ? value : (fallback ?? 0);
+        },
+        'getLong(Ljava/lang/String;J)J': (_self, [key, fallback]) => {
+          const value = systemProperty(jsString(key));
+          return value !== null && value !== '' ? BigInt(Math.trunc(Number(value)) || 0) : BigInt(fallback ?? 0);
+        },
+        'getBoolean(Ljava/lang/String;Z)Z': (_self, [key, fallback]) => {
+          const value = systemProperty(jsString(key));
+          if (value === null || value === '') return Boolean(fallback);
+          return value === '1' || value.toLowerCase() === 'true';
+        },
         'set(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
       },
     })
@@ -1380,8 +1720,35 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/view/InputDevice;', {
       super: 'Ljava/lang/Object;',
       staticMethods: {
-        'getDeviceIds()[I': (_self, _args, vm) => (vm ? vm.newArray('[I', 0, null) : null),
-        'getDevice(I)Landroid/view/InputDevice;': () => null,
+        'getDeviceIds()[I': (_self, _args, vm) => {
+          if (!vm) return null;
+          const ids = INPUT_DEVICE_DEFINITIONS.map((device) => device.id);
+          const array = vm.newArray('[I', ids.length, 0);
+          const target = array?.$data || array;
+          for (let i = 0; i < ids.length; i++) target[i] = ids[i];
+          return array;
+        },
+        'getDevice(I)Landroid/view/InputDevice;': (_self, [id], vm) => {
+          const def = INPUT_DEVICE_DEFINITIONS.find((device) => device.id === (id | 0));
+          if (!def || !vm) return null;
+          const object = vm.allocateRawObject('Landroid/view/InputDevice;');
+          object.id = def.id;
+          object.name = def.name;
+          object.vendorId = def.vendorId;
+          object.productId = def.productId;
+          object.descriptor = def.descriptor;
+          object.sources = def.sources;
+          return object;
+        },
+      },
+      methods: {
+        'getName()Ljava/lang/String;': (self) => self.name ?? '',
+        'getId()I': (self) => self.id | 0,
+        'getVendorId()I': (self) => self.vendorId | 0,
+        'getProductId()I': (self) => self.productId | 0,
+        'getDescriptor()Ljava/lang/String;': (self) => self.descriptor ?? '',
+        'getSources()I': (self) => self.sources | 0,
+        'isVirtual()Z': () => false,
       },
     })
   );
@@ -1589,7 +1956,7 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) child.layoutParams = params;
+            if (params) child.layoutParams = coerceLayoutParams(params);
             self.view.addView(child);
           }
         },
@@ -1603,7 +1970,7 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;)V': (self, [view, index, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) child.layoutParams = params;
+            if (params) child.layoutParams = coerceLayoutParams(params);
             self.view.addView(child, index | 0);
           }
         },
@@ -1633,6 +2000,50 @@ function buildFrameworkDefinitions(vm) {
         },
         'removeAllViews()V': (self) => self.view?.removeAllViews?.(),
         'removeAllViewsInLayout()V': (self) => self.view?.removeAllViews?.(),
+        'removeDetachedView(Landroid/view/View;Z)V': (self, [view, animate], vm) => {
+          const child = view?.$view || view;
+          if (!child || !self.view) return;
+          const index = self.view.children.indexOf(child);
+          if (index >= 0) {
+            self.view.children.splice(index, 1);
+            child.parent = null;
+            if (typeof child.onDetachedFromWindow === 'function') child.onDetachedFromWindow();
+            self.view.requestLayout?.();
+            self.view.invalidate?.();
+          }
+        },
+        'detachViewFromParent(I)V': (self, [index]) => {
+          const child = self.view?.children?.[index | 0];
+          if (!child) return;
+          self.view.children.splice(index | 0, 1);
+          child.parent = null;
+          child.__detachedFromParent = true;
+        },
+        'detachViewFromParent(Landroid/view/View;)V': (self, [view]) => {
+          const child = view?.$view || view;
+          if (!child || !self.view) return;
+          const index = self.view.children.indexOf(child);
+          if (index >= 0) self.view.children.splice(index, 1);
+          child.parent = null;
+          child.__detachedFromParent = true;
+        },
+        'detachAllViewsFromParent()V': (self) => {
+          for (const child of (self.view?.children || [])) {
+            child.parent = null;
+            child.__detachedFromParent = true;
+          }
+          if (self.view) self.view.children = [];
+        },
+        'attachViewToParent(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;)V': (self, [view, index, params]) => {
+          const child = view?.$view || view;
+          if (!child || !self.view) return;
+          if (params && typeof params === 'object' && !params.$peer) child.layoutParams = params;
+          child.parent = self.view;
+          child.__detachedFromParent = false;
+          const at = (index | 0) < 0 ? self.view.children.length : (index | 0);
+          self.view.children.splice(at, 0, child);
+        },
+        'onViewRemoved(Landroid/view/View;)V': () => undefined,
 'getChildCount()I': (self) => self.view?.getChildCount?.() ?? 0,
         'getChildAt(I)Landroid/view/View;': (self, [index], vm) => {
           if (globalThis.FV_DBG) console.error('GETCHILD self=', typeof self, 'hasView=', !!self?.view, 'idx=', index, 'kids=', self?.view?.children?.length);
@@ -2113,8 +2524,12 @@ function buildFrameworkDefinitions(vm) {
         },
         'getMovementMethod()Landroid/text/method/MovementMethod;': (self) => self.movementMethod ?? null,
         'setTextColor(Landroid/content/res/ColorStateList;)V': (self, [csl]) => {
-          const color = csl?.$peer?.color ?? csl?.color;
-          if (typeof color === 'number') self.view?.setTextColor?.(color >>> 0);
+          if (!self.view) return;
+          self.view.$textColorStateList = csl || null;
+          const color = csl?.color ?? (typeof csl?.getColorForState === 'function'
+            ? csl.getColorForState(self.view.$textStateSet || [], csl?.getDefaultColor?.() ?? 0)
+            : (csl?.$peer?.color ?? csl?.color));
+          if (typeof color === 'number') self.view.setTextColor?.(color >>> 0);
         },
         'setHintTextColor(Landroid/content/res/ColorStateList;)V': () => undefined,
         'setLinkTextColor(Landroid/content/res/ColorStateList;)V': () => undefined,
@@ -2275,6 +2690,32 @@ function buildFrameworkDefinitions(vm) {
         'setDefaultFontSize(I)V': () => undefined,
         'setSavePassword(Z)V': () => undefined,
         'setSaveFormData(Z)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/ViewStub;', {
+      super: 'Landroid/view/View;',
+      ctor: viewPeerConstructor('Landroid/widget/ViewStub;'),
+      methods: {
+        'setVisibility(I)V': (self, [value]) => self.view?.setVisibility(value | 0),
+        'setInflatedId(I)V': () => undefined,
+        'setLayoutResource(I)V': () => undefined,
+        'setLayoutInflater(Landroid/view/LayoutInflater;)V': () => undefined,
+        'inflate()Landroid/view/View;': (self) => self.view?.inflate?.() ?? null,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/CheckedTextView;', {
+      super: 'Landroid/widget/TextView;',
+      ctor: viewPeerConstructor('Landroid/widget/CheckedTextView;', 'Landroid/widget/TextView;'),
+      methods: {
+        'setChecked(Z)V': (self, [value]) => { if (self.view) self.view.checked = !!value; },
+        'isChecked()Z': (self) => (self.view?.checked ? 1 : 0),
+        'setCheckMarkDrawable(Landroid/graphics/drawable/Drawable;)V': () => undefined,
       },
     })
   );
@@ -2780,6 +3221,28 @@ function buildFrameworkDefinitions(vm) {
         set bottomMargin(v) { this.object.$layoutParams.bottomMargin = v | 0; }
       },
       methods: {
+        '<init>(II)V': (self, [width, height]) => {
+          const params = self.object.$layoutParams || {};
+          params.width = width | 0;
+          params.height = height | 0;
+          self.object.$layoutParams = params;
+        },
+        '<init>(Landroid/view/ViewGroup$LayoutParams;)V': (self, [other]) => {
+          const source = other?.$layoutParams || other || {};
+          self.object.$layoutParams = {
+            width: -2, height: -2,
+            leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0,
+            ...source,
+          };
+        },
+        '<init>(Landroid/view/ViewGroup$MarginLayoutParams;)V': (self, [other]) => {
+          const source = other?.$layoutParams || other || {};
+          self.object.$layoutParams = {
+            width: -2, height: -2,
+            leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0,
+            ...source,
+          };
+        },
         'setMargins(IIII)V': (self, [l, t, r, b]) => {
           const params = self.object.$layoutParams || {};
           params.leftMargin = l | 0;
@@ -3233,8 +3696,14 @@ function buildFrameworkDefinitions(vm) {
           if (value === null || value === undefined) return true;
           return jsString(value).length === 0;
         },
-        'join(Ljava/lang/CharSequence;Ljava/lang/Iterable;)Ljava/lang/String;': (_self, [separator, values]) =>
-          (values?.items || []).map(jsString).join(jsString(separator)),
+        'join(Ljava/lang/CharSequence;Ljava/lang/Iterable;)Ljava/lang/String;': (_self, [separator, values], vm) => {
+          let items = values?.items || (Array.isArray(values) ? values : null);
+          if (!items && vm && values) {
+            const peer = vm.registry?.getPeer?.(values, 'Ljava/lang/Iterable;');
+            items = peer?.items || peer?.setItems || null;
+          }
+          return (items || []).map((item) => jsString(item)).join(jsString(separator));
+        },
       },
     })
   );
@@ -3245,13 +3714,13 @@ function buildFrameworkDefinitions(vm) {
       staticFields: new Map([
         ['VERSION:Landroid/os/Build$VERSION;', { $descriptor: 'Landroid/os/Build$VERSION;' }],
         ['MODEL:Ljava/lang/String;', 'Browser'],
-        ['MANUFACTURER:Ljava/lang/String;', 'MonkeyCode'],
-        ['BRAND:Ljava/lang/String;', 'MonkeyCode'],
+        ['MANUFACTURER:Ljava/lang/String;', 'apk.js'],
+        ['BRAND:Ljava/lang/String;', 'apk.js'],
         ['DEVICE:Ljava/lang/String;', 'browser'],
         ['PRODUCT:Ljava/lang/String;', 'browser'],
         ['BOARD:Ljava/lang/String;', 'browser'],
         ['HARDWARE:Ljava/lang/String;', 'browser'],
-        ['FINGERPRINT:Ljava/lang/String;', 'MonkeyCode/browser/browser:12/SQ3A.220705.004/1:user/release-keys'],
+        ['FINGERPRINT:Ljava/lang/String;', 'apk.js/browser/browser:12/SQ3A.220705.004/1:user/release-keys'],
         ['TYPE:Ljava/lang/String;', 'user'],
         ['TAGS:Ljava/lang/String;', 'release-keys'],
         ['ID:Ljava/lang/String;', 'SQ3A.220705.004'],
@@ -3267,7 +3736,7 @@ function buildFrameworkDefinitions(vm) {
         ['BOOTLOADER:Ljava/lang/String;', 'unknown'],
         ['SERIAL:Ljava/lang/String;', 'unknown'],
         ['TIME:I', 0],
-        ['SOC_MANUFACTURER:Ljava/lang/String;', 'MonkeyCode'],
+        ['SOC_MANUFACTURER:Ljava/lang/String;', 'apk.js'],
         ['SOC_MODEL:Ljava/lang/String;', 'browser'],
       ]),
     })
@@ -3294,22 +3763,74 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/hardware/Sensor;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getName()Ljava/lang/String;': (self) => self.name ?? '',
+        'getType()I': (self) => self.type ?? 0,
+        'getVendor()Ljava/lang/String;': (self) => self.vendor ?? 'apk.js',
+        'getVersion()I': (self) => self.version ?? 1,
+        'getPower()F': (self) => self.power ?? 0.5,
+        'getResolution()F': (self) => self.resolution ?? 1,
+        'getMaximumRange()F': (self) => self.maxRange ?? 100,
+        'getMinDelay()I': (self) => self.minDelay ?? 0,
+        'getStringType()Ljava/lang/String;': (self) => self.stringType ?? 'android.sensor.accelerometer',
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/hardware/SensorManager;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'getDefaultSensor(I)Landroid/hardware/Sensor;': () => null,
+        'getDefaultSensor(I)Landroid/hardware/Sensor;': (_self, [type], vm) => {
+          const s = buildSensors(vm).find((sensor) => sensor.type === (type | 0));
+          return s ? s.$object : null;
+        },
         'getSensorList(I)Ljava/util/List;': (_self, _args, vm) => {
           const list = vm.allocateRawObject('Ljava/util/ArrayList;');
-          list.$peer = { items: [] };
+          const sensors = buildSensors(vm);
+          const items = sensors.map((s) => s.$object);
+          if (list.$peer) list.$peer.items = items;
+          else list.$peer = { items };
+          list.$data = items;
           return list;
         },
         'getDynamicSensorList(I)Ljava/util/List;': (_self, _args, vm) => {
           const list = vm.allocateRawObject('Ljava/util/ArrayList;');
-          list.$peer = { items: [] };
+          if (list.$peer) list.$peer.items = [];
+          else list.$peer = { items: [] };
+          list.$data = [];
           return list;
         },
-        'registerListener(Landroid/hardware/SensorEventListener;Landroid/hardware/Sensor;I)Z': () => false,
-        'unregisterListener(Landroid/hardware/SensorEventListener;)V': () => undefined,
+        'registerListener(Landroid/hardware/SensorEventListener;Landroid/hardware/Sensor;I)Z': (_self, args, vm) => {
+          const [listener, sensor] = args || [];
+          if (!listener || !sensor || typeof vm?.invoke !== 'function') return false;
+          const type = sensor.type | 0;
+          const proto = { descriptor: '(Landroid/hardware/Sensor;Landroid/hardware/SensorEvent;)V', parameters: ['Landroid/hardware/Sensor;', 'Landroid/hardware/SensorEvent;'] };
+          const tick = () => {
+            const values = readSensorValues(type);
+            if (!values) return;
+            const event = vm.allocateRawObject('Landroid/hardware/SensorEvent;');
+            event.sensor = sensor;
+            event.accuracy = 3;
+            event.timestamp = BigInt(Date.now()) * 1000000n;
+            const vector = toFloatArray(vm, values);
+            event.values = vector;
+            vm.invoke({ classDesc: 'Landroid/hardware/SensorEventListener;', name: 'onSensorChanged', proto }, listener, [event], 'interface');
+          };
+          const timer = setInterval(tick, 200);
+          if (typeof timer?.unref === 'function') timer.unref();
+          if (!_self.$sensorTimers) _self.$sensorTimers = new Map();
+          _self.$sensorTimers.set(listener, timer);
+          return true;
+        },
+        'unregisterListener(Landroid/hardware/SensorEventListener;Landroid/hardware/Sensor;)V': (self, args) => {
+          stopSensorTimer(self, args && args[0]);
+        },
+        'unregisterListener(Landroid/hardware/SensorEventListener;)V': (self, args) => {
+          stopSensorTimer(self, args && args[0]);
+        },
       },
     })
   );
@@ -3401,6 +3922,28 @@ function buildFrameworkDefinitions(vm) {
           out.$fields?.set('Landroid/util/TypedValue;->data:I', typeof value === 'number' ? value >>> 0 : 0);
         },
         'getAssets()Landroid/content/res/AssetManager;': (self, _args, vm) => vm.resources.getAssets(),
+        'openRawResource(I)Ljava/io/InputStream;': (self, [resId], vm) => {
+          const id = Number(resId) >>> 0;
+          const table = vm.resources?.table;
+          let bytes = null;
+          for (const typeName of ['raw', 'xml']) {
+            const entry = table?.getTypeEntries?.(typeName)?.get(id);
+            if (!entry) continue;
+            const name = String(entry.key || '');
+            for (const candidate of [`res/${typeName}/${name}`, `${typeName}/${name}`, name]) {
+              try {
+                bytes = vm.resources.getAssets().readBytes(candidate);
+                break;
+              } catch (e) {
+                void e;
+              }
+            }
+            if (bytes) break;
+          }
+          if (!bytes) return makeAssetStream(vm, new Uint8Array(0));
+          return makeAssetStream(vm, bytes);
+        },
+        'openRawResourceFd(I)Landroid/content/res/AssetFileDescriptor;': () => null,
         'getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I': (self, [name, type, pkg], vm) =>
           vm.resources.getIdentifier(jsString(name), jsString(type), jsString(pkg)),
         'getDisplayMetrics()Landroid/util/DisplayMetrics;': (self, _args, vm) => vm.resources.getDisplayMetrics(),
@@ -3423,13 +3966,14 @@ function buildFrameworkDefinitions(vm) {
         'open(Ljava/lang/String;)Ljava/io/InputStream;': (self, [path], vm) => {
           const mgr = resolveAssetManager(self, vm);
           const name = jsString(path);
-          return {
-            $descriptor: 'Ljava/io/InputStream;',
-            $nativeClass: 'Ljava/io/InputStream;',
-            path: name,
-            bytes: mgr ? mgr.readBytes(name) : new Uint8Array(0),
-            offset: 0,
-          };
+          let bytes;
+          try {
+            bytes = mgr.readBytes(name);
+          } catch (e) {
+            vm.throwException('Ljava/io/FileNotFoundException;', `${name}: ${e?.message || e}`);
+            return null;
+          }
+          return makeAssetStream(vm, bytes);
         },
         'list(Ljava/lang/String;)[Ljava/lang/String;': (self, [path], vm) => {
           const mgr = resolveAssetManager(self, vm);
@@ -3938,7 +4482,6 @@ function coreGraphicDefs() {
     }),
     nativeDef('Landroid/graphics/Point;', { super: 'Ljava/lang/Object;' }),
     nativeDef('Landroid/graphics/RectF;', { super: 'Ljava/lang/Object;' }),
-    nativeDef('Landroid/graphics/drawable/Drawable;', { super: 'Ljava/lang/Object;' }),
     nativeDef('Landroid/graphics/drawable/shapes/Shape;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -4085,6 +4628,19 @@ function viewMethods() {
     },
     'setBackgroundColor(I)V': (self, [color]) => self.view?.setBackgroundColor(color >>> 0),
     'setBackground(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => self.view?.setBackground(drawable),
+    'setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => self.view?.setBackground(drawable),
+    'setBackgroundResource(I)V': (self, [resId], vm) => {
+      const id = resId >>> 0;
+      const table = (self.resources || vm.resources)?.table;
+      const hasEntry = !!table?.getEntry?.(id);
+      if (!hasEntry && id > 0xff) {
+        self.view?.setBackgroundColor(id);
+        return;
+      }
+      const drawable = (self.resources || vm.resources)?.getDrawable(id);
+      if (drawable) self.view?.setBackground(drawable);
+    },
+    'getBackground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getBackground() ?? null,
     'setForeground(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => self.view?.setForeground?.(drawable),
     'getForeground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getForeground?.() ?? null,
     'setForegroundGravity(I)V': (self, [gravity]) => self.view?.setForegroundGravity?.(gravity | 0),
@@ -4114,6 +4670,7 @@ function viewMethods() {
     'requestApplyInsets()V': () => undefined,
     'setOnKeyListener(Landroid/view/View$OnKeyListener;)V': () => undefined,
     'setMeasuredDimension(II)V': (self, [w, h], vm) => {
+      if (globalThis.__RVT && /RecyclerView$/.test(String(self.object?.$dexClass?.descriptor || self.view?.$descriptor || ''))) console.error('RVSMD ' + (self.view?.$descriptor) + ' w=' + (w|0) + ' h=' + (h|0));
       self.view?.setMeasuredDimension(w | 0, h | 0);
       syncDexViewField(self, vm, 'mMeasuredWidth', 'I', w | 0);
       syncDexViewField(self, vm, 'mMeasuredHeight', 'I', h | 0);
@@ -4309,6 +4866,7 @@ function viewMethods() {
     'getPaddingRight()I': (self) => self.view?.getPaddingRight() ?? 0,
     'getPaddingBottom()I': (self) => self.view?.getPaddingBottom() ?? 0,
     'getLayoutParams()Landroid/view/ViewGroup$LayoutParams;': (self, _args, vm) => {
+      if (process.env.DBG_LP && !self?.view) console.error('GLP-SELF isJavaObj=' + !!(self && self.$fields) + ' ncls=' + self?.$nativeClass + ' dex=' + self?.$dexClass?.descriptor + ' peer=' + !!self?.$peer);
       const view = self.view;
       if (!view) { if (process.env.DBG_LP) console.error('GLP-NOVIEW self=', self && (self.constructor?.name||'obj'), 'selfDesc=', self?.descriptor, 'objDesc=', self?.object?.$dexClass?.descriptor, 'keys=', self&&Object.keys(self).join(',')); return null; }
       const descriptor = layoutParamsDescriptorFor(view, vm);
@@ -4335,7 +4893,7 @@ function viewMethods() {
         const merged = { ...raw };
         const fields = params?.$fields;
         if (fields) {
-          for (const axis of ['x', 'y', 'leftMargin', 'topMargin']) {
+          for (const axis of ['width', 'height', 'x', 'y', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight', 'startMargin', 'endMargin', 'column', 'span']) {
             for (const [key, value] of fields) {
               if (key.endsWith(`->${axis}:I`) && typeof value === 'number') merged[axis] = value;
             }
@@ -4716,7 +5274,9 @@ function makeTypedArrayPeer(vm, values, present = null) {
     },
     getResourceId: (index, fallback) => {
       const value = lookup(index);
-      return typeof value === 'number' ? value >>> 0 : fallback;
+      if (typeof value === 'number') return value >>> 0;
+      if (value && typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
+      return fallback;
     },
     getDimension: (index, fallback) => {
       const value = lookup(index);
@@ -4756,7 +5316,12 @@ function makeTypedArrayPeer(vm, values, present = null) {
     getString: (index) => {
       if (!isPresent(index)) return null;
       const value = lookup(index);
-      return value === undefined || value === null ? null : String(value);
+      if (value === undefined || value === null) return null;
+      if (value && typeof value === 'object' && value.reference !== undefined) {
+        const resolved = vm.resources?.resolve?.(value.reference >>> 0);
+        return resolved === undefined || resolved === null ? null : String(resolved);
+      }
+      return String(value);
     },
     getText: (index) => makeTypedArrayPeer(vm, values).getString(index),
     getLayoutDimension: (index, fallback) => makeTypedArrayPeer(vm, values).getDimensionPixelSize(index, fallback),
@@ -4827,6 +5392,27 @@ function coerceReflectionArgs(vm, paramDescriptors, args) {
         return arg;
     }
   });
+}
+
+function makeAssetStream(vm, bytes) {
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const object = vm.allocateRawObject('Ljava/io/FileInputStream;');
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  object.data = data;
+  object.cursor = 0;
+  object.$bytes = data;
+  if (object.$fields instanceof Map) {
+    object.$fields.set('data', data);
+    object.$fields.set('cursor', 0);
+  }
+  if (vm.registry?.getPeer) {
+    const peer = vm.registry.getPeer(object, 'Ljava/io/FileInputStream;');
+    if (peer) {
+      peer.data = data;
+      peer.cursor = 0;
+    }
+  }
+  return object;
 }
 
 function resolveAssetManager(self, vm) {
@@ -5059,8 +5645,14 @@ function attributeValueFor(attributeSet, attrId) {
   const attr = node.attrs.find((a) => (a.resId >>> 0) === id && a.resId);
   if (!attr) return undefined;
   const dataType = attr.dataType & 0xff;
-  if (dataType === 0x01) return attr.data >>> 0;
-  if (dataType === 0x02) return (attr.data >>> 0) === 0 ? 0 : Number(attr.rawValue ?? attr.value ?? attr.data);
+  if (dataType === 0x01) {
+    if (attr.value !== undefined && attr.value !== null && typeof attr.value === 'object' && attr.value.reference !== undefined) return attr.value;
+    return attr.data >>> 0;
+  }
+  if (dataType === 0x02) {
+    if (attr.value && typeof attr.value === 'object' && attr.value.reference !== undefined) return attr.value;
+    return (attr.data >>> 0) === 0 ? 0 : Number(attr.rawValue ?? attr.value ?? attr.data);
+  }
   if (dataType === 0x03) return attr.rawValue ?? (typeof attr.value === 'string' ? attr.value : null);
   if (dataType === 0x05) return attr.value?.dimension !== undefined ? attr.value : (attr.rawValue ?? attr.value);
   if (dataType === 0x10 || dataType === 0x11) return attr.data | 0;

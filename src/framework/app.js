@@ -2,7 +2,7 @@ import { Resources } from './resources.js';
 import { DecorView, SurfaceScreen, Window } from './window.js';
 import { LayoutInflater } from './layout-inflater.js';
 import { viewObject, contextFacade } from './bridge.js';
-import { MeasureSpec } from './view.js';
+import { MeasureSpec, measureDepth } from './view.js';
 
 export class ActivityHost {
   constructor(vm, activityObject) {
@@ -21,8 +21,22 @@ export class ActivityHost {
     if (this.window) return;
     const context = contextFacade(this.vm);
     this.decorView = new DecorView(context, this.screen);
-    this.decorView.$scheduleLayout = () => this.relayout();
+    this.decorView.$scheduleLayout = () => {
+      if (this._inLayout || measureDepth > 0) return;
+      this._pendingRelayout = true;
+      this._relayoutScheduled = true;
+      const run = () => {
+        this._relayoutScheduled = false;
+        if (!this._pendingRelayout) return;
+        this._pendingRelayout = false;
+        this.relayout();
+      };
+      if (typeof queueMicrotask === 'function') queueMicrotask(run);
+      else setTimeout(run, 0);
+    };
     this.decorView.$scheduleDraw = () => this.screen?.invalidate();
+    this.decorView.attachedToWindow = true;
+    this.decorView.__isScreenRoot = true;
     this.window = new Window(context, this.decorView, this.screen);
     this.window.host = this;
     this.window.callback = this.object;
@@ -35,15 +49,34 @@ export class ActivityHost {
     if (this.screen) this.screen.setDecorView(this.decorView);
   }
 
-  relayout() {
+  relayout(force = false) {
     if (!this.decorView || !this.screen) return;
-    const width = this.screen.width;
-    const height = this.screen.height;
-    this.decorView.measure(
-      MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-      MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
-    );
-    this.decorView.layout(0, 0, width, height);
+    if (this._inLayout) {
+      this._pendingRelayout = true;
+      return;
+    }
+    const layoutWidth = this.screen.width;
+    const layoutHeight = this.screen.height;
+    if (!force && !this._pendingRelayout && this._layoutSignature === layoutWidth + 'x' + layoutHeight) {
+      return;
+    }
+    this._inLayout = true;
+    try {
+      let guard = 0;
+      do {
+        this._pendingRelayout = false;
+        const width = this.screen.width;
+        const height = this.screen.height;
+        this._layoutSignature = width + 'x' + height;
+        this.decorView.measure(
+          MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+          MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+        );
+        this.decorView.layout(0, 0, width, height);
+      } while (this._pendingRelayout && ++guard < 8);
+    } finally {
+      this._inLayout = false;
+    }
     this.screen.invalidate();
   }
 
@@ -61,7 +94,7 @@ export class ActivityHost {
     this.ensureWindow();
     this.contentView = view;
     this.window.setContentView(view);
-    this.relayout();
+    this._pendingRelayout = true;
   }
 
   findViewById(id) {

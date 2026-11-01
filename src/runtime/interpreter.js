@@ -41,15 +41,18 @@ export class DexInterpreter {
 
     const handlers = buildTryMap(code);
     const savedPendingException = this.vm.pendingException;
+    const savedMethod = this.currentMethod;
     this.vm.pendingException = null;
     try {
       return this.runLoop(method, registers, handlers, insns, code);
     } finally {
       this.vm.pendingException = savedPendingException;
+      this.currentMethod = savedMethod;
     }
   }
 
   runLoop(method, registers, handlers, insns, code) {
+    this.currentMethod = method;
     let pc = 0;
     let _lastPc = -1, _samePc = 0;
     const _pcs = [];
@@ -59,7 +62,6 @@ export class DexInterpreter {
       if (pc === _lastPc) { if (++_samePc > 20000) { console.error('PC-STUCK at', method.classDesc + '.' + method.name, 'pc', pc, 'op=0x' + (insns[pc]&0xff).toString(16), 'regs', registers.map((r,i)=>'v'+i+'='+(r===null?'n':typeof r==='object'?'obj':r)).join(',')); throw new Error('PC-STUCK'); } } else { _lastPc = pc; _samePc = 0; }
       const unit = insns[pc];
       const op = unit & 0xff;
-      if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_PC ' + pc + ' op=0x' + op.toString(16));
       this.stats.instructions++;
       this.vm.currentPc = pc;
       if (DBG.npe && method.classDesc === 'Lpc/a;' && (method.name === '<clinit>' || method.name === 'g')) console.error('EXEC', method.name, 'pc=' + pc, 'op=0x' + op.toString(16), method.name==='g' ? 'v0='+registers[0]+' v1='+(registers[1]===null?'null':typeof registers[1]) : '');
@@ -291,7 +293,6 @@ export class DexInterpreter {
               size = 3;
             }
             const ref = method.dex.methods[refIndex];
-            if (globalThis.__DBG_MS && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INV pc=' + pc + ' op=0x' + op.toString(16) + ' ref=' + ref.name + ' argc=' + argRegs.length);
             const array = this.vm.newArray('[' + ref.classDesc, args2.length, null);
             for (let i = 0; i < args2.length; i++) array.$data[i] = args2[i];
             this.vm.pendingResult = array;
@@ -463,16 +464,8 @@ export class DexInterpreter {
           }
           case 0x6e: case 0x6f: case 0x70: case 0x71: case 0x72:
           case 0x74: case 0x75: case 0x76: case 0x77: case 0x78: {
-            if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INVOKE_ENTER op=0x' + op.toString(16) + ' pc=' + pc);
             const { refIndex, argRegs, size } = readInvokeArgs(op, insns, pc);
-            if (DBG.npe && String(insns[pc] & 0xffff).length && (this.vm.methodStack||[]).slice(-1)[0] === 'mark.via.Shell.onCreate') {
-              const _r = this.vm.dexFiles?.[0]?.methods?.[refIndex];
-              const _n = _r ? (typeof _r.name === 'string' ? _r.name : this.vm.dexFiles[0].strings[_r.name]) : '?';
-              console.error('INVOKE', _n, 'pc=', pc, 'unit=0x' + (insns[pc]>>>0).toString(16), 'third=0x' + (insns[pc+2]>>>0).toString(16), 'argRegs=', JSON.stringify(argRegs), 'values=', argRegs.map(r => registers[r] === null ? 'null' : (Array.isArray(registers[r]) || registers[r]?.$data ? 'array[' + (registers[r].$data?.length ?? registers[r].length) + ']' : typeof registers[r])).join(','));
-            }
             const ref = method.dex.methods[refIndex];
-            if (globalThis.__DBG_MS && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure') console.error('TL_INV pc=' + pc + ' op=0x' + op.toString(16) + ' ref=' + ref.name + ' argc=' + argRegs.length);
-            if (globalThis.__DBG_ARG && method.classDesc === 'Landroidx/appcompat/app/e;' && method.name === 'findViewById') console.error('READINV pc=' + pc + ' unit=0x' + (insns[pc]>>>0).toString(16) + ' argRegs=' + JSON.stringify(argRegs) + ' vals=' + JSON.stringify(argRegs.map(i => registers[i])));
             if (this.vm.dbgInvoke) this.vm.dbgInvoke(method, ref, pc, argRegs, registers, insns, this.vm);
             const args2 = argRegs.map((index) => registers[index]);
             const mode =
@@ -482,14 +475,9 @@ export class DexInterpreter {
               : op === 0x72 || op === 0x78 ? 'interface'
               : 'virtual';
             const receiver = mode === 'static' ? null : args2.shift();
-            if (globalThis.__DBG_CD && String(ref.name)==='findViewById' && pc===6) console.error('CD_PC6 recv=$' + (receiver? 'obj':'null') + ' regs2=$' + (registers[2]? 'obj':'null') + ' same=' + (receiver===registers[2]) + ' recvNative=' + (receiver?.$nativeClass) + ' recvView=' + !!receiver?.$view + ' reg2Native=' + (registers[2]?.$nativeClass) + ' reg2View=' + !!registers[2]?.$view);
-            if (globalThis.__DBG_CD && String(ref.classDesc||'')==='Lru/andr7e/deviceinfohw/l/c$d;' && String(ref.name)==='<init>') console.error('CD_INIT arg=' + (receiver? 'ok':'null') + ' viewArg=' + (args2[0] ? JSON.stringify({t:typeof args2[0], keys: Object.keys(args2[0]).slice(0,8), cls: args2[0].$nativeClass, dex: args2[0].$dexClass?.descriptor, hasViewProp: 'view' in args2[0], $view: !!args2[0].$view}) : String(args2[0])));
-            if (globalThis.__DBG_INIT && String(ref.classDesc||'').includes('RecyclerView$d0')) console.error('D0_INIT recv=' + (receiver?.$descriptor||typeof receiver) + ' arg0=' + (args2[0]?.$descriptor||typeof args2[0]||args2[0]?.id));
-            if (globalThis.__DBG_INIT && String(ref.classDesc||'').includes('deviceinfohw') && String(ref.name||'').includes('<init>')) console.error('INIT_CALL', ref.classDesc, ref.name, 'recv=' + (receiver===null?'null':(receiver?.$descriptor||typeof receiver)), 'arg0=' + (args2[0]?.$descriptor || typeof args2[0]));
             this.stats.invokes++;
             try {
               if (DBG.npe && ref.name === 'longValue') console.error('INVOKE-longValue recv=' + (receiver === null ? 'NULL' : typeof receiver) + ' at ' + method.classDesc + '.' + method.name + ' pc=' + pc);
-              if (globalThis.__DBG_PC && method.classDesc === 'Lcom/google/android/material/tabs/TabLayout;' && method.name === 'onMeasure' && op === 0x6f) console.error('TL_SUPER_CALL ref=' + ref.classDesc + '.' + ref.name + ' mode=' + mode + ' recv=' + (receiver===null?'null':typeof receiver));
               this.vm.pendingResult = this.vm.invoke(ref, receiver, args2, mode, method);
 
             } catch (error) {

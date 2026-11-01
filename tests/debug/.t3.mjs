@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+const eng=new EmulatorEngine({onLog:()=>{},width:360,height:720});
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync('/tmp/devinfo.apk')));
+await eng.start(apk);
+const cls = eng.vm.registry.resolve('Lb/g/k/d;').dexClass;
+console.log(Object.keys(cls));
+console.log('methods sample', cls.methods?.slice(0,3)?.map(m=>({n:m.name,p:m.proto,acc:m.accessFlags,code:!!m.code})));
+const a = cls.methods?.find(m=>m.name==='a'&&m.proto?.descriptor==='(II)I');
+console.log('a found', !!a, a && {acc:a.accessFlags, code:!!a.code});

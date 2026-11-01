@@ -1,0 +1,15 @@
+process.on('uncaughtException', () => {});
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+const { loadApkFiles, EmulatorEngine } = await import('./src/framework/engine.js');
+const zip = await JSZip.loadAsync(fs.readFileSync('/tmp/devinfo.apk'));
+const apk = await loadApkFiles(zip);
+const engine = new EmulatorEngine({ onLog: () => {} });
+await engine.start(apk);
+const vm = engine.vm;
+const store = vm.$sharedPrefs?.get('com.voze.devinfo_preferences') || vm.$sharedPrefs?.get((vm.packageName||'app') + '_preferences');
+console.log('package:', vm.packageName);
+if (store) for (const [k, v] of store) console.log(' ', k, '=', JSON.stringify(v));
+else console.log('no store', [...(vm.$sharedPrefs?.keys() || [])]);

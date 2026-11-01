@@ -187,6 +187,7 @@ function autoInitDemo() {
     statusEl.textContent = text;
     statusEl.dataset.kind = kind;
   };
+  const markBusy = (text) => setStatus(text, 'busy');
 
   const appendLog = (entry) => {
     if (!logEl) return;
@@ -209,7 +210,7 @@ function autoInitDemo() {
 
   const loadApk = async (file) => {
     if (!file) return;
-    setStatus('正在解压 APK…', 'info');
+    markBusy('正在解压 APK…');
     try {
       await simulator.loadFromFile(file);
       setStatus(`运行中：${simulator.vm?.packageName || '未知包名'}`, 'ok');
@@ -223,6 +224,13 @@ function autoInitDemo() {
   };
 
   pickBtn?.addEventListener('click', () => fileInput?.click());
+  dropZone?.addEventListener('click', () => fileInput?.click());
+  dropZone?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      fileInput?.click();
+    }
+  });
   fileInput?.addEventListener('change', (event) => {
     const file = event.target.files?.[0];
     if (file) loadApk(file);

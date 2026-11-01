@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+import { JavaVM } from './src/runtime/vm.js';
+const ctx=new Proxy({measureText:t=>({width:8}),createLinearGradient:()=>({addColorStop(){}}),createRadialGradient:()=>({addColorStop(){}}),getLineDash:()=>[]},{get(t,p){return p in t?t[p]:()=>{}},set(t,p,v){t[p]=v;return true}});
+const canvas={clientWidth:360,clientHeight:720,width:360,height:720,style:{},getContext:()=>ctx,addEventListener(){},removeEventListener(){},setPointerCapture(){},getBoundingClientRect(){return{left:0,top:0,width:360,height:720}}};
+globalThis.requestAnimationFrame=(cb)=>setTimeout(()=>cb(Date.now()),16);
+const ov=JavaVM.prototype.invoke; let n=0;
+JavaVM.prototype.invoke=function(ref,recv,args,mode,cm){
+  if(ref&&ref.name==='next'&&String(ref.classDesc).includes('XmlPullParser')){ if(n++<3){ console.log('NEXT recv=', recv? (recv.$descriptor||recv.$nativeClass||Object.keys(recv).slice(0,5).join(',')) : 'NULL'); console.log('  from', (this.methodStack||[]).slice(-8).join(' <- ')); } }
+  return ov.call(this,ref,recv,args,mode,cm);
+};
+const eng=new EmulatorEngine({onLog:()=>{},width:360,height:720,maxFrames:200});eng.attachCanvas(canvas);
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(process.argv[2])));
+try{await eng.start(apk);}catch(e){console.log('ERR',e.message);}
+console.log('DONE');

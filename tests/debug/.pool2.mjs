@@ -1,0 +1,10 @@
+import fs from 'fs';
+import { createRequire } from 'module';
+const require=createRequire(import.meta.url);
+const JSZip=require('jszip');
+const zip=await JSZip.loadAsync(fs.readFileSync('/tmp/devinfo.apk'));
+const buf=await zip.file('res/color/mtrl_tabs_colored_ripple_color.xml').async('nodebuffer');
+const { parseBinaryXml } = await import('./src/res/axml.js');
+const x=parseBinaryXml(buf);
+console.log('TOP KEYS', Object.keys(x));
+console.log('STRINGS', JSON.stringify(x.strings||x.pool?.strings));

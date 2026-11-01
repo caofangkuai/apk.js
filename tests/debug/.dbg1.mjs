@@ -1,0 +1,24 @@
+process.on('uncaughtException', (e) => console.log('UNCAUGHT', e.message));
+globalThis.__DBG_BA2 = true;
+globalThis.__DBG_SH = true;
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+import Canvas from 'canvas';
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+const W=720,H=1520;
+const canvas=Canvas.createCanvas(W,H);
+canvas.style={};canvas.clientWidth=W;canvas.clientHeight=H;
+canvas.addEventListener=()=>{};canvas.removeEventListener=()=>{};canvas.setPointerCapture=()=>{};
+canvas.getBoundingClientRect=()=>({left:0,top:0,width:W,height:H});
+const eng=new EmulatorEngine({onLog:()=>{},width:W,height:H,density:2});eng.attachCanvas(canvas);
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(process.argv[2])));
+console.log('vm before start:', !!eng.vm);
+try{await eng.start(apk);}catch(e){console.log('S',e.message);}
+console.log('vm after start:', !!eng.vm, 'screen:', !!eng.screen, 'decor:', !!eng.screen?.decorView);
+await new Promise(r=>setTimeout(r,300));
+console.log('decor2:', !!eng.screen?.decorView);
+const st = eng.vm._invokeStats || new Map();
+const hits = [...st.entries()].filter(([k]) => k.includes('deviceinfohw'));
+for (const [k,v] of hits.sort((a,b)=>b[1]-a[1]).slice(0,25)) console.log('CALL', v, k);

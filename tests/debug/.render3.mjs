@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+const { createCanvas } = require('canvas');
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+const W=360,H=720; const c=createCanvas(W,H); const real=c.getContext('2d');
+const proxy=new Proxy(real,{get(t,p){const v=t[p]; return typeof v==='function'?v.bind(t):v;},set(t,p,v){t[p]=v;return true;}});
+const g=Object.create(proxy); for(const k of ['measureText','fillRect','fillText','clearRect','save','restore','translate','scale','beginPath','moveTo','lineTo','stroke','fill','rect','arc','closePath','clip','setTransform','drawImage','createLinearGradient','createRadialGradient','setLineDash','getLineDash','strokeRect','ellipse','quadraticCurveTo','bezierCurveTo','fillStyle','strokeStyle','font','textBaseline','textAlign','globalAlpha','lineWidth','shadowColor','shadowBlur']) if(!(k in g)) g[k]=real[k];
+const canvas={clientWidth:W,clientHeight:H,width:W,height:H,style:{},getContext:()=>real,addEventListener(){},removeEventListener(){},setPointerCapture(){},getBoundingClientRect(){return{left:0,top:0,width:W,height:H}}};
+globalThis.requestAnimationFrame=(cb)=>setTimeout(()=>cb(Date.now()),16);
+const eng=new EmulatorEngine({onLog:()=>{},width:W,height:H});eng.attachCanvas(canvas);
+if(eng.setSurfaceContext) eng.setSurfaceContext?.(real);
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(process.argv[2])));
+try{await eng.start(apk);}catch(e){console.error('start err',e.message);}
+await new Promise(r=>setTimeout(r,300));
+eng.screen?.render?.(); eng.invalidate?.();
+await new Promise(r=>setTimeout(r,100));
+fs.writeFileSync('/tmp/render3.png', c.toBuffer('image/png'));
+console.log('wrote /tmp/render3.png', fs.statSync('/tmp/render3.png').size);

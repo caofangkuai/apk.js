@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+const { parseBinaryXml } = await import('./src/res/axml.js');
+const zip = await JSZip.loadAsync(fs.readFileSync('/tmp/devinfo.apk'));
+const buf = await zip.file('res/xml/pref_main.xml').async('nodebuffer');
+const doc = parseBinaryXml(buf);
+const root = doc.root?.children?.[0] ?? doc.root;
+const cat = root.children[0];
+const sp = cat.children[0];
+console.log('attrs type', Array.isArray(sp.attrs), sp.attrs && Object.keys(sp.attrs));
+console.log(JSON.stringify(sp.attrs));

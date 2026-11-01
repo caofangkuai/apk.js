@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+import Canvas from 'canvas';
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+const W=720,H=1520;
+const canvas=Canvas.createCanvas(W,H);
+canvas.style={};canvas.clientWidth=W;canvas.clientHeight=H;
+canvas.addEventListener=()=>{};canvas.removeEventListener=()=>{};canvas.setPointerCapture=()=>{};
+canvas.getBoundingClientRect=()=>({left:0,top:0,width:W,height:H});
+const eng=new EmulatorEngine({onLog:()=>{},width:W,height:H,density:2});eng.attachCanvas(canvas);
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(process.argv[2])));
+try{await eng.start(apk);}catch(e){console.log('START',e.message);}
+await new Promise(r=>setTimeout(r,300));
+const vm=eng.vm;
+const am=vm.resources.getAssets();
+console.log('assets', am && Object.keys(am).slice(0,6));
+console.log('readBytes typeof', typeof am.readBytes);
+console.log('readBytes test', am.readBytes('x')?.length);
+const { registry } = { registry: vm.registry };
+console.log('asset peer?', !!vm.registry.getPeer(am,'Landroid/content/res/AssetManager;'));

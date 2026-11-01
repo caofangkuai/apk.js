@@ -77,7 +77,7 @@ class ToastOverlay {
     const textSize = 14;
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, this.alpha)) * 0.9;
-    ctx.font = `500 ${textSize}px sans-serif`;
+    ctx.font = `500 ${textSize}px 'Noto Sans CJK SC'`;
     const metrics = ctx.measureText(this.text);
     const paddingX = 20;
     const paddingY = 12;

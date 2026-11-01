@@ -184,6 +184,16 @@
 dbg*.tmp.mjs
 *.tmp.mjs
 
-# Webpack artifacts (committed)
-!dist/
-!dist/*.min.js
+# Debug artifacts
+image-debug/*.tmp.png
+tests/debug/node_modules/
+
+# VitePress build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# Webpack artifacts (built by CI)
+dist/
+
+# Site build output (built by CI)
+site/

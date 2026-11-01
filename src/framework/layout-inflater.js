@@ -14,7 +14,7 @@ import {
   ScrollView,
   TextView,
 } from './widgets.js';
-import { ActionBarContainer, ActionBarOverlayLayout, Toolbar, ViewStub } from './layouts.js';
+import { ActionBarContainer, ActionBarOverlayLayout, CoordinatorLayout, DrawerLayout, TableLayout, TableRow, Toolbar, SimpleFrameHost, ViewPagerHost, ViewStub, TabLayoutHost } from './layouts.js';
 import {
   FrameLayout,
   LinearLayout,
@@ -59,7 +59,14 @@ function inferViewBase(fullName) {
   if (/FrameLayout$/.test(name)) return FrameLayout;
   if (/ContentFrameLayout$/.test(name)) return FrameLayout;
   if (/Toolbar$/.test(name)) return Toolbar;
-  if (/(DrawerLayout|CoordinatorLayout|NestedScrollView|CollapsingToolbarLayout|TabLayout|ViewPager|SwipeRefreshLayout|NavigationMenuView|TableLayout|TableRow)$/.test(name)) {
+  if (/TableRow$/.test(name)) return TableRow;
+  if (/TableLayout$/.test(name)) return TableLayout;
+  if (/DrawerLayout$/.test(name)) return DrawerLayout;
+  if (/CoordinatorLayout$/.test(name)) return CoordinatorLayout;
+  if (/ViewPager$/.test(name)) return ViewPagerHost;
+  if (/(NestedScrollView|SwipeRefreshLayout)$/.test(name)) return SimpleFrameHost;
+  if (/TabLayout$/.test(name)) return TabLayoutHost;
+  if (/(CollapsingToolbarLayout|NavigationMenuView|NavigationView)$/.test(name)) {
     return FrameLayout;
   }
   if (/HorizontalScrollView$/.test(name)) {
@@ -74,7 +81,7 @@ function inferViewBase(fullName) {
   if (/ScrollView$/.test(name)) return ScrollView;
   if (/ProgressBar$/.test(name)) return ProgressBar;
   if (/TextView$/.test(name)) return TextView;
-  return View;
+  return null;
 }
 
 export class LayoutInflater {
@@ -154,7 +161,7 @@ export class LayoutInflater {
     }
     const ctor = RESOLVED_CLASSES[fullName] || RESOLVED_CLASSES[tag] || VIEW_CLASSES[tag];
     if (!ctor) {
-      const base = this.baseFromDexSuperclass(fullName) || inferViewBase(fullName);
+      const base = inferViewBase(fullName) || this.baseFromDexSuperclass(fullName) || View;
       const fallback = new base(this.context);
       fallback.$unknownTag = fullName;
       fallback.$descriptor = `L${fullName.replace(/\./g, '/')};`;
@@ -381,6 +388,30 @@ export class LayoutInflater {
     const enabledAttr = get(ATTR_IDS.enabled);
     if (enabledAttr) view.enabled = Boolean(enabledAttr.value);
 
+    if (view instanceof TabLayoutHost) {
+      const toColor = (attr) => {
+        if (!attr) return null;
+        const value = resolveAttrValue(attr, resources);
+        if (typeof value === 'number') return value >>> 0;
+        if (typeof value === 'string') return parseColorString(value);
+        return null;
+      };
+      const tabBg = getByName('tabBackground');
+      if (tabBg) view.$tabBackground = toColor(tabBg);
+      const indicator = getByName('tabIndicatorColor');
+      if (indicator) view.$tabIndicatorColor = toColor(indicator);
+      const selected = getByName('tabSelectedTextColor');
+      if (selected) view.$tabSelectedTextColor = toColor(selected);
+      const unselected = getByName('tabTextColor');
+      if (unselected) view.$tabTextColor = toColor(unselected);
+      const tabMode = getByName('tabMode');
+      if (tabMode) view.$tabMode = Number(tabMode.value) | 0;
+      const tabGravity = getByName('tabGravity');
+      if (tabGravity) view.$tabGravity = Number(tabGravity.value) | 0;
+      const indicatorHeight = getByName('tabIndicatorHeight');
+      if (indicatorHeight) view.$tabIndicatorHeight = resolveDimensionAttr(indicatorHeight, resources, density);
+    }
+
     if (view instanceof LinearLayout) {
       const orientationAttr = get(ATTR_IDS.orientation);
       if (orientationAttr) view.orientation = Number(orientationAttr.value) | 0;
@@ -453,7 +484,7 @@ function toLayoutSize(attr, resources, density) {
     const key = entry?.key || attr.name;
     const themeValue = key ? themeAttrs[key] : undefined;
     if (themeValue !== undefined && themeValue !== null) {
-      if (typeof themeValue === 'number') return Math.round(themeValue);
+      if (typeof themeValue === 'number') return Math.round(themeValue > 0 && themeValue <= 168 ? themeValue * density : themeValue);
       if (typeof themeValue === 'object' && themeValue.dimension !== undefined) {
         return Math.round(convertDimension(themeValue, density));
       }

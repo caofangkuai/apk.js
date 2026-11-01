@@ -206,6 +206,8 @@ export class ClassRegistry {
         cursor = receiver.$dexClass.superclass;
       } else if (def) {
         cursor = def.superDescriptor;
+      } else if (descriptor) {
+        cursor = this.resolve(descriptor)?.superDescriptor || null;
       }
       while (cursor) {
         const candidate = this.nativeDefs.get(cursor);
@@ -216,6 +218,7 @@ export class ClassRegistry {
         const rc = this.resolve(cursor);
         cursor = rc?.superDescriptor || null;
       }
+      if (globalThis.GPB_DBG) console.error('GPB-FAIL desc=' + descriptor + ' sup=' + (receiver.$dexClass?.superclass || def?.superDescriptor));
       return receiver;
     }
     if (!receiver.$nativeClass && receiver.$runtimeClass?.descriptor) {

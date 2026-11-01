@@ -6,7 +6,7 @@ export class Paint {
     this.strokeWidth = 1;
     this.style = 'fill';
     this.textAlign = 'left';
-    this.typeface = 'sans-serif';
+    this.typeface = 'Noto Sans CJK SC';
     this.letterSpacing = 0;
   }
 
@@ -345,7 +345,7 @@ export function blendColor(base, overlay, alpha = 1) {
   return (((Math.round(outA * 255) & 0xff) << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)) >>> 0;
 }
 
-export function measureTextWidth(text, textSize, typeface = 'sans-serif') {
+export function measureTextWidth(text, textSize, typeface = 'Noto Sans CJK SC') {
   if (!text) return 0;
   let width = 0;
   for (const char of text) {
@@ -361,7 +361,7 @@ export function measureTextWidth(text, textSize, typeface = 'sans-serif') {
   return width;
 }
 
-export function wrapText(text, textSize, maxWidth, typeface = 'sans-serif') {
+export function wrapText(text, textSize, maxWidth, typeface = 'Noto Sans CJK SC') {
   const lines = [];
   for (const paragraph of String(text ?? '').split('\n')) {
     if (!paragraph) {
@@ -391,7 +391,7 @@ function applyPaint(ctx, paint) {
   ctx.fillStyle = cssColor(p.color);
   ctx.strokeStyle = cssColor(p.color);
   ctx.lineWidth = p.strokeWidth || 1;
-  ctx.font = `${p.fontWeight || 'normal'} ${p.textSize}px ${p.typeface || 'sans-serif'}`;
+  ctx.font = `${p.fontWeight || 'normal'} ${p.textSize}px ${p.typeface || 'Noto Sans CJK SC'}`;
   ctx.textAlign = p.textAlign || 'left';
   ctx.globalAlpha = p.alpha ?? 1;
   if (p.letterSpacing) ctx.letterSpacing = `${p.letterSpacing}px`;

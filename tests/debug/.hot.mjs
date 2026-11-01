@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const JSZip = require('jszip');
+import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+const ctx=new Proxy({measureText:t=>({width:8}),createLinearGradient:()=>({addColorStop(){}}),createRadialGradient:()=>({addColorStop(){}}),getLineDash:()=>[]},{get(t,p){return p in t?t[p]:()=>{}},set(t,p,v){t[p]=v;return true}});
+const canvas={clientWidth:360,clientHeight:720,width:360,height:720,style:{},getContext:()=>ctx,addEventListener(){},removeEventListener(){},setPointerCapture(){},getBoundingClientRect(){return{left:0,top:0,width:360,height:720}}};
+globalThis.requestAnimationFrame=(cb)=>setTimeout(()=>cb(Date.now()),16);
+const eng=new EmulatorEngine({onLog:()=>{},width:360,height:720});eng.attachCanvas(canvas);
+const apk=await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(process.argv[2])));
+try{await eng.start(apk);}catch(e){ console.log('STOP:', e.message); 
+  const vm=eng.vm; const stats=[...(vm._invokeStats||[])].sort((a,b)=>b[1]-a[1]).slice(0,12);
+  stats.forEach(([k,c])=>console.log('  ',c,k));
+  console.log('stack tail=', (vm.methodStack||[]).slice(-10).join(' <- '));
+}

@@ -19,6 +19,8 @@ export const MeasureSpec = {
   },
 };
 
+export let measureDepth = 0;
+
 export const VISIBILITY = { VISIBLE: 0, INVISIBLE: 4, GONE: 8 };
 export const GONE_VALUES = new Set([2, 8]);
 
@@ -42,6 +44,14 @@ export const HORIZONTAL = 0;
 export const VERTICAL = 1;
 
 export class View {
+  getDensity() {
+    if (this.$density) return this.$density;
+    const vm = this.vm || this.$vm;
+    const d = vm?.resources?.density;
+    if (typeof d === 'number' && d > 0) return d;
+    return 1;
+  }
+
   constructor(context = null) {
     this.vm = context?.vm || context?.$vm || null;
     this.context = context;
@@ -370,6 +380,10 @@ export class View {
     if (root && root.$scheduleLayout) root.$scheduleLayout();
     else this.invalidate();
     return this;
+  }
+
+  isLayoutRequested() {
+    return !!this.$layoutRequested;
   }
 
   invalidate() {
@@ -838,6 +852,8 @@ export class View {
   getWindowToken() {
     let node = this;
     while (node.parent) node = node.parent;
+    const attached = node.attachedToWindow === true || node.__isScreenRoot === true || node.__windowAttached === true;
+    if (!attached) return null;
     if (!node.windowToken) {
       node.windowToken = { $descriptor: 'Landroid/os/IBinder;' };
     }
@@ -916,6 +932,11 @@ export class View {
   }
 
   findViewById(id) {
+    if (globalThis.__DBG_FVID) {
+      const ids=[]; const walk=(v)=>{ if(v.id!==undefined&&v.id!==null) ids.push((v.id>>>0).toString(16)+':'+(v.$descriptor||v.constructor?.name)); for(const c of v.children||[]) walk(c); };
+      walk(this);
+      console.error('FVID req=0x'+(id>>>0).toString(16)+' root='+(this.$descriptor||this.constructor?.name)+' ids='+ids.slice(0,20).join(','));
+    }
     if (this.id === id) return this;
     for (const child of this.children) {
       const found = child.findViewById(id);
@@ -925,7 +946,96 @@ export class View {
   }
 
   measure(widthSpec, heightSpec) {
-    this.onMeasure(widthSpec, heightSpec);
+    if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) { try { console.error('RVT enter depth=' + measureDepth + ' h=' + ((heightSpec>>>30)&3) + ':' + (heightSpec&0x3fffffff) + ' meash=' + this.measuredHeight + ' kids=' + this.children.length); } catch {} }
+    measureDepth++;
+    try {
+      if (this.measureWithDex(widthSpec, heightSpec)) { if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) console.error('RVT dex-ok meash=' + this.measuredHeight + ' kids=' + this.children.length); return; }
+      this.onMeasure(widthSpec, heightSpec);
+      if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) console.error('RVT host-fallback meash=' + this.measuredHeight + ' kids=' + this.children.length);
+    } finally {
+      measureDepth--;
+    }
+  }
+
+  measureWithDex(widthSpec, heightSpec) {
+    const vm = this.vm || this.$vm;
+    const object = this.$javaObject;
+    const descriptor = this.$descriptor;
+    if (globalThis.__RVL && /\/RecyclerView;$/.test(descriptor || '')) { console.error('RVL top=' + this.top + ' scrollY=' + this.scrollY + ' kids=' + this.children.length + ' ' + this.children.map(c=>c.top).join(',')); }
+    if (!vm || !object || !descriptor || typeof vm.findVirtual !== 'function') return false;
+    if (this.$preferHostMeasure) return false;
+    if (this.$jsMeasureHandled) return false;
+    let resolved;
+    try {
+      resolved = vm.findVirtual(descriptor, 'onMeasure', '(II)V');
+    } catch (e) {
+      return false;
+    }
+
+    if (!resolved || resolved.kind !== 'dex') return false;
+    const ref = resolved.method;
+    if (globalThis.__MS4 && /recyclerview/.test(descriptor)) {
+      const sm=(x)=>['U','E','A'][(x>>>30)&3]+':'+(x&0x3fffffff);
+      console.error('MSPEC ' + descriptor + ' w=' + sm(widthSpec) + ' h=' + sm(heightSpec) + ' lpH=' + (this.layoutParams&&this.layoutParams.height));
+    }
+    this.$jsMeasureHandled = true;
+    if (globalThis.__DBG_MS && /tabs\/TabLayout/.test(descriptor)) { const sm=(x)=>[(x>>>30)&3,(x&0x3fffffff)]; console.error('TL_DEX_MEASURE kind=' + resolved.kind + ' h=' + JSON.stringify(sm(heightSpec))); }
+    try {
+      vm.invoke(
+        { classDesc: descriptor, name: 'onMeasure', proto: ref.proto },
+        object,
+        [widthSpec, heightSpec],
+        'virtual'
+      );
+      if (globalThis.__DBG_RV && /\/RecyclerView;$/.test(descriptor)) console.error('RVFB meash=' + this.measuredHeight + ' kids=' + this.children.length);
+      if (/\/RecyclerView;$/.test(descriptor) && this.measuredHeight === 0 && this.children.length > 0) {
+        let maxBottom = 0;
+        for (const child of this.children) {
+          if (child.visibility === 8) continue;
+          maxBottom = Math.max(maxBottom, child.bottom || 0, (child.top || 0) + (child.getMeasuredHeight ? child.getMeasuredHeight() : (child.measuredHeight || 0)));
+        }
+        if (maxBottom > 0) {
+          const hMode = (heightSpec >>> 30) & 3;
+          let h = maxBottom + this.paddingTop + this.paddingBottom;
+          if (hMode === 2) h = Math.min(h, heightSpec & 0x3fffffff);
+          this.setMeasuredDimension(this.measuredWidth || MeasureSpec.getSize(widthSpec), h);
+          if (globalThis.__DBG_RV) console.error('RVFB set h=' + h + ' maxBottom=' + maxBottom);
+        }
+      }
+      if (/com\.google\.android\.material\.tabs\.TabLayout;$/.test(descriptor) && (this.measuredHeight === 0 || this.measuredWidth === 0)) {
+        const wMode = (widthSpec >>> 30) & 3;
+        const hMode = (heightSpec >>> 30) & 3;
+        const defW = MeasureSpec.getSize(widthSpec) || 360;
+        const density = this.$density || this.resources?.getDisplayMetrics?.()?.density || 1;
+        const defH = Math.round(48 * density);
+        const childrenH = (() => {
+          let m = 0;
+          const content = this.children[0];
+          if (content) for (const tab of content.children || []) m = Math.max(m, (tab.getMeasuredHeight ? tab.getMeasuredHeight() : tab.measuredHeight) || 0);
+          return m;
+        })();
+        const h = childrenH > 0 ? Math.max(childrenH + Math.round(16 * density), defH) : defH;
+        this.setMeasuredDimension(
+          wMode === 2 ? (widthSpec & 0x3fffffff) : Math.min(defW, widthSpec & 0x3fffffff),
+          hMode === 2 ? (heightSpec & 0x3fffffff) : h
+        );
+      }
+      if (/androidx\/appcompat\/widget\/Toolbar;/.test(descriptor) && this.measuredHeight === 0) {
+        const lpHeight = this.layoutParams?.height;
+        const fallback = lpHeight > 0 ? lpHeight : (this.getMinimumHeight?.() || 0);
+        if (fallback > 0) {
+          this.setMeasuredDimension(this.measuredWidth || MeasureSpec.getSize(widthSpec), fallback);
+        }
+      }
+      return true;
+    } catch (e) {
+      if (/RecyclerView;$/.test(descriptor)) console.error('RVMEASURE_ERR ' + String(e && (e.stack || e.message || e)).split('\n').slice(0,10).join('\n   '));
+      if (/TabLayout;$/.test(descriptor)) console.error('TLMEASURE_ERR ' + String(e && (e.stack || e.message || e)).split('\n').slice(0,6).join(' | '));
+      if (globalThis.__DBG_ARG) console.error('MEASURE_ERR', descriptor, String(e.message).slice(0,80));
+      return false;
+    } finally {
+      this.$jsMeasureHandled = false;
+    }
   }
 
   onMeasure(widthSpec, heightSpec) {
@@ -952,8 +1062,10 @@ export class View {
   }
 
   setMeasuredDimension(width, height) {
-    this.measuredWidth = width;
-    this.measuredHeight = height;
+    if (globalThis.__DBG_ARG && /ContentFrameLayout|FitWindows|CoordinatorLayout/.test(this.$descriptor||'')) console.error('SMD', this.$descriptor, 'w=' + width, 'h=' + height);
+    const MEASURED_SIZE_MASK = 0x00ffffff;
+    this.measuredWidth = width & MEASURED_SIZE_MASK;
+    this.measuredHeight = height & MEASURED_SIZE_MASK;
     this.measuredWidthState = width;
     this.measuredHeightState = height;
   }
@@ -964,15 +1076,71 @@ export class View {
     this.top = top;
     this.right = right;
     this.bottom = bottom;
+    if (this.layoutWithDex(changed, left, top, right, bottom)) return;
     this.onLayout(changed, left, top, right, bottom);
+  }
+
+  layoutWithDex(changed, left, top, right, bottom) {
+    const vm = this.vm || this.$vm;
+    const object = this.$javaObject;
+    const descriptor = this.$descriptor;
+    if (!vm || !object || !descriptor || typeof vm.findVirtual !== 'function') return false;
+    if (this.$preferHostLayout) return false;
+    if (this.$jsLayoutHandled) return false;
+    let resolved;
+    try {
+      resolved = vm.findVirtual(descriptor, 'onLayout', '(ZIIII)V');
+    } catch {
+      return false;
+    }
+
+    if (!resolved || resolved.kind !== 'dex') return false;
+    const ref = resolved.method;
+    this.$jsLayoutHandled = true;
+    if (globalThis.__DBG_MS && /tabs\/TabLayout/.test(descriptor)) { const sm=(x)=>[(x>>>30)&3,(x&0x3fffffff)]; console.error('TL_MEASURE spec=' + JSON.stringify(sm(heightSpec)) + ' wspec=' + JSON.stringify(sm(widthSpec))); }
+    try {
+      for (const child of this.children) child.$relayoutBase = { left: child.left, top: child.top };
+      vm.invoke(
+        { classDesc: descriptor, name: 'onLayout', proto: ref.proto },
+        object,
+        [changed ? 1 : 0, left, top, right, bottom],
+        'virtual'
+      );
+      if (left !== 0 || top !== 0) {
+        const prev = this.$dexAbsOffset || { dx: 0, dy: 0 };
+        const dx = left - prev.dx;
+        const dy = top - prev.dy;
+        this.$dexAbsOffset = { dx: left, dy: top };
+        if (dx !== 0 || dy !== 0) {
+          const shiftTree = (node, sx, sy) => {
+            node.left += sx;
+            node.right += sx;
+            node.top += sy;
+            node.bottom += sy;
+            for (const g of node.children || []) shiftTree(g, sx, sy);
+          };
+          for (const child of this.children) shiftTree(child, dx, dy);
+        }
+      }
+      for (const child of this.children) delete child.$relayoutBase;
+      return true;
+    } catch (e) {
+      if (globalThis.__DBG_ARG) console.error('LAYOUT_ERR', descriptor, String(e.message).slice(0,100));
+      return false;
+    } finally {
+      this.$jsLayoutHandled = false;
+    }
   }
 
   onLayout(changed, left, top, right, bottom) {}
 
   draw(canvas) {
     if (this.visibility !== VISIBILITY.VISIBLE) return;
+    const parent = this.parent;
+    const offsetX = this.left - (parent ? parent.left : 0);
+    const offsetY = this.top - (parent ? parent.top : 0);
     canvas.save();
-    canvas.translate(this.left + this.translationX, this.top + this.translationY);
+    canvas.translate(offsetX + this.translationX, offsetY + this.translationY);
     const alpha = this.alpha;
     if (alpha < 1) canvas.context.globalAlpha = alpha;
     this.drawBackground(canvas);
@@ -1221,6 +1389,20 @@ export class ViewGroup extends View {
       const childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, params.height);
       child.measure(childWidthSpec, childHeightSpec);
     }
+  }
+
+  measureChildWithMargins(child, widthSpec, widthUsed, heightSpec, heightUsed) {
+    if (!child || child.visibility === VISIBILITY.GONE) return;
+    const params = child.layoutParams || { width: -2, height: -2 };
+    const ml = params.leftMargin || 0;
+    const mr = params.rightMargin || 0;
+    const mt = params.topMargin || 0;
+    const mb = params.bottomMargin || 0;
+    const widthPadding = this.paddingLeft + this.paddingRight + ml + mr;
+    const heightPadding = this.paddingTop + this.paddingBottom + mt + mb;
+    const childWidthSpec = getChildMeasureSpec(widthSpec, widthPadding, params.width);
+    const childHeightSpec = getChildMeasureSpec(heightSpec, heightPadding, params.height);
+    child.measure(childWidthSpec, childHeightSpec);
   }
 
   dispatchDraw(canvas) {

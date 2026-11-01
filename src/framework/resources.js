@@ -15,6 +15,19 @@ const ANDROID_FRAMEWORK_COLORS = new Map([
   [0x0106007b, 0xff333333], [0x0106007c, 0xff222222], [0x0106007d, 0xff111111],
 ]);
 
+const STATE_ATTR_IDS = {
+  state_selected: 0x010100a1,
+  state_pressed: 0x010100a7,
+  state_focused: 0x0101009c,
+  state_enabled: 0x0101009e,
+  state_hovered: 0x01010367,
+  state_activated: 0x010102fe,
+  state_checked: 0x010100a0,
+  state_accelerated: 0x0101031e,
+  state_above_anchor: 0x010102c0,
+  state_accessibility_focused: 0x0101036e,
+};
+
 export class AssetManager {
   constructor(apk) {
     this.apk = apk;
@@ -59,21 +72,33 @@ export class Resources {
     this.apk = apk;
     this.vm = vm;
     this.table = apk.resourceTable;
-    this.density = 1;
-    this.displayMetrics = { widthPixels: 360, heightPixels: 640, density: 1, densityDpi: 160, scaledDensity: 1 };
+    const initDensity = vm?.engine?.options?.density ?? apk?.density ?? 1;
+    const initW = vm?.engine?.options?.width ?? 360;
+    const initH = vm?.engine?.options?.height ?? 640;
+    this.density = initDensity;
+    this.displayMetrics = {
+      widthPixels: initW,
+      heightPixels: initH,
+      density: initDensity,
+      densityDpi: Math.round(initDensity * 160),
+      scaledDensity: initDensity,
+    };
     this.cache = new Map();
     this.bitmapCache = new Map();
     this._assetManager = new AssetManager(apk);
+    if (this.table && typeof this.table.setConfig === 'function') {
+      this.table.setConfig('zh-CN', initDensity);
+    }
     this._config = {
       orientation: 1,
       locale: 'zh-CN',
       uiMode: 0x11,
       fontScale: 1,
       screenLayout: 0x02,
-      screenWidthDp: 360,
-      screenHeightDp: 640,
-      smallestScreenWidthDp: 360,
-      densityDpi: 160,
+      screenWidthDp: Math.round(initW / initDensity),
+      screenHeightDp: Math.round(initH / initDensity),
+      smallestScreenWidthDp: Math.round(Math.min(initW, initH) / initDensity),
+      densityDpi: Math.round(initDensity * 160),
       touchscreen: 3,
       keyboard: 1,
       keyboardHidden: 1,
@@ -228,6 +253,53 @@ export class Resources {
 
   getResourcePackageName() {
     return this.apk.packageName;
+  }
+
+  getColorStateList(resId) {
+    const value = this.resolve(resId >>> 0);
+    if (typeof value === 'number') {
+      const color = value >>> 0;
+      return { states: [[]], colors: [color], color };
+    }
+    if (typeof value !== 'string' || !value.endsWith('.xml')) return null;
+    const xml = this.apk.xmlCache.get(value) || parseBinaryXml(this.apk.zipEntry(value));
+    this.apk.xmlCache.set(value, xml);
+    const root = xml.root.children.find((c) => c.type === 'element');
+    if (!root || root.name !== 'selector') return null;
+    const states = [];
+    const colors = [];
+    for (const item of root.children || []) {
+      if (item.type !== 'element' || item.name !== 'item') continue;
+      const stateSet = [];
+      let color = 0;
+      let alpha = 1;
+      for (const attr of item.attrs || []) {
+        const name = attr.name;
+        if (name === 'color') {
+          const raw = attr.value;
+          if (typeof raw === 'number') color = raw >>> 0;
+          else if (raw && typeof raw === 'object' && raw.reference !== undefined) {
+            const resolved = this.resolve(raw.reference >>> 0);
+            if (typeof resolved === 'number') color = resolved >>> 0;
+            else if (typeof resolved === 'string') color = parseColorString(resolved) ?? 0;
+          }
+        } else if (name === 'alpha') {
+          alpha = Number(attr.value) || 0;
+        } else if (name.startsWith('state_')) {
+          const id = STATE_ATTR_IDS[name];
+          if (id !== undefined && attr.value === true) stateSet.push(id);
+          else if (id !== undefined && attr.value === false) stateSet.push(-id);
+        }
+      }
+      if (alpha < 1) {
+        const a = Math.round(((color >>> 24) & 0xff) * alpha);
+        color = (((a & 0xff) << 24) | (color & 0x00ffffff)) >>> 0;
+      }
+      states.push(stateSet);
+      colors.push(color);
+    }
+    if (!states.length) return null;
+    return { states, colors, color: colors[colors.length - 1] };
   }
 
   openRawResource(resId) {

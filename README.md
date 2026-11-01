@@ -1,51 +1,55 @@
 # apk.js
 
-在浏览器里直接运行 Android APK 的纯 JavaScript 模拟器。
+**English** | [简体中文](./README.zh-CN.md)
 
-解析 APK 中的 `classes.dex`、`AndroidManifest.xml`、`resources.arsc`，用 DEX 字节码解释器执行应用逻辑，再用 Canvas 版 Android Framework 子集把界面画出来。整个过程不依赖 Android 设备、模拟器或原生库。
+[Docs](https://caofangkuai.github.io/apk.js/) · [Playground](https://caofangkuai.github.io/apk.js/playground.html)
 
-## 特性
+Run Android APKs in the browser with plain JavaScript. apk.js parses `classes.dex`, `AndroidManifest.xml` and `resources.arsc` straight from the APK, executes the application logic with a DEX bytecode interpreter, and paints the UI through a Canvas-based subset of the Android Framework. No device, no emulator, no native libraries.
 
-- **纯前端**：解压、解析、执行、渲染都在浏览器内完成，不需后端服务
-- **DEX 解释器**：支持 Dalvik 指令集主体、异常处理、switch/数组/字段/方法调用
-- **资源解析**：二进制 `AndroidManifest.xml`（AXML）与 `resources.arsc` 资源表
-- **Framework 子集**：`Activity` 生命周期、`View` 树与测量布局、`LinearLayout`/`FrameLayout`/`RelativeLayout`/`ScrollView`、`TextView`/`Button`/`EditText`/`ImageView`/`ProgressBar`、`ActionBar`/`Toolbar`、`Toast`、`Context`/`Intent`/`Bundle` 等
-- **可绘制资源与主题**：`shape`/`vector`/`ripple`/`selector` 绘制、`RippleDrawable` 内容解包、`GradientDrawable`、`backgroundTint`、`@android:color/*` 解析、`Context.setTheme` 主题继承链
-- **软键盘输入**：点击 `EditText` 聚焦并弹出系统键盘（隐藏输入框桥接），支持 `InputMethodManager`、光标闪烁与 `getSelectionStart`/`setSelection`
-- **系统与反射**：`android.os.Build`/`VERSION`、`Class.forName`/`getMethod`/`Method.invoke`（含基本类型参数拆箱）、`startActivity` 携带 `Intent` 参数的多 Activity 跳转
-- **可执行示例**：仓库自带 `samples/hello-dex.apk`，打开页面即可运行，涵盖计数、输入回显、动态添加视图、进度条、形状背景按钮、Build 信息、反射调用与第二个 Activity 跳转
+> **一切开始，尽在 apk.js** — Everything starts with apk.js.
 
-## 快速开始
+## Features
+
+- **Pure frontend.** Unpacking, parsing, execution and rendering all happen inside the browser. There is no backend.
+- **DEX interpreter.** Covers the bulk of the Dalvik instruction set, with exception handling, `switch`, arrays, fields and method dispatch.
+- **Resource parsing.** Binary `AndroidManifest.xml` (AXML) and the `resources.arsc` resource table.
+- **Framework subset.** `Activity` lifecycle, `View` tree with measure and layout, `LinearLayout` / `FrameLayout` / `RelativeLayout` / `ScrollView`, `TextView` / `Button` / `EditText` / `ImageView` / `ProgressBar`, `ActionBar` / `Toolbar`, `Toast`, `Context` / `Intent` / `Bundle`, and more.
+- **Drawables and themes.** `shape` / `vector` / `ripple` / `selector` rendering, `RippleDrawable` content unwrapping, `GradientDrawable`, `backgroundTint`, `@android:color/*` resolution, and `Context.setTheme` inheritance.
+- **Soft keyboard input.** Tapping an `EditText` focuses it and raises the system keyboard through a hidden-input bridge. Supports `InputMethodManager`, a blinking caret, and `getSelectionStart` / `setSelection`.
+- **System and reflection.** `android.os.Build` / `VERSION`, `Class.forName` / `getMethod` / `Method.invoke` (including primitive argument unboxing), and multi-`Activity` navigation through `startActivity` with `Intent` extras.
+- **Runnable sample.** The repository ships `samples/hello-dex.apk`. Open the page and it runs: counters, input echo, dynamic view insertion, progress bars, shape-backed buttons, `Build` info, reflection calls, and a jump to a second `Activity`.
+
+## Quick start
 
 ```bash
-# 安装依赖
+# Install dependencies
 npm install
 
-# 打包（产物输出到 dist/）
+# Bundle into dist/
 npm run build
 
-# 启动本地静态服务器
+# Serve the static site
 npm run serve
 ```
 
-浏览器打开 <http://localhost:8080>，点击「选择 APK」或把 APK 拖进页面即可运行。
+Open <http://localhost:8080>, then click **Choose APK** or drop an APK onto the page.
 
-仓库已提交打包产物 `dist/apk.min.js` 与 `dist/android-framework.min.js`，因此也可以直接把 `index.html`、`dist/`、`vendor/`、`samples/` 放到任意静态服务器上使用。
+The build output `dist/apk.min.js` and `dist/android-framework.min.js` is committed, so you can also copy `index.html`, `dist/`, `vendor/` and `samples/` onto any static host and skip the build step.
 
-## 产物说明
+## Build output
 
-`npm run build` 使用 webpack 生成两个 ES Module 文件：
+`npm run build` runs webpack and produces two ES modules:
 
-| 产物 | 内容 |
+| Artifact | Contents |
 | --- | --- |
-| `dist/android-framework.min.js` | 纯框架实现：DEX 解析、运行时、资源解析、Canvas 版 Android Framework。不含任何页面/DOM 逻辑 |
-| `dist/apk.min.js` | 用户调用层：设备信息、渲染目标元素、文件加载、状态与日志回调，依赖上一个文件 |
+| `dist/android-framework.min.js` | Framework only: DEX parsing, runtime, resource parsing, Canvas Android Framework subset. No DOM or page logic. |
+| `dist/apk.min.js` | Caller layer: device info, render target, file loading, status and log callbacks. Depends on the file above. |
 
-`index.html` 通过 `<script type="module">` 引用 `dist/apk.min.js`，它会自动加载 `android-framework.min.js`。JSZip 以全局变量形式提供，来自 `vendor/jszip.min.js`。
+`index.html` loads `dist/apk.min.js` through `<script type="module">`, which pulls in `android-framework.min.js`. JSZip is provided as a global from `vendor/jszip.min.js`.
 
-## 在页面中使用
+## Using it on a page
 
-`apk.min.js` 对外暴露 `createSimulator` 与 `ApkSimulator`，由调用方指定设备信息与渲染目标元素：
+`apk.min.js` exports `createSimulator` and `ApkSimulator`. The caller supplies the device info and the render target:
 
 ```html
 <script src="vendor/jszip.min.js"></script>
@@ -53,9 +57,9 @@ npm run serve
   import { createSimulator } from './dist/apk.min.js';
 
   const sim = createSimulator({
-    // 渲染目标：可传 CSS 选择器、DOM 元素，或直接传已有 canvas
+    // Render target: a CSS selector, a DOM element, or an existing canvas
     element: '#phone-screen',
-    // 设备信息
+    // Device info
     device: {
       width: 360,
       height: 640,
@@ -64,108 +68,138 @@ npm run serve
       maxApkSize: 50 * 1024 * 1024,
     },
     onLog: (entry) => console.log(`[${entry.level}] ${entry.tag}: ${entry.message}`),
-    onFinished: () => console.log('Activity 已结束'),
+    onFinished: () => console.log('Activity finished'),
     onError: (error) => console.error(error),
   });
 
-  // 从 File 对象加载（例如 <input type="file">）
+  // Load from a File object (for example from <input type="file">)
   await sim.loadFromFile(file);
 
-  // 也支持 URL、ArrayBuffer 或已解压的 JSZip 实例
+  // URL, ArrayBuffer and an unpacked JSZip instance also work
   // await sim.loadFromUrl('samples/hello-dex.apk');
   // await sim.loadFromArrayBuffer(buffer);
   // await sim.loadFromZip(zip);
 
-  sim.setDevice({ width: 280, height: 480 }); // 运行中调整尺寸
-  sim.destroy();                              // 停止并从目标元素移除 canvas
+  sim.setDevice({ width: 280, height: 480 }); // Resize while running
+  sim.destroy();                              // Stop and remove the canvas
 </script>
 ```
 
-| 选项 | 说明 |
+| Option | Description |
 | --- | --- |
-| `element` | 渲染目标，接受 CSS 选择器字符串或 DOM 元素，自动在其中创建 canvas |
-| `canvas` | 直接使用已有的 `<canvas>`，优先于 `element` |
-| `device.width` / `device.height` | 逻辑分辨率，默认 360×640 |
-| `device.dpr` | 设备像素比，默认取 `window.devicePixelRatio`（上限 2）；canvas 物理尺寸为逻辑尺寸 × dpr |
-| `device.style` | 主题风格，默认 `material` |
-| `device.maxApkSize` | APK 大小上限，默认 50MB |
-| `onLog` / `onFinished` / `onError` | 日志、结束、错误回调 |
+| `element` | Render target. Accepts a CSS selector string or a DOM element; a canvas is created inside it. |
+| `canvas` | Use an existing `<canvas>`. Takes precedence over `element`. |
+| `device.width` / `device.height` | Logical resolution. Defaults to 360×640. |
+| `device.dpr` | Device pixel ratio. Defaults to `window.devicePixelRatio` capped at 2. The canvas backing size is logical size × dpr. |
+| `device.style` | Theme style. Defaults to `material`. |
+| `device.maxApkSize` | APK size limit. Defaults to 50MB. |
+| `onLog` / `onFinished` / `onError` | Log, finish and error callbacks. |
 
-| 方法 | 说明 |
+| Method | Description |
 | --- | --- |
-| `loadFromFile(file)` | 从浏览器 `File` 对象加载 |
-| `loadFromUrl(url, options)` | 通过 `fetch` 下载后加载 |
-| `loadFromArrayBuffer(buffer)` | 从二进制内容加载 |
-| `loadFromZip(zip)` | 从 JSZip 实例加载 |
-| `setDevice(device)` | 更新设备信息并立即应用新尺寸 |
-| `stop()` / `destroy()` | 停止运行 / 停止并清理 canvas |
-| `vm` | 当前 `JavaVM` 实例（只读） |
+| `loadFromFile(file)` | Load from a browser `File`. |
+| `loadFromUrl(url, options)` | Download with `fetch`, then load. |
+| `loadFromArrayBuffer(buffer)` | Load from binary contents. |
+| `loadFromZip(zip)` | Load from a JSZip instance. |
+| `setDevice(device)` | Update device info and apply the new size immediately. |
+| `stop()` / `destroy()` | Stop running / stop and clean up the canvas. |
+| `vm` | The current `JavaVM` instance (read-only). |
 
-开发时可用 `npm run build:dev` 生成带 source map 的未压缩版本。
+During development, `npm run build:dev` produces an unminified bundle with source maps.
 
-## 目录结构
+## Project layout
 
 ```
 .
-├── apk.js                    # 页面入口源码（webpack 入口之一）
-├── index.html                # 演示页面
-├── webpack.config.js         # 打包配置
-├── dist/                     # 打包产物（已提交）
+├── apk.js                    # Public entry source (webpack entry)
+├── index.html                # Demo page
+├── webpack.config.js         # Build configuration
+├── dist/                     # Build output (committed)
 │   ├── apk.min.js
 │   └── android-framework.min.js
 ├── samples/
-│   ├── hello-dex.apk         # 可运行示例 APK
-│   └── apk-src/              # 示例 APK 的源码
+│   ├── hello-dex.apk         # Runnable sample APK
+│   └── apk-src/              # Sample APK source
 ├── src/
-│   ├── core/binary.js        # 二进制读取工具
-│   ├── dex/                  # DEX 文件解析与指令定义
-│   ├── res/                  # AXML / ARSC 解析
-│   ├── runtime/              # VM、解释器、类注册表、值模型
-│   └── framework/            # Canvas 版 Android Framework 子集
-├── tests/                    # 回归测试
-├── tools/                    # 构建示例 APK 的脚本
-└── vendor/jszip.min.js       # JSZip（全局提供）
+│   ├── core/binary.js        # Binary reading helpers
+│   ├── dex/                  # DEX parsing and instruction definitions
+│   ├── res/                  # AXML / ARSC parsing
+│   ├── runtime/              # VM, interpreter, class registry, value model
+│   └── framework/            # Canvas Android Framework subset
+├── tests/                    # Regression tests
+│   └── debug/                # Ad-hoc debugging scripts kept for reference
+├── image-debug/              # node-canvas renders of real APKs
+├── tools/                    # Sample APK build script and render helper
+├── docs/                     # VitePress documentation site
+└── vendor/jszip.min.js       # JSZip (provided globally)
 ```
 
-### `src` 各模块职责
+### What each `src` module does
 
-| 目录 | 职责 |
+| Directory | Responsibility |
 | --- | --- |
-| `core/` | 字节序安全的二进制读取 |
-| `dex/` | DEX 头、字符串池、类型、方法、字段、类定义与字节码解析 |
-| `res/` | `AndroidManifest.xml`、`resources.arsc` 的二进制格式解析 |
-| `runtime/` | `JavaVM`、`DexInterpreter`、`ClassRegistry`、`JavaObject`/`JavaArray` 值模型 |
-| `framework/` | `Engine` 编排、`View` 体系、布局、控件、资源、窗口、`Context`/`Intent`、Java 核心类 native 实现 |
+| `core/` | Endian-safe binary reading. |
+| `dex/` | DEX header, string pool, types, methods, fields, class definitions and bytecode. |
+| `res/` | Binary parsing of `AndroidManifest.xml` and `resources.arsc`. |
+| `runtime/` | `JavaVM`, `DexInterpreter`, `ClassRegistry`, the `JavaObject` / `JavaArray` value model. |
+| `framework/` | `Engine` orchestration, `View` hierarchy, layout, widgets, resources, windows, `Context` / `Intent`, and native implementations of Java core classes. |
 
-## 支持范围与限制
+## Rendering a real APK to an image
 
-- 仅支持**纯 Java/Kotlin APK**，含 `lib/` 原生库的 APK 无法运行
-- APK 大小上限 50MB
-- Framework 是 Android 的一小部分子集，覆盖率持续扩充中；未实现的 Framework 类或方法会以日志形式报错
-- `startActivity` 仅支持应用内部 Activity，启动其他应用会抛 `ActivityNotFoundException`
-- 界面渲染目标为 360×640 的 Canvas
-
-## 测试
+`tools/render-apk.mjs` runs an APK through node-canvas and writes a PNG to `image-debug/`:
 
 ```bash
-# 运行完整回归（加载示例 APK 并模拟点击）
-npm test
-
-# 校验 APK 解析结果
-npm run check
+npm run render -- /path/to/app.apk my-app
+# writes image-debug/my-app.png
 ```
 
-`npm test` 会解析 `samples/hello-dex.apk`、构建 View 树，并依次模拟：点击计数按钮、聚焦编辑框并用键盘输入回显、动态添加视图、推进进度条、点击形状背景按钮、读取 `Build` 信息、运行反射调用、`startActivity` 跳转到第二个 Activity 并校验传递的参数，检查各项事件回调是否生效。
+Set `RENDER_WIDTH`, `RENDER_HEIGHT` or `RENDER_DENSITY` to change the output size.
 
-## 构建示例 APK
+## Scope and limits
 
-`tools/build-sample-apk.sh` 演示如何把 `samples/apk-src` 编译打包成可运行的 APK，需要本机安装 Android SDK 与 build-tools。
+- **Java/Kotlin APKs only.** APKs containing native libraries under `lib/` cannot run.
+- APK size limit is 50MB.
+- The framework is a small subset of Android and keeps growing. Unimplemented framework classes or methods surface as log errors.
+- `startActivity` only resolves activities inside the same app. Launching another app throws `ActivityNotFoundException`.
+- The demo renders at 360×640.
 
-## 已知问题
+## Tests
 
-- 部分复杂第三方应用（如大型浏览器）在生命周期 `onStart` 阶段仍可能因 Framework 覆盖不全而失败
-- 调试开关（`DBG_INV`、`DBG_CAST`、`CAS_DBG`、`FV_DBG`）在打包时会被编译期替换为 `false`
+```bash
+# Full regression: load the sample APK and simulate taps
+npm test
 
-## 许可
+# Verify the APK parse result
+npm run check
 
-本项目基于 [MIT License](./LICENSE) 开源。
+# All of the above
+npm run test:all
+```
+
+`npm test` parses `samples/hello-dex.apk`, builds the view tree, then simulates a counter tap, focusing the editor and echoing keyboard input, dynamic view insertion, progress advancement, a shape-backed button tap, reading `Build` info, a reflection call, and a `startActivity` jump to a second `Activity` with argument checks.
+
+The scripts in `tests/debug/` are older exploratory probes from development. They are not part of the regression suite.
+
+## Building the sample APK
+
+`tools/build-sample-apk.sh` shows how to compile `samples/apk-src` into a runnable APK. It needs the Android SDK and build-tools installed locally.
+
+## Known issues
+
+- Some large third-party apps still fail during `onStart` because the framework coverage is incomplete.
+- Debug switches (`DBG_INV`, `DBG_CAST`, `CAS_DBG`, `FV_DBG`) are replaced with `false` at build time.
+- `tests/debug/` contains roughly 400 ad-hoc scripts from development. They are kept for reference and will be pruned.
+
+## Documentation
+
+The VitePress site lives in `docs/`:
+
+```bash
+npm run docs:dev      # Local dev server
+npm run docs:build    # Static build
+npm run docs:preview  # Preview the build
+```
+
+## License
+
+[MIT](./LICENSE)

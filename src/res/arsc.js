@@ -24,6 +24,9 @@ export class ResourceTable {
     this.packages = [];
     this.values = new Map();
     this.entries = new Map();
+    this.variants = new Map();
+    this.locale = null;
+    this.density = 0;
     this.layouts = new Map();
     this.stringResources = new Map();
     this.drawables = new Map();
@@ -173,6 +176,8 @@ export class ResourceTable {
       }
       if (typeName === 'id' && (value === false || value === null || value === 0)) value = resId;
       const record = { resId, typeName, key, value, bag, config };
+      if (!this.variants.has(resId)) this.variants.set(resId, []);
+      this.variants.get(resId).push(record);
       const existing = this.entries.get(resId);
       if (!existing || configRank(config) <= configRank(existing.config)) {
         this.entries.set(resId, record);
@@ -196,6 +201,49 @@ export class ResourceTable {
       return this.resolve(entry.value.reference, seen);
     }
     return entry.value;
+  }
+
+  setConfig(locale = null, density = 0) {
+    this.locale = locale;
+    this.density = density;
+    this.entries.clear();
+    for (const [resId, variants] of this.variants) {
+      this.entries.set(resId, this.pickVariant(variants, resId));
+    }
+  }
+
+  pickVariant(variants, resId) {
+    if (!variants || variants.length === 0) return null;
+    if (variants.length === 1) return variants[0];
+    const wantLang = (this.locale || '').split(/[-_]/)[0].toLowerCase();
+    const wantCountry = (this.locale || '').split(/[-_]/)[1]?.toLowerCase() || '';
+    let best = null;
+    let bestScore = -Infinity;
+    for (const v of variants) {
+      const c = v.config || {};
+      const lang = (c.language || '').toLowerCase();
+      const country = (c.country || '').toLowerCase();
+      let score = 0;
+      if (!lang) score += 0;
+      else if (lang === wantLang) score += 100;
+      else score -= 1000;
+      if (country) {
+        if (country === wantCountry && wantLang) score += 50;
+        else score -= 500;
+      }
+      if (c.density) {
+        if (this.density && Math.abs(c.density - this.density) < 0.01) score += 30;
+        else score -= 5;
+      }
+      if (c.orientation) score -= 20;
+      if (c.sdkVersion) score -= 2;
+      score += configRank(c) * 0.001;
+      if (score > bestScore) {
+        bestScore = score;
+        best = v;
+      }
+    }
+    return best || variants[0];
   }
 
   getEntry(resId) {

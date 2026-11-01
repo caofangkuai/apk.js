@@ -134,9 +134,7 @@ function readPoolUtf8Length(reader, offset) {
 function readUtf8String(reader, offset) {
   const utf16 = readPoolUtf8Length(reader, offset);
   const byteInfo = readPoolUtf8Length(reader, utf16.next);
-  const bytes = reader.bytes;
-  const dataStart = bytes.byteOffset + byteInfo.next;
-  return decodeMutf8(bytes, dataStart, byteInfo.length);
+  return decodeMutf8(reader.bytes, byteInfo.next, byteInfo.length);
 }
 
 function readUtf16String(reader, offset) {
@@ -167,7 +165,14 @@ export class XmlNode {
 
   getAttribute(name) {
     const found = this.attrs.find((a) => a.name === name || a.namespaceName === name);
-    return found ? found.value : null;
+    if (found) return found.value;
+    const localName = typeof name === 'string' && name.includes(':') ? name.slice(name.indexOf(':') + 1) : null;
+    if (localName) {
+      const local = this.attrs.find((a) => a.name === localName);
+      if (local) return local.value;
+    }
+    const prefixed = this.attrs.find((a) => a.name === `android:${name}`);
+    return prefixed ? prefixed.value : null;
   }
 
   getAttributeValue(name) {

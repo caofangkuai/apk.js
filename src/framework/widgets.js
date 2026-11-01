@@ -32,8 +32,9 @@ export class TextView extends View {
     this.text = '';
     this.textPaint = new Paint();
     this.textPaint.color = 0xff000000;
-    this.textPaint.textSize = 14;
-    this.textSize = 14;
+    const defaultTextSize = 14 * this.getDensity();
+    this.textPaint.textSize = defaultTextSize;
+    this.textSize = defaultTextSize;
     this.textColor = 0xff000000;
     this.hintText = null;
     this.hintColor = 0x80808080;
@@ -44,7 +45,7 @@ export class TextView extends View {
     this.lineSpacingExtra = 0;
     this.lineSpacingMultiplier = 1;
     this.letterSpacing = 0;
-    this.typeface = 'sans-serif';
+    this.typeface = 'Noto Sans CJK SC';
     this.textStyle = 0;
     this.paddingLeft = 0;
     this.paddingTop = 0;
@@ -159,7 +160,7 @@ export class TextView extends View {
   }
 
   setTypeface(typeface, style) {
-    this.typeface = typeface || 'sans-serif';
+    this.typeface = typeface || 'Noto Sans CJK SC';
     this.textPaint.typeface = this.typeface;
     if (style !== undefined) this.setTextStyle(style);
     return this;
@@ -228,6 +229,7 @@ export class TextView extends View {
     const content = this.textAllCaps ? this.text.toUpperCase() : this.text;
     const display = content.length ? content : (this.hintText || '');
     const available = Math.max(1, maxWidth - this.paddingLeft - this.paddingRight);
+    if (globalThis.__TXT && maxWidth > 100) console.error('TXLAY maxW=' + maxWidth + ' padL=' + this.paddingLeft + ' padR=' + this.paddingRight + ' avail=' + available + ' size=' + this.textSize + ' text=' + JSON.stringify(String(this.text).slice(0,20)));
     if (!this.layoutDirty && this.lastLayoutWidth === available) return;
     this.lastLayoutWidth = available;
     this.lines = this.singleLine ? [display.replace(/\n/g, ' ')] : wrapText(display, this.textSize, available, this.typeface);
@@ -250,10 +252,12 @@ export class TextView extends View {
     if (heightMode === MeasureSpec.EXACTLY) height = MeasureSpec.getSize(heightSpec);
     else if (heightMode === MeasureSpec.AT_MOST) height = Math.min(height, MeasureSpec.getSize(heightSpec));
     height = Math.max(height, this.minHeight + this.paddingTop + this.paddingBottom);
+    if (globalThis.__TXT && this.text === 'apk.js Browser') console.error('TXMEAS w=' + width + ' h=' + height + ' lines=' + this.lines.length + ' lh=' + lineHeight + ' minH=' + this.minHeight + ' padT=' + this.paddingTop + ' padB=' + this.paddingBottom + ' hMode=' + heightMode + ' hSize=' + MeasureSpec.getSize(heightSpec));
     this.setMeasuredDimension(width, height);
   }
 
   onDraw(canvas) {
+    if (globalThis.__TXT) console.error('TXDRAW left=' + this.left + ' top=' + this.top + ' w=' + this.getWidth() + ' h=' + this.getHeight() + ' text=' + JSON.stringify(String(this.text).slice(0,20)));
     const width = this.getWidth();
     const height = this.getHeight();
     this.ensureTextLayout(width);

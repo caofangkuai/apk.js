@@ -6,7 +6,8 @@ import { DexInterpreter } from '../runtime/interpreter.js';
 import { Resources } from './resources.js';
 import { SurfaceScreen } from './window.js';
 import { registerFrameworkNativeClasses, loadThemeFromStyleId } from './registry.js';
-import { JAVA_CORE_CLASSES } from './java-core.js';
+import { JAVA_CORE_CLASSES, seedHardwareFs } from './java-core.js';
+import { installSensorSources } from './sensors.js';
 import { contextFacade, viewObject } from './bridge.js';
 import { Looper, Handler } from './os.js';
 import { DBG } from '../runtime/debug.js';
@@ -157,6 +158,8 @@ export class EmulatorEngine {
     this.screen = null;
     this.activity = null;
     this.running = false;
+    seedHardwareFs();
+    installSensorSources();
   }
 
   attachCanvas(canvas) {
@@ -259,6 +262,7 @@ export class EmulatorEngine {
     vm.apk = apk;
     apk.invalidate = () => this.screen?.invalidate?.();
     vm.interpreter = new DexInterpreter(vm);
+    vm.engine = this;
     const resources = new Resources(apk, vm);
     vm.resources = resources;
     for (const cls of Object.values(JAVA_CORE_CLASSES)) vm.registry.registerNative(cls);

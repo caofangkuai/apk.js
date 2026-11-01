@@ -1,0 +1,14 @@
+import fs from 'fs';
+import { createRequire } from 'module';
+const require=createRequire(import.meta.url);
+const JSZip=require('jszip');
+const zip=await JSZip.loadAsync(fs.readFileSync('/tmp/devinfo.apk'));
+const buf=await zip.file('res/color/mtrl_tabs_colored_ripple_color.xml').async('nodebuffer');
+console.log('byteOffset', buf.byteOffset, 'len', buf.length);
+const dv=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
+let off=8;
+const sc=dv.getUint32(off+8,true), flags=dv.getUint32(off+16,true), ss=dv.getUint32(off+20,true);
+const hsz=dv.getUint16(off+2,true);
+console.log('hsz',hsz,'sc',sc,'ss',ss,'flags',flags.toString(16),'poolStart',off);
+const strBase = off + ss;
+console.log('first offset', dv.getUint32(off+hsz,true), '->', strBase + dv.getUint32(off+hsz,true));
