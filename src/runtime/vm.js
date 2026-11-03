@@ -133,6 +133,7 @@ export class JavaVM {
       'sensor': 'Landroid/hardware/SensorManager;',
       'location': 'Landroid/location/LocationManager;',
       'camera': 'Landroid/hardware/camera2/CameraManager;',
+      'bluetooth': 'Landroid/bluetooth/BluetoothManager;',
     };
     const descriptor = descriptorByService[key];
     if (!descriptor) {

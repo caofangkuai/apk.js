@@ -90,13 +90,62 @@ export class FrameLayout extends ViewGroup {
   }
 }
 
+export class HorizontalScrollView extends FrameLayout {
+  constructor(context = null) {
+    super(context);
+    this.scrollX = 0;
+    this.scrollY = 0;
+    this.scrollRangeX = 0;
+    this.fillViewport = false;
+  }
+
+  setFillViewport(value) {
+    this.fillViewport = !!value;
+    this.requestLayout();
+  }
+
+  getScrollX() {
+    return this.scrollX;
+  }
+
+  getScrollY() {
+    return this.scrollY;
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    super.onMeasure(widthSpec, heightSpec);
+  }
+
+  onLayout(changed, left, top, right, bottom) {
+    super.onLayout(changed, left, top, right, bottom);
+    let maxRight = 0;
+    for (const child of this.children) {
+      if (child.visibility === 8) continue;
+      maxRight = Math.max(maxRight, child.left + child.getWidth());
+    }
+    this.scrollRangeX = Math.max(0, maxRight - (right - left));
+  }
+
+  scrollTo(x, y) {
+    this.scrollX = Math.max(0, Math.min(this.scrollRangeX, x));
+    this.scrollY = y;
+    this.invalidate();
+  }
+
+  dispatchDraw(canvas) {
+    canvas.save();
+    canvas.translate(-this.scrollX, -this.scrollY);
+    super.dispatchDraw(canvas);
+    canvas.restore();
+  }
+}
+
 export class ViewPagerHost extends FrameLayout {
   constructor(context = null) {
     super(context);
     this.$preferHostLayout = true;
   }
 }
-
 export class TabLayoutHost extends FrameLayout {
   constructor(context = null) {
     super(context);

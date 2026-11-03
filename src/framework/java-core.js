@@ -877,8 +877,24 @@ export const JAVA_CORE_CLASSES = {
       'trim()Ljava/lang/String;': (self) => jsString(self).trim(),
       'isEmpty()Z': (self) => jsString(self).length === 0,
       'split(Ljava/lang/String;)[Ljava/lang/String;': (self, [pattern], vm) => {
-        const parts = jsString(self).split(jsString(pattern));
+        const parts = javaSplit(jsString(self), jsString(pattern), 0);
         return vm.newArray('[Ljava/lang/String;', parts.length, parts);
+      },
+      'split(Ljava/lang/String;I)[Ljava/lang/String;': (self, [pattern, limit], vm) => {
+        const parts = javaSplit(jsString(self), jsString(pattern), toInt(limit));
+        return vm.newArray('[Ljava/lang/String;', parts.length, parts);
+      },
+      'replaceAll(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [regex, replacement]) =>
+        jsString(self).replace(new RegExp(jsString(regex), 'g'), javaRegexReplacement(jsString(replacement))),
+      'replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [regex, replacement]) =>
+        jsString(self).replace(new RegExp(jsString(regex)), javaRegexReplacement(jsString(replacement))),
+      'matches(Ljava/lang/String;)Z': (self, [regex]) => {
+        try {
+          return new RegExp(`^(?:${jsString(regex)})$`).test(jsString(self));
+        } catch (error) {
+          void error;
+          return false;
+        }
       },
       'toCharArray()[C': (self, _args, vm) => {
         const text = jsString(self);
@@ -1131,6 +1147,67 @@ export const JAVA_CORE_CLASSES = {
       'toRadians(D)D': (_self, [v]) => (Number(v) * Math.PI) / 180,
     },
     staticFields: new Map([['PI:D', Math.PI], ['E:D', Math.E]]),
+  }),
+
+  'Ljava/math/BigDecimal;': nativeDef('Ljava/math/BigDecimal;', {
+    super: 'Ljava/lang/Object;',
+    ctor: peerClass(function () {
+      this.value = 0;
+    }, { value: 0 }),
+    methods: {
+      '<init>(D)V': (self, [v]) => {
+        self.value = Number(v) || 0;
+      },
+      '<init>(I)V': (self, [v]) => {
+        self.value = toInt(v);
+      },
+      '<init>(J)V': (self, [v]) => {
+        self.value = Number(toLong(v));
+      },
+      '<init>(Ljava/lang/String;)V': (self, [v]) => {
+        self.value = Number(jsString(v)) || 0;
+      },
+      '<init>(Ljava/math/BigInteger;)V': (self, [v]) => {
+        self.value = Number(v?.$peer?.value ?? v?.value ?? 0) || 0;
+      },
+      'setScale(I)Ljava/math/BigDecimal;': (self) => self.object || self,
+      'setScale(ILjava/math/RoundingMode;)Ljava/math/BigDecimal;': (self) => self.object || self,
+      'setScale(ILjava/lang/Object;)Ljava/math/BigDecimal;': (self) => self.object || self,
+      'setScale(ILjava/math/RoundingMode;Z)Ljava/math/BigDecimal;': (self) => self.object || self,
+      'multiply(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;': (self, [other]) => {
+        self.value = self.value * (other?.$peer?.value ?? other?.value ?? 0);
+        return self.object || self;
+      },
+      'divide(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;': (self, [other]) => {
+        const d = other?.$peer?.value ?? other?.value ?? 0;
+        self.value = d === 0 ? 0 : self.value / d;
+        return self.object || self;
+      },
+      'add(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;': (self, [other]) => {
+        self.value = self.value + (other?.$peer?.value ?? other?.value ?? 0);
+        return self.object || self;
+      },
+      'subtract(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;': (self, [other]) => {
+        self.value = self.value - (other?.$peer?.value ?? other?.value ?? 0);
+        return self.object || self;
+      },
+      'doubleValue()D': (self) => Number(self.value) || 0,
+      'floatValue()F': (self) => Number(self.value) || 0,
+      'intValue()I': (self) => self.value | 0,
+      'longValue()J': (self) => BigInt(Math.trunc(Number(self.value) || 0)),
+      'toString()Ljava/lang/String;': (self) => String(self.value),
+      'toPlainString()Ljava/lang/String;': (self) => String(self.value),
+      'compareTo(Ljava/math/BigDecimal;)I': (self, [other]) => {
+        const o = other?.$peer?.value ?? other?.value ?? 0;
+        return self.value > o ? 1 : self.value < o ? -1 : 0;
+      },
+      'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+        const o = other?.$peer?.value ?? other?.value;
+        return o !== undefined && self.value === o;
+      },
+      'intValueExact()I': (self) => self.value | 0,
+      'longValueExact()J': (self) => BigInt(Math.trunc(Number(self.value) || 0)),
+    },
   }),
 
   'Ljava/lang/ref/Reference;': nativeDef('Ljava/lang/ref/Reference;', {
@@ -1750,6 +1827,17 @@ JAVA_CORE_CLASSES['Landroid/content/pm/ConfigurationInfo;'] = nativeDef('Landroi
   ],
   methods: {
     'getGlEsVersion()Ljava/lang/String;': () => '3.0',
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/bluetooth/BluetoothManager;'] = nativeDef('Landroid/bluetooth/BluetoothManager;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm) {
+    this.vm = vm;
+  }, {}),
+  methods: {
+    'getAdapter()Landroid/bluetooth/BluetoothAdapter;': () => null,
+    'getConnectedDevices(I)Ljava/util/List;': (_self, _args, vm) => makeList(vm, []),
   },
 });
 
@@ -2962,6 +3050,27 @@ function readFsText(path) {
   return '';
 }
 
+function javaRegexReplacement(replacement) {
+  return replacement.replace(/\\(.)/g, '$1').replace(/\$(\d)/g, '$$$$$1');
+}
+
+function javaSplit(text, pattern, limit) {
+  const input = String(text ?? '');
+  const expression = String(pattern);
+  if (limit > 0) {
+    const parts = input.split(new RegExp(expression));
+    if (parts.length <= limit) return parts;
+    const head = parts.slice(0, limit - 1);
+    head.push(parts.slice(limit - 1).join(expression));
+    return head;
+  }
+  const parts = input.split(new RegExp(expression));
+  if (limit === 0) {
+    while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+  }
+  return parts;
+}
+
 function readerText(source) {
   if (source === null || source === undefined) return '';
   if (typeof source === 'string') return source;
@@ -3164,6 +3273,64 @@ JAVA_CORE_CLASSES['Ljava/io/PrintWriter;'] = nativeDef('Ljava/io/PrintWriter;', 
     'checkError()Z': () => false,
   },
 });
+JAVA_CORE_CLASSES['Ljava/util/Date;'] = nativeDef('Ljava/util/Date;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.time = Date.now();
+  }, { time: 0 }),
+  methods: {
+    '<init>()V': (self) => {
+      self.time = Date.now();
+    },
+    '<init>(J)V': (self, [time]) => {
+      self.time = Number(time) || 0;
+    },
+    'getTime()J': (self) => self.time || 0,
+    'setTime(J)V': (self, [time]) => {
+      self.time = Number(time) || 0;
+    },
+    'before(Ljava/util/Date;)Z': (self, [other]) => ((self.time || 0) < (other?.$peer?.time ?? 0) ? 1 : 0),
+    'after(Ljava/util/Date;)Z': (self, [other]) => ((self.time || 0) > (other?.$peer?.time ?? 0) ? 1 : 0),
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => ((self.time || 0) === (other?.$peer?.time ?? NaN) ? 1 : 0),
+    'compareTo(Ljava/util/Date;)I': (self, [other]) => Math.sign((self.time || 0) - (other?.$peer?.time ?? 0)) | 0,
+    'toString()Ljava/lang/String;': (self) => new Date(self.time || 0).toISOString(),
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/TimeZone;'] = nativeDef('Ljava/util/TimeZone;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.id = 'UTC';
+  }, { id: 'UTC' }),
+  methods: {
+    'getID()Ljava/lang/String;': (self) => self.id || 'UTC',
+    'setID(Ljava/lang/String;)V': (self, [id]) => {
+      self.id = jsString(id) || 'UTC';
+    },
+    'getOffset(J)I': () => 0,
+    'getRawOffset()I': () => 0,
+    'inDaylightTime(Ljava/util/Date;)Z': () => 0,
+    'useDaylightTime()Z': () => 0,
+    'getDisplayName()Ljava/lang/String;': (self) => self.id || 'UTC',
+    'getDisplayName(ZI)Ljava/lang/String;': (self) => self.id || 'UTC',
+    'getDisplayName(Ljava/util/Locale;)Ljava/lang/String;': (self) => self.id || 'UTC',
+  },
+  staticMethods: {
+    'getDefault()Ljava/util/TimeZone;': (_self, _args, vm) => vm.instantiate('Ljava/util/TimeZone;', []),
+    'getTimeZone(Ljava/lang/String;)Ljava/util/TimeZone;': (_self, [id], vm) => {
+      const tz = vm.instantiate('Ljava/util/TimeZone;', []);
+      const peer = vm.registry.getPeer(tz, 'Ljava/util/TimeZone;');
+      if (peer) peer.id = jsString(id) || 'UTC';
+      return tz;
+    },
+    'getAvailableIDs()[Ljava/lang/String;': (_self, _args, vm) => {
+      const array = vm.newArray('[Ljava/lang/String;', 1);
+      array.$data[0] = 'UTC';
+      return array;
+    },
+  },
+});
+
 JAVA_CORE_CLASSES['Ljava/sql/Timestamp;'] = nativeDef('Ljava/sql/Timestamp;', {
   super: 'Ljava/util/Date;',
   ctor: peerClass(function () {
@@ -3675,6 +3842,39 @@ function makeMap(vm) {
 function integerDef(descriptor, bits) {
   const isLong = bits === 64;
   const wrap = (value, vm) => vm.wrapPeer({ value: isLong ? toLong(value) : toInt(value), constructor: { $descriptor: descriptor } });
+  const throwNumberFormat = (vm, text) => vm.throwException('Ljava/lang/NumberFormatException;', `For input string: "${text}"`);
+  const digitValue = (ch) => {
+    const code = ch.charCodeAt(0);
+    if (code >= 48 && code <= 57) return code - 48;
+    if (code >= 97 && code <= 122) return code - 87;
+    if (code >= 65 && code <= 90) return code - 55;
+    return -1;
+  };
+  const parseIntChecked = (value, radix, vm) => {
+    const text = String(jsString(value) ?? '').trim();
+    const base = toInt(radix);
+    if (base < 2 || base > 36) throwNumberFormat(vm, text);
+    const negative = text[0] === '-';
+    const body = text[0] === '-' || text[0] === '+' ? text.slice(1) : text;
+    if (!body) throwNumberFormat(vm, text);
+    let acc = 0;
+    for (const ch of body) {
+      const digit = digitValue(ch);
+      if (digit < 0 || digit >= base) throwNumberFormat(vm, text);
+      acc = acc * base + digit;
+    }
+    const signed = negative ? -acc : acc;
+    if (signed < -2147483648 || signed > 2147483647) throwNumberFormat(vm, text);
+    return signed | 0;
+  };
+  const parseLongChecked = (value, vm) => {
+    const text = String(jsString(value) ?? '').trim();
+    const body = text[0] === '-' || text[0] === '+' ? text.slice(1) : text;
+    if (!body || !/^[0-9]+$/.test(body)) throwNumberFormat(vm, text);
+    const result = BigInt(text);
+    if (result < -(1n << 63n) || result > (1n << 63n) - 1n) throwNumberFormat(vm, text);
+    return result;
+  };
   return nativeDef(descriptor, {
     super: 'Ljava/lang/Object;',
     ctor: peerClass(function (vm, object) {
@@ -3687,17 +3887,16 @@ function integerDef(descriptor, bits) {
       '<init>(J)V': (self, [value]) => {
         self.value = toLong(value);
       },
-      '<init>(Ljava/lang/String;)V': (self, [value]) => {
-        const parsed = isLong ? BigInt(jsString(value) || '0') : parseInt(jsString(value), 10) | 0;
-        self.value = parsed;
+      '<init>(Ljava/lang/String;)V': (self, [value], vm) => {
+        self.value = isLong ? parseLongChecked(value, vm) : parseIntChecked(value, 10, vm);
       },
       'intValue()I': (self) => toInt(self.value),
       'longValue()J': (self) => toLong(self.value),
       'toString()Ljava/lang/String;': (self) => (isLong ? toLong(self.value).toString() : String(toInt(self.value))),
     },
     staticMethods: {
-      'parseInt(Ljava/lang/String;)I': (_self, [value]) => parseInt(jsString(value).trim(), 10) | 0,
-      'parseInt(Ljava/lang/String;I)I': (_self, [value, radix]) => parseInt(jsString(value).trim(), toInt(radix)) | 0,
+      'parseInt(Ljava/lang/String;)I': (_self, [value], vm) => parseIntChecked(value, 10, vm),
+      'parseInt(Ljava/lang/String;I)I': (_self, [value, radix], vm) => parseIntChecked(value, radix, vm),
       'decode(Ljava/lang/String;)Ljava/lang/Integer;': (_self, [value], vm) => {
         const text = jsString(value).trim();
         const parsed = /^[-+]?0[xX]/.test(text) ? parseInt(text.replace(/^[-+]?0[xX]/, (m) => (m.startsWith('-') ? '-' : '')), 16)
@@ -3706,10 +3905,10 @@ function integerDef(descriptor, bits) {
           : parseInt(text, 10);
         return wrap(parsed | 0, vm);
       },
-      'parseLong(Ljava/lang/String;)J': (_self, [value]) => BigInt(jsString(value).trim() || '0'),
+      'parseLong(Ljava/lang/String;)J': (_self, [value], vm) => parseLongChecked(value, vm),
       'valueOf(I)Ljava/lang/Integer;': (_self, [value], vm) => wrap(value, vm),
       'valueOf(J)Ljava/lang/Long;': (_self, [value], vm) => wrap(value, vm),
-      'valueOf(Ljava/lang/String;)Ljava/lang/Integer;': (_self, [value], vm) => wrap(parseInt(jsString(value), 10), vm),
+      'valueOf(Ljava/lang/String;)Ljava/lang/Integer;': (_self, [value], vm) => wrap(parseIntChecked(value, 10, vm), vm),
       'toString(I)Ljava/lang/String;': (_self, [value]) => String(toInt(value)),
       'toString(J)Ljava/lang/String;': (_self, [value]) => toLong(value).toString(),
       'toHexString(I)Ljava/lang/String;': (_self, [value]) => (toInt(value) >>> 0).toString(16),
@@ -4023,6 +4222,30 @@ const VIRTUAL_FS = {
   },
 };
 
+const sodiumSwapTotalKb = 2097148;
+
+function describeMemory() {
+  const nav = readNavigator();
+  const reported = Number(nav?.deviceMemory);
+  const gigabytes = Number.isFinite(reported) && reported > 0
+    ? Math.round(reported)
+    : Math.round(DEVICE_CAPABILITY_FALLBACK.memoryBytes / (1024 * 1024 * 1024));
+  const type = gigabytes >= 8 ? 'LPDDR5' : (gigabytes >= 4 ? 'LPDDR4X' : 'LPDDR3');
+  const maxFreqHz = type === 'LPDDR5' ? 3200000000 : (type === 'LPDDR4X' ? 2133000000 : 1600000000);
+  const agent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+  let vendor = 'Micron';
+  if (/samsung/i.test(agent)) vendor = 'Samsung';
+  else if (/google|pixel/i.test(agent)) vendor = 'Hynix';
+  return { type, vendor, maxFreqHz, gigabytes };
+}
+
+function describeFingerprint() {
+  const agent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+  if (/samsung/i.test(agent)) return 'samsung_fingerprint';
+  if (/google|pixel/i.test(agent)) return 'goodix_fingerprint';
+  return 'fpc_fingerprint';
+}
+
 const HARDWARE_FS_SEEDED = { done: false };
 
 function seedHardwareFs() {
@@ -4040,7 +4263,7 @@ function seedHardwareFs() {
     'Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32',
     '',
   ].join('\n'));
-  write('/proc/cmdline', 'console=ttyMSM0,115200n8 androidboot.hardware=browser androidboot.soc=monkeycode\n');
+  write('/proc/cmdline', 'console=ttyMSM0,115200n8 androidboot.hardware=browser androidboot.soc=apkjs\n');
   write('/proc/meminfo', [
     'MemTotal:        7956184 kB',
     'MemFree:         3021448 kB',
@@ -4054,34 +4277,61 @@ function seedHardwareFs() {
   write('/proc/partitions', [
     'major minor  #blocks  name',
     '',
+    ' 259        0    3145728 dm-0',
+    ' 259        1    2097152 dm-1',
+    ' 259        2    1048576 dm-2',
+    ' 259        3   52428800 dm-3',
+    ' 259        4    2097152 dm-4',
     ' 179        0   61071360 mmcblk0',
-    ' 179        1     262144 mmcblk0p1',
-    ' 179        2   60807168 mmcblk0p2',
+    ' 179        1       8192 mmcblk0p1',
+    ' 179        2      65536 mmcblk0p2',
+    ' 179        3   52428800 mmcblk0p3',
+    '   8        0   61071360 sda',
     '',
   ].join('\n'));
-  write('/proc/mounts', [
-    '/dev/root / ext4 ro,seclabel,relatime 0 0',
+  const mountTable = [
+    '/dev/block/dm-0 / ext4 ro,seclabel,relatime 0 0',
+    '/dev/block/dm-1 /system ext4 ro,seclabel,relatime 0 0',
+    '/dev/block/dm-2 /vendor ext4 ro,seclabel,relatime 0 0',
+    '/dev/block/dm-3 /data ext4 rw,seclabel,nosuid,nodev,noatime 0 0',
+    '/dev/block/dm-4 /cache ext4 rw,seclabel,nosuid,nodev,noatime 0 0',
+    '/dev/block/by-name/userdata /data/media emulated rw,nosuid,nodev,noatime 0 0',
     'tmpfs /dev tmpfs rw,seclabel,nosuid,relatime 0 0',
+    'tmpfs /mnt tmpfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0',
+    'proc /proc proc rw,relatime 0 0',
+    'sysfs /sys sysfs rw,seclabel,relatime 0 0',
     '/dev/block/mmcblk0p1 /vendor ext4 ro,seclabel,relatime 0 0',
     '',
-  ].join('\n'));
-  write('/proc/self/mounts', '/dev/root / ext4 ro,seclabel,relatime 0 0\n');
+  ].join('\n');
+  write('/proc/mounts', mountTable);
+  write('/proc/self/mounts', mountTable);
   write('/proc/bootdevice/type', 'ufs\n');
-  write('/proc/asound/card0/id', 'msm8996tashasndcard\n');
+  write('/proc/asound/card0/id', '\n');
   write('/proc/scsi/scsi', 'Host: scsi0 Channel: 00 Id: 00 Lun: 00\n  Vendor: Linux    Model: UFS 128GB        Rev: 0001\n');
   write('/proc/bus/input/devices', [
     'I: Bus=0018 Vendor=0000 Product=0000 Version=0000',
-    'N: Name="monkeycode-touchscreen"',
+    'N: Name="apk.js-touchscreen"',
     'P: Phys=',
     'S: Sysfs=/devices/virtual/input/input2',
     'U: Uniq=',
     'H: Handlers=event2',
     'B: PROP=2',
     '',
+    'I: Bus=0019 Vendor=0000 Product=0000 Version=0000',
+    'N: Name="wsa881x-i2c-codec"',
+    'P: Phys=i2c-6-0023',
+    'E: ABS=0',
+    'X: wsa-snd-card',
+    'Y: wsa_snd_card',
+    'S: Sysfs=/devices/platform/soc/soc:qcom,sound/input0',
+    'U: Uniq=',
+    'H: Handlers=event3',
+    'B: PROP=0',
+    '',
   ].join('\n'));
   write('/proc/device-tree/model', 'apk.js Browser\0');
-  write('/proc/device-tree/compatible', 'monkeycode,browser\0monkeycode,soc\0');
-  write('/proc/hardware', 'monkeycode,browser\n');
+  write('/proc/device-tree/compatible', 'apkjs,browser\0apkjs,soc\0');
+  write('/proc/hardware', 'apkjs,browser\n');
   write('/proc/interrupts', [
     '           CPU0       CPU1       CPU2       CPU3',
     ' 11:      12345      12000      11800      11600     GICv3  30 Level     arch_timer',
@@ -4104,7 +4354,7 @@ function seedHardwareFs() {
   write('/proc/hctinfo', 'apk.js Browser\n');
   write('/proc/device-tree/chosen/atag,videolfb-lcmname', 'apk.js LCD Panel\0');
   write('/proc/device-tree/chosen/atag,videolfb-islcmfound', '1\0');
-  write('/proc/device-tree/amlogic-dt-id', 'monkeycode\0');
+  write('/proc/device-tree/amlogic-dt-id', 'apkjs\0');
   write('/proc/dumchar_info', 'apk.js Storage\n');
   write('/proc/mtd', 'dev:    size   erasesize  name\n');
   write('/proc/rknand', 'apk.js Storage\n');
@@ -4141,22 +4391,38 @@ function seedHardwareFs() {
   for (const [bus, addr, chip] of [
     [1, '0018', 'bma255'], [2, '0019', 'ak09918'], [3, '0020', 'pa22c'],
     [4, '0021', 'goodix_ts'], [5, '0022', 'bq25890'], [6, '0023', 'wsa881x'],
-    [7, '0024', 'wm89xx'], [8, '0025', 'fingerprint'],
   ]) {
     write(`/sys/bus/i2c/drivers/${chip}/${bus}-${addr}/name`, `${chip}\n`);
     write(`/sys/bus/i2c/devices/${bus}-${addr}/name`, `${chip}\n`);
+    write(`/sys/bus/i2c/devices/${bus}-${addr}/modalias`, `i2c:${chip}\n`);
+    write(`/sys/bus/i2c/devices/${bus}-${addr}/uevent`, [
+      `DRIVER=${chip}`,
+      `MODALIAS=i2c:${chip}`,
+      '',
+    ].join('\n'));
+    write(`/sys/bus/i2c/drivers/${chip}/uevent`, [
+      `DRIVER=${chip}`,
+      `MODALIAS=i2c:${chip}`,
+      '',
+    ].join('\n'));
   }
   write('/dev/block/mmcblk0/device/type', 'MMC\n');
   write('/sys/class/mmc_host/mmc0/mmc0:0001/type', 'MMC\n');
   write('/sys/block/mmcblk0/device/type', 'MMC\n');
+  const { memoryBytes, availBytes } = deviceCapabilities();
+  const memTotalKb = Math.max(1, Math.round(memoryBytes / 1024));
+  const memAvailKb = Math.max(1, Math.round(availBytes / 1024));
+  const memFreeKb = Math.round(memAvailKb * 0.62);
+  const memBuffersKb = Math.round(memAvailKb * 0.04);
+  const memCachedKb = Math.round(memAvailKb * 0.28);
   write('/proc/meminfo', [
-    'MemTotal:        3889904 kB',
-    'MemFree:         1543296 kB',
-    'MemAvailable:    2318672 kB',
-    'Buffers:           63872 kB',
-    'Cached:           986432 kB',
-    'SwapTotal:       2097148 kB',
-    'SwapFree:        2097148 kB',
+    `MemTotal:        ${memTotalKb} kB`,
+    `MemFree:         ${memFreeKb} kB`,
+    `MemAvailable:    ${memAvailKb} kB`,
+    `Buffers:         ${memBuffersKb} kB`,
+    `Cached:          ${memCachedKb} kB`,
+    `SwapTotal:       ${sodiumSwapTotalKb} kB`,
+    `SwapFree:        ${sodiumSwapTotalKb} kB`,
     '',
   ].join('\n'));
   write('/sys/class/power_supply/battery/manufacturer', 'apk.js\n');
@@ -4172,7 +4438,84 @@ function seedHardwareFs() {
   write('/sys/bus/soc/devices/soc0/chip_name', 'apk.js SoC\n');
   write('/sys/bus/soc/devices/soc0/machine', 'apk.js Browser\n');
   write('/sys/bus/soc/devices/soc0/soc_id', '1\n');
-  write('/system/build.prop', 'ro.product.model=Browser\n');
+  const memoryDescriptor = describeMemory();
+  const memoryGb = Math.max(1, Math.round(memoryBytes / (1024 * 1024 * 1024)));
+
+  write('/system/build.prop', [
+    'ro.product.model=Browser',
+    'ro.product.manufacturer=apk.js',
+    `ro.boot.hardware.ddrVendor=${memoryDescriptor.vendor}`,
+    `ro.boot.ddr_type=${memoryDescriptor.type}`,
+    'ro.hardware.fingerprint=apk.js',
+    '',
+  ].join('\n'));
+  write('/proc/AllHWList/draminfo', `${memoryDescriptor.vendor} ${memoryDescriptor.type} ${memoryGb}GB\n`);
+  write('/proc/ddr_rod', `${memoryDescriptor.type} ${memoryDescriptor.vendor}\n`);
+  write('/proc/device-tree/memory/ddr_device_type', `${memoryDescriptor.type}\0`);
+  write('/sys/bus/platform/drivers/ddr_type/ddr_type', `${memoryDescriptor.type}\n`);
+  write('/sys/bus/platform/drivers/ddr_type/ddr_vendor', `${memoryDescriptor.vendor}\n`);
+  write('/sys/bus/platform/drivers/ddr_type/ddr_size', `${memoryGb}GB\n`);
+  write('/sys/bus/platform/drivers/ddr_type/uevent', [
+    'DRIVER=ddr_type',
+    `DRIVER_TYPE=${memoryDescriptor.type}`,
+    `DRIVER_VENDOR=${memoryDescriptor.vendor}`,
+    '',
+  ].join('\n'));
+  write('/sys/class/sec/sec_hw_param/ddr_info', `${memoryGb}GB ${memoryDescriptor.type} ${memoryDescriptor.vendor}\n`);
+  write('/sys/class/devfreq/ddrfreq/max_freq', `${memoryDescriptor.maxFreqHz}\n`);
+
+  const audioCodec = 'wsa881x-i2c-codec';
+  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
+  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/status', 'okay\n');
+  write('/sys/bus/i2c/drivers/wsa881x/6-0023/driver_name', `${audioCodec}\n`);
+  write('/sys/bus/i2c/drivers/wsa881x/6-0023/codec_name', `${audioCodec}\n`);
+  write('/sys/bus/i2c/devices/6-0023/CID', `${audioCodec}\n`);
+  write('/sys/bus/i2c/devices/6-0023/of_node/name', 'wsa881x\0');
+  VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/i2c-6');
+  write('/sys/bus/i2c/devices/i2c-6/name', 'i2c-6\n');
+  write('/sys/bus/i2c/devices/i2c-6/6-0023/name', `${audioCodec}\n`);
+  write('/sys/bus/i2c/devices/i2c-6/6-0023/of_node/name', `${audioCodec}\0`);
+  write('/sys/bus/i2c/devices/i2c-6/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
+  VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/6-0023/of_node');
+  VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/6-0023');
+  write('/sys/bus/i2c/devices/6-0023/of_node/name', `${audioCodec}\0`);
+  write('/sys/bus/i2c/devices/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
+  write('/sys/bus/i2c/devices/6-0023/of_node/status', 'okay\0');
+  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/name', `${audioCodec}\n`);
+  write('/proc/asound/card0/codec#0', `Codec: ${audioCodec}\n`);
+  write('/proc/asound/card0/codec#1', `Codec: ${audioCodec}\n`);
+  write('/proc/asound/card0/pcm0p/info', `card: 0\ndevice: 0\nsubdevice: 0\nstream: PLAYBACK\nid: MultiMedia1\nname: MultiMedia1\nsubname: subdevice #0\nclass: 0\nsubclass: 0\nsubdevices_count: 1\nsubdevices_avail: 1\n`);
+  write('/proc/asound/cards', ' 0 [msm8996tashasn]: MSM8996TASHA - MSM8996TASHA\n                      apk.js SoC - msm8996tashasndcard\n');
+  write('/proc/asound/devices', '  0: [ 0]   : control\n 16: [ 0- 0]: digital audio playback\n 24: [ 0- 0]: digital audio capture\n');
+  write('/sys/class/sound/card0/id', 'msm8996tashasndcard\n');
+
+  const fingerprintDescriptor = describeFingerprint();
+  for (const driver of ['fpc1020', 'fpc1145', 'fpc1022_irq', 'goodix_fp', 'cdfinger_fp']) {
+    write(`/sys/bus/platform/drivers/${driver}/uevent`, [
+      `DRIVER=${driver}`,
+      `MODALIAS=platform:${driver}`,
+      '',
+    ].join('\n'));
+    write(`/sys/bus/platform/drivers/${driver}/name`, `${driver}\n`);
+  }
+  write('/sys/bus/platform/drivers/goodix_fp/goodix_fp.0/name', 'goodix_fp.0\n');
+  write('/sys/bus/platform/drivers/mi2s/uevent', 'DRIVER=mi2s\nMODALIAS=platform:mi2s\n');
+  write('/sys/bus/platform/drivers/mi2s/name', 'mi2s\n');
+  VIRTUAL_FS.mkdirs(`/sys/bus/platform/drivers/${audioCodec}`);
+  write(`/sys/bus/platform/drivers/${audioCodec}/uevent`, `DRIVER=${audioCodec}\nMODALIAS=platform:${audioCodec}\n`);
+  write(`/sys/bus/platform/drivers/${audioCodec}/name`, `${audioCodec}\n`);
+  for (let codecIndex = 0; codecIndex < 2; codecIndex++) {
+    const dir = `/sys/bus/platform/drivers/${audioCodec}/${audioCodec}.${codecIndex}`;
+    write(`${dir}/name`, `${audioCodec}\n`);
+    write(`${dir}/uevent`, `DRIVER=${audioCodec}\nMODALIAS=platform:${audioCodec}\n`);
+    VIRTUAL_FS.mkdirs(dir);
+  }
+  write('/sys/class/fingerprint/fingerprint/name', `${fingerprintDescriptor}\n`);
+  write('/sys/class/fpsensor/fingerprint/module_id', `${fingerprintDescriptor}\n`);
+  write('/sys/class/fpsensor/fingerprint_chip_info', `${fingerprintDescriptor}\n`);
+  write('/sys/class/fpsensor/fingerprint/fingerprint_chip_info', `${fingerprintDescriptor}\n`);
+  write('/sys/devices/platform/fingerprint/fingerprint_chip_info', `${fingerprintDescriptor}\n`);
+  write('/sys/bus/i2c/devices/8-0025/name', `${fingerprintDescriptor}\n`);
 }
 
 function filePeerClass() {
@@ -4272,7 +4615,7 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     },
     'exists()Z': (self) => VIRTUAL_FS.exists(self.path),
     'isFile()Z': (self) => VIRTUAL_FS.isFile(self.path),
-    'isDirectory()Z': (self) => VIRTUAL_FS.isDirectory(self.path),
+    'isDirectory()Z': (self) => { if (globalThis.__DBG_FLAG && String(self.path).includes('wsa881x')) console.error('ISDIR ' + self.path); return VIRTUAL_FS.isDirectory(self.path); },
     'length()J': (self) => VIRTUAL_FS.length(self.path),
     'mkdir()Z': (self) => VIRTUAL_FS.mkdirs(self.path),
     'mkdirs()Z': (self) => VIRTUAL_FS.mkdirs(self.path),
@@ -4290,6 +4633,7 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     },
     'listFiles()[Ljava/io/File;': (self, _args, vm) => {
       const names = VIRTUAL_FS.list(self.path);
+      if (globalThis.__DBG_FLAG) console.error('LISTF ' + self.path + ' -> ' + JSON.stringify(names));
       if (!vm) return names;
       const array = vm.newArray('[Ljava/io/File;', names.length, null);
       names.forEach((name, index) => { array.$data[index] = wrapFilePath(vm, joinPaths(self.path, name)); });

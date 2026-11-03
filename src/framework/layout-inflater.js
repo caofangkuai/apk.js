@@ -13,12 +13,25 @@ import {
   ProgressBar,
   ScrollView,
   TextView,
+  WebView,
 } from './widgets.js';
-import { ActionBarContainer, ActionBarOverlayLayout, CoordinatorLayout, DrawerLayout, TableLayout, TableRow, Toolbar, SimpleFrameHost, ViewPagerHost, ViewStub, TabLayoutHost } from './layouts.js';
 import {
+  ActionBarContainer,
+  ActionBarOverlayLayout,
+  AbsoluteLayout,
+  CoordinatorLayout,
+  DrawerLayout,
   FrameLayout,
+  HorizontalScrollView,
   LinearLayout,
   RelativeLayout,
+  TableLayout,
+  TableRow,
+  Toolbar,
+  SimpleFrameHost,
+  ViewPagerHost,
+  ViewStub,
+  TabLayoutHost,
 } from './layouts.js';
 
 const VIEW_CLASSES = {
@@ -41,48 +54,24 @@ const RESOLVED_CLASSES = {
   'android.widget.LinearLayout': LinearLayout,
   'android.widget.FrameLayout': FrameLayout,
   'android.widget.RelativeLayout': RelativeLayout,
+  'android.widget.AbsoluteLayout': AbsoluteLayout,
   'android.widget.TextView': TextView,
   'android.widget.Button': Button,
   'android.widget.EditText': EditText,
   'android.widget.ImageView': ImageView,
   'android.widget.ScrollView': ScrollView,
+  'android.widget.HorizontalScrollView': HorizontalScrollView,
   'android.widget.ProgressBar': ProgressBar,
+  'android.widget.TableLayout': TableLayout,
+  'android.widget.TableRow': TableRow,
   'android.widget.Space': View,
+  'android.webkit.WebView': WebView,
+  'androidx.drawerlayout.widget.DrawerLayout': DrawerLayout,
+  'androidx.coordinatorlayout.widget.CoordinatorLayout': CoordinatorLayout,
+  'androidx.appcompat.widget.Toolbar': Toolbar,
+  'androidx.appcompat.widget.ActionBarContainer': ActionBarContainer,
+  'androidx.appcompat.widget.ActionBarOverlayLayout': ActionBarOverlayLayout,
 };
-
-function inferViewBase(fullName) {
-  const name = fullName.split('.').pop();
-  if (/RelativeLayout$/.test(name)) return RelativeLayout;
-  if (/ActionBarOverlayLayout$/.test(name)) return ActionBarOverlayLayout;
-  if (/ActionBarContainer$/.test(name)) return ActionBarContainer;
-  if (/OverlayLayout$/.test(name)) return FrameLayout;
-  if (/FrameLayout$/.test(name)) return FrameLayout;
-  if (/ContentFrameLayout$/.test(name)) return FrameLayout;
-  if (/Toolbar$/.test(name)) return Toolbar;
-  if (/TableRow$/.test(name)) return TableRow;
-  if (/TableLayout$/.test(name)) return TableLayout;
-  if (/DrawerLayout$/.test(name)) return DrawerLayout;
-  if (/CoordinatorLayout$/.test(name)) return CoordinatorLayout;
-  if (/ViewPager$/.test(name)) return ViewPagerHost;
-  if (/(NestedScrollView|SwipeRefreshLayout)$/.test(name)) return SimpleFrameHost;
-  if (/TabLayout$/.test(name)) return TabLayoutHost;
-  if (/(CollapsingToolbarLayout|NavigationMenuView|NavigationView)$/.test(name)) {
-    return FrameLayout;
-  }
-  if (/HorizontalScrollView$/.test(name)) {
-    return FrameLayout;
-  }
-  if (/Layout$/.test(name) || /ViewGroup$/.test(name)) {
-    return LinearLayout;
-  }
-  if (/Button$/.test(name)) return Button;
-  if (/EditText$/.test(name)) return EditText;
-  if (/ImageView$/.test(name)) return ImageView;
-  if (/ScrollView$/.test(name)) return ScrollView;
-  if (/ProgressBar$/.test(name)) return ProgressBar;
-  if (/TextView$/.test(name)) return TextView;
-  return null;
-}
 
 export class LayoutInflater {
   constructor(context) {
@@ -161,7 +150,7 @@ export class LayoutInflater {
     }
     const ctor = RESOLVED_CLASSES[fullName] || RESOLVED_CLASSES[tag] || VIEW_CLASSES[tag];
     if (!ctor) {
-      const base = inferViewBase(fullName) || this.baseFromDexSuperclass(fullName) || View;
+      const base = this.baseFromDexSuperclass(fullName) || View;
       const fallback = new base(this.context);
       fallback.$unknownTag = fullName;
       fallback.$descriptor = `L${fullName.replace(/\./g, '/')};`;
@@ -178,16 +167,28 @@ export class LayoutInflater {
     const vm = this.context?.vm || this.context?.$vm || this.vm || null;
     if (!vm) return null;
     const nativeBaseBySuper = {
+      'Landroid/view/View;': View,
+      'Landroid/view/ViewGroup;': FrameLayout,
       'Landroid/widget/FrameLayout;': FrameLayout,
-      'Lcom/google/android/material/internal/k;': FrameLayout,
       'Landroid/widget/LinearLayout;': LinearLayout,
       'Landroid/widget/RelativeLayout;': RelativeLayout,
+      'Landroid/widget/AbsoluteLayout;': AbsoluteLayout,
+      'Landroid/widget/TableLayout;': TableLayout,
+      'Landroid/widget/TableRow;': TableRow,
       'Landroid/widget/Toolbar;': Toolbar,
-      'Landroid/view/ViewGroup;': FrameLayout,
       'Landroid/widget/ScrollView;': ScrollView,
+      'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
       'Landroid/widget/TextView;': TextView,
       'Landroid/widget/Button;': Button,
+      'Landroid/widget/EditText;': EditText,
       'Landroid/widget/ImageView;': ImageView,
+      'Landroid/widget/ProgressBar;': ProgressBar,
+      'Landroid/webkit/WebView;': WebView,
+      'Landroidx/drawerlayout/widget/DrawerLayout;': DrawerLayout,
+      'Landroidx/coordinatorlayout/widget/CoordinatorLayout;': CoordinatorLayout,
+      'Landroidx/appcompat/widget/Toolbar;': Toolbar,
+      'Landroidx/appcompat/widget/ActionBarContainer;': ActionBarContainer,
+      'Landroidx/appcompat/widget/ActionBarOverlayLayout;': ActionBarOverlayLayout,
     };
     let desc = `L${fullName.replace(/\./g, '/')};`;
     const visited = new Set();

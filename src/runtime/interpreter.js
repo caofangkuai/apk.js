@@ -68,6 +68,7 @@ export class DexInterpreter {
       if (this.trace && !globalThis.__TRACED && method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'i0') { globalThis.__TRACED = true; }
       if (this.trace) this.trace(pc, op, method);
 
+
       try {
         switch (op) {
           case 0x00:
@@ -349,20 +350,28 @@ export class DexInterpreter {
           case 0x2f:
           case 0x30:
           case 0x31: {
-            const vA = (unit >> 8) & 0xf;
-            const vB = unit >> 12;
-            const vC = insns[pc + 1] & 0xff;
+            const vA = unit >>> 8;
+            const vB = insns[pc + 1] & 0xff;
+            const vC = insns[pc + 1] >> 8;
             const left = registers[vB];
             const right = registers[vC];
             let value;
             if (op === 0x2d) {
-              value = Number.isNaN(left) || Number.isNaN(right) ? -1 : left > right ? 1 : left < right ? -1 : 0;
+              const l = floatBitsToNumber(left);
+              const r = floatBitsToNumber(right);
+              value = Number.isNaN(l) || Number.isNaN(r) ? -1 : l > r ? 1 : l < r ? -1 : 0;
             } else if (op === 0x2e) {
-              value = Number.isNaN(left) || Number.isNaN(right) ? 1 : left > right ? 1 : left < right ? -1 : 0;
+              const l = floatBitsToNumber(left);
+              const r = floatBitsToNumber(right);
+              value = Number.isNaN(l) || Number.isNaN(r) ? 1 : l > r ? 1 : l < r ? -1 : 0;
             } else if (op === 0x2f) {
-              value = Number.isNaN(left) || Number.isNaN(right) ? -1 : left > right ? 1 : left < right ? -1 : 0;
+              const l = doubleBitsToNumber(left);
+              const r = doubleBitsToNumber(right);
+              value = Number.isNaN(l) || Number.isNaN(r) ? -1 : l > r ? 1 : l < r ? -1 : 0;
             } else if (op === 0x30) {
-              value = Number.isNaN(left) || Number.isNaN(right) ? 1 : left > right ? 1 : left < right ? -1 : 0;
+              const l = doubleBitsToNumber(left);
+              const r = doubleBitsToNumber(right);
+              value = Number.isNaN(l) || Number.isNaN(r) ? 1 : l > r ? 1 : l < r ? -1 : 0;
             } else {
               const l = toLong(left);
               const r = toLong(right);

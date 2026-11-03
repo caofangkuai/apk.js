@@ -299,6 +299,30 @@ export class View {
   }
 
   performClick() {
+    if (!this.$inPerformClick) {
+      const vm = this.$vm;
+      const obj = this.$javaObject;
+      const descriptor = this.$descriptor || obj?.$nativeClass;
+      const dexClass = vm && obj && descriptor ? vm.registry.resolve(descriptor)?.dexClass : null;
+      const overrides = dexClass
+        ? [...(dexClass.virtualMethods || []), ...(dexClass.directMethods || [])].find(
+            (m) => m.name === 'performClick' && m.proto?.descriptor === '()Z',
+          )
+        : null;
+      if (overrides) {
+        this.$inPerformClick = true;
+        try {
+          const result = vm.executeMethod(overrides, obj, []);
+          return typeof result === 'number' ? result !== 0 : !!result;
+        } catch (error) {
+          if (!error?.javaException && error?.name !== 'VMRuntimeError') throw error;
+        } finally {
+          this.$inPerformClick = false;
+        }
+        return false;
+      }
+    }
+    this.$inPerformClick = false;
     if (this.listeners.click) {
       this.listeners.click(this, this);
       return true;
@@ -1108,9 +1132,16 @@ export class View {
       );
       if (left !== 0 || top !== 0) {
         const prev = this.$dexAbsOffset || { dx: 0, dy: 0 };
-        const dx = left - prev.dx;
-        const dy = top - prev.dy;
         this.$dexAbsOffset = { dx: left, dy: top };
+        let alreadyAbsolute = false;
+        for (const child of this.children) {
+          if (Math.abs(child.top - top) <= 1 && Math.abs(child.left - left) <= 1) {
+            alreadyAbsolute = true;
+            break;
+          }
+        }
+        const dx = alreadyAbsolute ? 0 : left - prev.dx;
+        const dy = alreadyAbsolute ? 0 : top - prev.dy;
         if (dx !== 0 || dy !== 0) {
           const shiftTree = (node, sx, sy) => {
             node.left += sx;
@@ -1144,10 +1175,69 @@ export class View {
     const alpha = this.alpha;
     if (alpha < 1) canvas.context.globalAlpha = alpha;
     this.drawBackground(canvas);
-    this.onDraw(canvas);
-    this.dispatchDraw(canvas);
+    if (!this.drawWithDex(canvas)) {
+      this.onDraw(canvas);
+      this.dispatchDraw(canvas);
+    }
     if (alpha < 1) canvas.context.globalAlpha = 1;
     canvas.restore();
+  }
+
+  canvasObject(canvas) {
+    const vm = this.vm || this.$vm;
+    if (!vm || !canvas) return canvas;
+    if (canvas.$peer && canvas.$peer.canvas) return canvas;
+    const object = vm.allocateRawObject('Landroid/graphics/Canvas;');
+    object.$peer = { canvas };
+    return object;
+  }
+
+  drawWithDex(canvas) {
+    const vm = this.vm || this.$vm;
+    const object = this.$javaObject;
+    const descriptor = this.$descriptor;
+    if (!vm || !object || !descriptor || typeof vm.findVirtual !== 'function') return false;
+    if (this.$jsDrawHandled) return false;
+    let drawRes = null;
+    let dispatchRes = null;
+    try {
+      drawRes = vm.findVirtual(descriptor, 'onDraw', '(Landroid/graphics/Canvas;)V');
+      dispatchRes = vm.findVirtual(descriptor, 'dispatchDraw', '(Landroid/graphics/Canvas;)V');
+    } catch {
+      return false;
+    }
+    const drawDex = drawRes && drawRes.kind === 'dex';
+    const dispatchDex = dispatchRes && dispatchRes.kind === 'dex';
+    if (!drawDex && !dispatchDex) return false;
+    this.$jsDrawHandled = true;
+    try {
+      const canvasObj = this.canvasObject(canvas);
+      if (drawDex) {
+        vm.invoke(
+          { classDesc: descriptor, name: 'onDraw', proto: drawRes.method.proto },
+          object,
+          [canvasObj],
+          'virtual',
+        );
+      } else {
+        this.onDraw(canvas);
+      }
+      if (dispatchDex) {
+        vm.invoke(
+          { classDesc: descriptor, name: 'dispatchDraw', proto: dispatchRes.method.proto },
+          object,
+          [canvasObj],
+          'virtual',
+        );
+      } else {
+        this.dispatchDraw(canvas);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      this.$jsDrawHandled = false;
+    }
   }
 
   dispatchDraw(canvas) {
@@ -1208,18 +1298,17 @@ export class View {
     if (this.listeners.touch) {
       if (this.listeners.touch(this, event)) return true;
     }
-    if (this.onTouchEvent(event)) return true;
     for (let i = this.children.length - 1; i >= 0; i--) {
       const child = this.children[i];
       if (child.visibility === VISIBILITY.VISIBLE) {
-        const x = event.x - child.left - child.translationX;
-        const y = event.y - child.top - child.translationY;
-        if (x >= 0 && y >= 0 && x < child.getWidth() && y < child.getHeight()) {
-          const childEvent = { ...event, x, y };
-          if (child.dispatchTouchEvent(childEvent)) return true;
+        const cx = event.x - child.left - child.translationX;
+        const cy = event.y - child.top - child.translationY;
+        if (cx >= 0 && cy >= 0 && cx < child.getWidth() && cy < child.getHeight()) {
+          if (child.dispatchTouchEvent(event)) return true;
         }
       }
     }
+    if (this.onTouchEvent(event)) return true;
     return false;
   }
 

@@ -1,4 +1,5 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
+import { numberToFloatBits } from '../runtime/values.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
 import { JAVA_CORE_CLASSES, deviceCapabilities, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
 import { LayoutInflater } from './layout-inflater.js';
@@ -21,6 +22,7 @@ import {
 import {
   AbsoluteLayout,
   FrameLayout,
+  HorizontalScrollView,
   LinearLayout,
   RelativeLayout,
   ActionBarContainer,
@@ -56,15 +58,47 @@ function detectPlatformName() {
   return raw.toLowerCase().replace(/\s+/g, '_');
 }
 
+function detectSocPlatform() {
+  const arch = String(readNavigator()?.userAgentData?.architecture || '').toLowerCase();
+  if (arch.includes('arm') || arch === '') return 'qcom';
+  return 'qcom';
+}
+
+function browserMarketName(nav) {
+  const agent = String(nav?.userAgent || '');
+  const platform = String(nav?.platform || '');
+  const match = /\(([^)]+)\)/.exec(agent);
+  if (match) {
+    const parts = match[1].split(';').map((part) => part.trim()).filter(Boolean);
+    const candidate = parts.find((part) => /^[A-Z][A-Za-z0-9 _.+\-]{2,}$/.test(part) && !/Linux|Windows|Macintosh|Android|Mobile|X11/i.test(part));
+    if (candidate) return candidate;
+  }
+  if (platform) return platform;
+  return 'apk.js Browser';
+}
+
+function browserModelName(nav) {
+  const agent = String(nav?.userAgent || '');
+  if (/Edg\//.test(agent)) return 'Edge';
+  if (/Firefox\//.test(agent)) return 'Firefox';
+  if (/OPR\/|Opera/.test(agent)) return 'Opera';
+  if (/Chrome\//.test(agent)) return 'Chrome';
+  if (/Safari\//.test(agent)) return 'Safari';
+  return 'Browser';
+}
+
 function buildSystemProperties() {
   const nav = readNavigator();
   const platform = detectPlatformName();
+  const soc = detectSocPlatform();
   const language = String(nav?.language || 'en-US');
   return {
     'ro.product.brand': 'apk.js',
     'ro.product.manufacturer': 'apk.js',
-    'ro.product.model': 'Browser',
-    'ro.product.nickname': 'apk.js Browser',
+    'ro.product.model': browserModelName(nav),
+    'ro.product.nickname': browserMarketName(nav),
+    'ro.product.odm.marketname': browserMarketName(nav),
+    'ro.product.marketname': browserMarketName(nav),
     'ro.product.device': platform,
     'ro.product.name': platform,
     'ro.product.board': platform,
@@ -79,12 +113,12 @@ function buildSystemProperties() {
     'ro.build.type': 'user',
     'ro.build.tags': 'release-keys',
     'ro.build.characteristics': 'default',
-    'ro.hardware': platform,
-    'ro.hardware.chipname': platform,
-    'ro.board.platform': platform,
+    'ro.hardware': soc,
+    'ro.hardware.chipname': soc,
+    'ro.board.platform': soc,
     'ro.soc.model': 'apk.js SoC',
     'ro.soc.manufacturer': 'apk.js',
-    'ro.chipname': platform,
+    'ro.chipname': soc,
     'ro.serialno': 'unknown',
     'ro.bootloader': 'unknown',
     'ro.debuggable': '0',
@@ -96,6 +130,39 @@ function buildSystemProperties() {
 }
 
 let cachedSystemProperties = null;
+
+let cachedSystemFeatures = null;
+
+export function systemFeatureNames() {
+  if (cachedSystemFeatures) return cachedSystemFeatures;
+  const capabilities = deviceCapabilities();
+  const names = [
+    'android.hardware.audio.output',
+    'android.hardware.audio.low_latency',
+    'android.hardware.audio.pro',
+    'android.hardware.bluetooth',
+    'android.hardware.camera',
+    'android.hardware.camera.any',
+    'android.hardware.faketouch',
+    'android.hardware.fingerprint',
+    'android.hardware.location',
+    'android.hardware.location.network',
+    'android.hardware.screen.landscape',
+    'android.hardware.screen.portrait',
+    'android.hardware.sensor.accelerometer',
+    'android.hardware.sensor.gyroscope',
+    'android.hardware.sensor.light',
+    'android.hardware.sensor.proximity',
+    'android.hardware.touchscreen',
+    'android.hardware.type.television',
+    'android.hardware.usb.host',
+    'android.hardware.wifi',
+    'android.software.webview',
+  ];
+  if (capabilities.touchPoints > 0) names.push('android.hardware.touchscreen.multitouch', 'android.hardware.touchscreen.multitouch.jazzhand');
+  if (capabilities.cores >= 2) names.push('android.hardware.sensor.stepcounter');
+  return (cachedSystemFeatures = names);
+}
 
 function systemProperties() {
   if (cachedSystemProperties) return cachedSystemProperties;
@@ -172,6 +239,8 @@ const INPUT_DEVICE_DEFINITIONS = [
   { id: 1, name: 'apk.js Touchscreen', vendorId: 1, productId: 1, descriptor: 'a1b2c3d4e5f60718', sources: 0x00001002 },
   { id: 2, name: 'apk.js Touch Keys', vendorId: 1, productId: 2, descriptor: 'b1b2c3d4e5f60719', sources: 0x00000101 },
   { id: 3, name: 'gpio-keys', vendorId: 1, productId: 3, descriptor: 'c1b2c3d4e5f6071a', sources: 0x00000101 },
+  { id: 4, name: 'wsa881x-i2c-codec -snd-card', vendorId: 1, productId: 4, descriptor: 'd1b2c3d4e5f6071b', sources: 0x00000001 },
+  { id: 5, name: 'wsa881x-i2c-codec -snd-card', vendorId: 1, productId: 5, descriptor: 'e1b2c3d4e5f6071c', sources: 0x00000001 },
 ];
 
 const SENSOR_DEFINITIONS = [
@@ -225,6 +294,7 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/FrameLayout;': FrameLayout,
   'Landroid/widget/LinearLayout;': LinearLayout,
   'Landroid/widget/RelativeLayout;': RelativeLayout,
+  'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
   'Landroid/widget/TextView;': TextView,
   'Landroid/widget/Button;': Button,
   'Landroid/widget/EditText;': EditText,
@@ -399,7 +469,7 @@ function buildLayoutParamsViaDex(vm, descriptor, params) {
     setBaseField('height', params.height | 0);
     if (descriptor === 'Landroidx/viewpager/widget/ViewPager$g;') {
       for (const key of object.$fields.keys()) {
-        if (key.endsWith('->c:F') && !Number(object.$fields.get(key))) object.$fields.set(key, 1);
+        if (key.endsWith('->c:F') && !object.$fields.get(key)) object.$fields.set(key, numberToFloatBits(1));
       }
     }
     const hasMargins = params.leftMargin !== undefined || params.topMargin !== undefined
@@ -469,8 +539,9 @@ function viewPeerConstructor(descriptor, superDescriptor = null) {
         object.$view = new ViewClass(context);
         object.$view.$vm = vm;
         object.$view.$javaObject = object;
-        const viewDescriptor = object.$nativeClass || descriptor;
+        const viewDescriptor = object.$runtimeClass?.descriptor || object.$nativeClass || descriptor;
         object.$view.$descriptor = viewDescriptor;
+        if (!object.$nativeClass) object.$nativeClass = viewDescriptor;
         viewDescriptor && object.$fields?.set(
           `${viewDescriptor}->$view:Landroid/view/View;`,
           object.$view
@@ -780,6 +851,14 @@ function buildFrameworkDefinitions(vm) {
         'getAssets()Landroid/content/res/AssetManager;': (self, _args, vm) => (self.resources || vm.resources)?.getAssets(),
         'getApplicationContext()Landroid/content/Context;': (self, _args, vm) => self.contextObject || self,
         'getPackageName()Ljava/lang/String;': (self, _args, vm) => vm.packageName,
+        'getContentResolver()Landroid/content/ContentResolver;': (self, _args, vm) => {
+          if (!self.contentResolver || self.contentResolver === null) {
+            const resolver = vm.allocateRawObject('Landroid/content/ContentResolver;');
+            resolver.$peer = { vm };
+            self.contentResolver = resolver;
+          }
+          return self.contentResolver;
+        },
         'isRestricted()Z': () => false,
         'getString(I)Ljava/lang/String;': (self, [resId], vm) => (self.resources || vm.resources).getString(resId >>> 0),
         'getString(I[Ljava/lang/Object;)Ljava/lang/String;': (self, [resId, args]) => {
@@ -834,9 +913,9 @@ function buildFrameworkDefinitions(vm) {
         },
         'setTheme(Landroid/content/res/Resources$Theme;)V': () => undefined,
         'obtainStyledAttributes([I)Landroid/content/res/TypedArray;': (self, [attrs], vm) => createTypedArray(vm, attrs),
-        'obtainStyledAttributes(I[I)Landroid/content/res/TypedArray;': (self, [_style, attrs], vm) => createTypedArray(vm, attrs),
+        'obtainStyledAttributes(I[I)Landroid/content/res/TypedArray;': (self, [styleId, attrs], vm) => createTypedArray(vm, attrs, styleId >>> 0),
         'obtainStyledAttributes(Landroid/util/AttributeSet;[I)Landroid/content/res/TypedArray;': (self, [set, attrs], vm) => createTypedArray(vm, attrs, 0, set),
-        'obtainStyledAttributes(Landroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [set, attrs, defStyleAttr, _defStyleRes], vm) => createTypedArray(vm, attrs, 0, set, defStyleAttr),
+        'obtainStyledAttributes(Landroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [set, attrs, defStyleAttr, defStyleRes], vm) => createTypedArray(vm, attrs, defStyleRes >>> 0, set, defStyleAttr),
         'obtainStyledAttributes([IIII)Landroid/content/res/TypedArray;': (self, [attrs], vm) => createTypedArray(vm, attrs),
       },
     })
@@ -968,10 +1047,10 @@ function buildFrameworkDefinitions(vm) {
           self.obtainStyledAttributes?.(attrs) ?? createTypedArray(vm, attrs),
         'obtainStyledAttributes(I[I)Landroid/content/res/TypedArray;': (self, [styleId, attrs], vm) =>
           self.obtainStyledAttributesWithStyle?.(styleId, attrs, vm) ?? createTypedArray(vm, attrs),
-        'obtainStyledAttributes(ILandroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [styleId, _set, attrs], vm) =>
-          self.obtainStyledAttributesWithStyle?.(styleId, attrs, vm) ?? createTypedArray(vm, attrs),
-        'obtainStyledAttributes(Landroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [_set, attrs], vm) =>
-          self.obtainStyledAttributes?.(attrs) ?? createTypedArray(vm, attrs),
+        'obtainStyledAttributes(ILandroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [styleId, set, attrs, defStyleAttr, defStyleRes], vm) =>
+          createTypedArray(vm, attrs, (styleId >>> 0) || (defStyleRes >>> 0), set, defStyleAttr),
+        'obtainStyledAttributes(Landroid/util/AttributeSet;[III)Landroid/content/res/TypedArray;': (self, [set, attrs, defStyleAttr, defStyleRes], vm) =>
+          createTypedArray(vm, attrs, defStyleRes >>> 0, set, defStyleAttr),
       },
     })
   );
@@ -2062,7 +2141,15 @@ function buildFrameworkDefinitions(vm) {
           const view = child?.$view || child;
           self.view?.measureChildWithMargins?.(view, wSpec | 0, wUsed | 0, hSpec | 0, hUsed | 0);
         },
-        'drawChild(Landroid/graphics/Canvas;Landroid/view/View;J)Z': () => true,
+        'drawChild(Landroid/graphics/Canvas;Landroid/view/View;J)Z': (self, [canvas, child]) => {
+          const hostCanvas = canvas?.$peer?.canvas || canvas;
+          const hostChild = child?.$view || child?.$peer?.view || null;
+          if (hostChild && hostCanvas && typeof hostChild.draw === 'function') {
+            hostChild.draw(hostCanvas);
+            return true;
+          }
+          return false;
+        },
         'dispatchDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.dispatchDraw?.(canvas),
         'getBackground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getBackground() ?? null,
         'getBaseline()I': (self) => self.view?.getBaseline?.() ?? -1,
@@ -3593,12 +3680,22 @@ function buildFrameworkDefinitions(vm) {
         },
         'queryIntentActivities(Landroid/content/Intent;I)Ljava/util/List;': () => null,
         'resolveActivity(Landroid/content/Intent;I)Landroid/content/pm/ResolveInfo;': () => null,
-        'getSystemAvailableFeatures()[Landroid/content/pm/FeatureInfo;': (_self, _args, vm) =>
-          vm.newArray('[Landroid/content/pm/FeatureInfo;', 0, null),
+        'getSystemAvailableFeatures()[Landroid/content/pm/FeatureInfo;': (_self, _args, vm) => {
+          const names = systemFeatureNames();
+          const array = vm.newArray('[Landroid/content/pm/FeatureInfo;', names.length, null);
+          for (let i = 0; i < names.length; i++) {
+            const info = vm.allocateRawObject('Landroid/content/pm/FeatureInfo;');
+            info.$peer = { vm, name: names[i], reqGlEsVersion: 0x00030000, version: 0 };
+            info.name = names[i];
+            info.reqGlEsVersion = 0x00030000;
+            array.$data[i] = info;
+          }
+          return array;
+        },
         'getSystemSharedLibraryNames()[Ljava/lang/String;': (_self, _args, vm) =>
           vm.newArray('[Ljava/lang/String;', 0, null),
-        'hasSystemFeature(Ljava/lang/String;)Z': () => false,
-        'hasSystemFeature(Ljava/lang/String;I)Z': () => false,
+        'hasSystemFeature(Ljava/lang/String;)Z': (_self, [name]) => systemFeatureNames().includes(jsString(name)),
+        'hasSystemFeature(Ljava/lang/String;I)Z': (_self, [name]) => systemFeatureNames().includes(jsString(name)),
         'getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;': (self, _args, vm) => {
           const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
           info.$peer = { vm, constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' } };
@@ -3702,7 +3799,8 @@ function buildFrameworkDefinitions(vm) {
             const peer = vm.registry?.getPeer?.(values, 'Ljava/lang/Iterable;');
             items = peer?.items || peer?.setItems || null;
           }
-          return (items || []).map((item) => jsString(item)).join(jsString(separator));
+          const joined = (items || []).map((item) => jsString(item)).join(jsString(separator));
+          return joined;
         },
       },
     })
@@ -3713,20 +3811,20 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       staticFields: new Map([
         ['VERSION:Landroid/os/Build$VERSION;', { $descriptor: 'Landroid/os/Build$VERSION;' }],
-        ['MODEL:Ljava/lang/String;', 'Browser'],
-        ['MANUFACTURER:Ljava/lang/String;', 'apk.js'],
-        ['BRAND:Ljava/lang/String;', 'apk.js'],
-        ['DEVICE:Ljava/lang/String;', 'browser'],
-        ['PRODUCT:Ljava/lang/String;', 'browser'],
-        ['BOARD:Ljava/lang/String;', 'browser'],
-        ['HARDWARE:Ljava/lang/String;', 'browser'],
-        ['FINGERPRINT:Ljava/lang/String;', 'apk.js/browser/browser:12/SQ3A.220705.004/1:user/release-keys'],
+        ['MODEL:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.model'] }],
+        ['MANUFACTURER:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.manufacturer'] }],
+        ['BRAND:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.brand'] }],
+        ['DEVICE:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.device'] }],
+        ['PRODUCT:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.name'] }],
+        ['BOARD:Ljava/lang/String;', { lazy: () => systemProperties()['ro.product.board'] }],
+        ['HARDWARE:Ljava/lang/String;', { lazy: () => systemProperties()['ro.hardware'] }],
+        ['FINGERPRINT:Ljava/lang/String;', { lazy: () => systemProperties()['ro.build.fingerprint'] }],
         ['TYPE:Ljava/lang/String;', 'user'],
         ['TAGS:Ljava/lang/String;', 'release-keys'],
         ['ID:Ljava/lang/String;', 'SQ3A.220705.004'],
         ['DISPLAY:Ljava/lang/String;', 'SQ3A.220705.004'],
-        ['HOST:Ljava/lang/String;', 'monkeycode'],
-        ['USER:Ljava/lang/String;', 'root'],
+        ['HOST:Ljava/lang/String;', 'apk.js'],
+        ['USER:Ljava/lang/String;', 'apk.js'],
         ['CPU_ABI:Ljava/lang/String;', 'arm64-v8a'],
         ['CPU_ABI2:Ljava/lang/String;', ''],
         ['SUPPORTED_ABIS:[Ljava/lang/String;', { lazy(vm) { const a = vm.newArray('[Ljava/lang/String;', 3, null); ['arm64-v8a', 'armeabi-v7a', 'armeabi'].forEach((s, i) => { a.$data[i] = s; }); return a; } }],
@@ -4021,6 +4119,8 @@ function buildFrameworkDefinitions(vm) {
 
   defs.push(...coreGraphicDefs());
   defs.push(...cryptoDefs());
+  defs.push(...settingsDefs());
+  defs.push(...audioDefs());
   return defs;
 }
 
@@ -4206,6 +4306,253 @@ function aesCbcProcess(mode, keyBytes, iv, data) {
   if (ivBytes.length !== 16) return data;
   if (mode === 2) return aesDecryptCbc(key, ivBytes, data);
   return aesEncryptCbc(key, ivBytes, data);
+}
+
+function audioDefs() {
+  const outputDevices = () => [
+    { type: 2, name: 'Speaker', address: '', sampleRates: [44100, 48000], channelCounts: [2] },
+    { type: 3, name: 'Headset', address: '', sampleRates: [44100, 48000], channelCounts: [2] },
+  ];
+  const makeDeviceInfo = (vm, entry, id) => {
+    const info = vm.allocateRawObject('Landroid/media/AudioDeviceInfo;');
+    info.$peer = { vm, ...entry, id };
+    info.type = entry.type;
+    info.id = id;
+    info.productName = entry.name;
+    info.address = entry.address;
+    return info;
+  };
+  return [
+    nativeDef('Landroid/media/AudioDeviceInfo;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getType()I': (self) => toInt(self.type),
+        'getId()I': (self) => toInt(self.id),
+        'getProductName()Ljava/lang/CharSequence;': (self) => String(self.productName ?? ''),
+        'getAddress()Ljava/lang/String;': (self) => String(self.address ?? ''),
+        'isSource()Z': () => false,
+        'isSink()Z': () => true,
+        'getSampleRates()[I': (self, _args, vm) => {
+          const rates = self.sampleRates || [44100, 48000];
+          const array = vm.newArray('[I', rates.length);
+          rates.forEach((rate, index) => { array.$data[index] = rate; });
+          return array;
+        },
+        'getChannelCounts()[I': (self, _args, vm) => {
+          const counts = self.channelCounts || [2];
+          const array = vm.newArray('[I', counts.length);
+          counts.forEach((count, index) => { array.$data[index] = count; });
+          return array;
+        },
+        'getChannelMasks()[I': (self, _args, vm) => {
+          const array = vm.newArray('[I', 1);
+          array.$data[0] = 12;
+          return array;
+        },
+        'getEncodings()[I': (self, _args, vm) => {
+          const array = vm.newArray('[I', 1);
+          array.$data[0] = 1;
+          return array;
+        },
+      },
+    }),
+    nativeDef('Landroid/media/AudioManager;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['STREAM_VOICE_CALL:I', 0],
+        ['STREAM_SYSTEM:I', 1],
+        ['STREAM_RING:I', 2],
+        ['STREAM_MUSIC:I', 3],
+        ['STREAM_ALARM:I', 4],
+        ['STREAM_NOTIFICATION:I', 5],
+        ['STREAM_DTMF:I', 8],
+        ['STREAM_ACCESSIBILITY:I', 10],
+        ['AUDIOFOCUS_GAIN:I', 1],
+        ['AUDIOFOCUS_LOSS:I', -1],
+        ['ADJUST_RAISE:I', 1],
+        ['ADJUST_LOWER:I', -1],
+        ['ADJUST_SAME:I', 0],
+        ['MODE_NORMAL:I', 0],
+        ['MODE_RINGTONE:I', 1],
+        ['MODE_IN_CALL:I', 2],
+        ['MODE_IN_COMMUNICATION:I', 3],
+        ['RINGER_MODE_NORMAL:I', 2],
+        ['RINGER_MODE_SILENT:I', 0],
+        ['RINGER_MODE_VIBRATE:I', 1],
+        ['USE_DEFAULT_STREAM_TYPE:I', -2147483648],
+      ]),
+      methods: {
+        'getStreamMaxVolume(I)I': () => 15,
+        'getStreamVolume(I)I': () => 8,
+        'setStreamVolume(III)V': () => undefined,
+        'adjustStreamVolume(III)V': () => undefined,
+        'adjustVolume(II)V': () => undefined,
+        'setStreamMute(IZ)V': () => undefined,
+        'isStreamMute(I)Z': () => false,
+        'getMode()I': () => 0,
+        'setMode(I)V': () => undefined,
+        'getRingerMode()I': () => 2,
+        'setRingerMode(I)V': () => undefined,
+        'isMusicActive()Z': () => false,
+        'isSpeakerphoneOn()Z': () => true,
+        'setSpeakerphoneOn(Z)V': () => undefined,
+        'isBluetoothScoOn()Z': () => false,
+        'setBluetoothScoOn(Z)V': () => undefined,
+        'isWiredHeadsetOn()Z': () => false,
+        'requestAudioFocus(Landroid/media/AudioManager$OnAudioFocusChangeListener;III)I': () => 1,
+        'requestAudioFocus(Landroid/media/AudioFocusRequest;)I': () => 1,
+        'abandonAudioFocus(Landroid/media/AudioManager$OnAudioFocusChangeListener;)I': () => 1,
+        'abandonAudioFocusRequest(Landroid/media/AudioFocusRequest;)I': () => 1,
+        'registerAudioDeviceCallback(Landroid/media/AudioDeviceCallback;Landroid/os/Handler;)V': () => undefined,
+        'unregisterAudioDeviceCallback(Landroid/media/AudioDeviceCallback;)V': () => undefined,
+        'getDevices(I)[Landroid/media/AudioDeviceInfo;': (_self, [_flags], vm) => {
+          const entries = outputDevices();
+          const array = vm.newArray('[Landroid/media/AudioDeviceInfo;', entries.length, null);
+          entries.forEach((entry, index) => { array.$data[index] = makeDeviceInfo(vm, entry, index + 1); });
+          return array;
+        },
+        'getProperty(Ljava/lang/String;)Ljava/lang/String;': (_self, [key]) => {
+          const name = jsString(key);
+          if (name === 'ro.product.model') return 'apk.js Browser';
+          return '';
+        },
+      },
+    }),
+    nativeDef('Landroid/media/MediaCodecInfo;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getName()Ljava/lang/String;': (self) => String(self.className ?? ''),
+        'isEncoder()Z': (self) => !!self.encoder,
+        'isDecoder()Z': (self) => !self.encoder,
+        'getSupportedTypes()[Ljava/lang/String;': (self, _args, vm) => {
+          const types = self.types || [];
+          const array = vm.newArray('[Ljava/lang/String;', types.length);
+          types.forEach((type, index) => { array.$data[index] = type; });
+          return array;
+        },
+      },
+    }),
+    nativeDef('Landroid/media/MediaCodecList;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['ALL_CODECS:I', 1],
+        ['REGULAR_CODECS:I', 0],
+      ]),
+      methods: {
+        'getCodecCount()I': () => 4,
+        'getCodecInfoAt(I)Landroid/media/MediaCodecInfo;': (_self, [index], vm) => {
+          const entries = [
+            { name: 'OMX.google.aac.decoder', encoder: false, types: ['audio/mp4a-latm'] },
+            { name: 'OMX.google.aac.encoder', encoder: true, types: ['audio/mp4a-latm'] },
+            { name: 'OMX.google.h264.decoder', encoder: false, types: ['video/avc'] },
+            { name: 'OMX.google.h264.encoder', encoder: true, types: ['video/avc'] },
+          ];
+          const entry = entries[toInt(index)] || entries[0];
+          const info = vm.allocateRawObject('Landroid/media/MediaCodecInfo;');
+          info.$peer = { vm, ...entry };
+          info.className = entry.name;
+          info.encoder = entry.encoder;
+          info.types = entry.types;
+          return info;
+        },
+        'findDecoderForFormat(Landroid/media/MediaFormat;)Ljava/lang/String;': () => 'OMX.google.aac.decoder',
+        'findEncoderForFormat(Landroid/media/MediaFormat;)Ljava/lang/String;': () => 'OMX.google.aac.encoder',
+      },
+    }),
+  ];
+}
+
+function settingsDefs() {
+  const settingsValues = () => {
+    const nav = readNavigator();
+    const language = String(nav?.language || 'en-US');
+    return {
+      'screen_brightness': '120',
+      'screen_brightness_mode': '1',
+      'screen_off_timeout': '60000',
+      'sound_effects_enabled': '0',
+      'vibrate_on': '0',
+      'user_rotation': '0',
+      'accelerometer_rotation': '1',
+      'font_scale': '1.0',
+      'device_name': 'apk.js Browser',
+      'system_locales': language,
+      'adb_enabled': '0',
+      'development_settings_enabled': '0',
+      'android_id': 'apkjs000000000001',
+      'bluetooth_on': '0',
+      'wifi_on': '1',
+      'airplane_mode_on': '0',
+      'time_12_24': '24',
+      'date_format': 'yyyy-MM-dd',
+    };
+  };
+  const readSetting = (name) => {
+    const values = settingsValues();
+    const key = jsString(name);
+    return values[key] !== undefined ? values[key] : null;
+  };
+  const settingDef = (descriptor) => nativeDef(descriptor, {
+    super: 'Ljava/lang/Object;',
+    staticFields: new Map([
+      ['ACTION_ACCESSIBILITY_SETTINGS:Ljava/lang/String;', 'android.settings.ACCESSIBILITY_SETTINGS'],
+      ['ACTION_SETTINGS:Ljava/lang/String;', 'android.settings.SETTINGS'],
+    ]),
+    methods: {
+      'getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;': (_self, [resolver, name]) => {
+        void resolver;
+        return readSetting(name);
+      },
+      'getString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (_self, [resolver, name, fallback]) => {
+        void resolver;
+        const value = readSetting(name);
+        return value === null ? jsString(fallback) : value;
+      },
+      'getInt(Landroid/content/ContentResolver;Ljava/lang/String;)I': (_self, [resolver, name]) => {
+        void resolver;
+        const value = readSetting(name);
+        return value === null ? 0 : Number.parseInt(value, 10) || 0;
+      },
+      'getInt(Landroid/content/ContentResolver;Ljava/lang/String;I)I': (_self, [resolver, name, fallback]) => {
+        void resolver;
+        const value = readSetting(name);
+        return value === null ? toInt(fallback) : (Number.parseInt(value, 10) || 0);
+      },
+      'getLong(Landroid/content/ContentResolver;Ljava/lang/String;J)J': (_self, [resolver, name, fallback]) => {
+        void resolver;
+        const value = readSetting(name);
+        return value === null ? fallback : (Number.parseInt(value, 10) || 0);
+      },
+      'getFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)F': (_self, [resolver, name, fallback]) => {
+        void resolver;
+        const value = readSetting(name);
+        return value === null ? Number(fallback) : (Number.parseFloat(value) || 0);
+      },
+      'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': () => true,
+      'putString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Z': () => true,
+      'putLong(Landroid/content/ContentResolver;Ljava/lang/String;J)Z': () => true,
+      'putFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)Z': () => true,
+    },
+  });
+  return [
+    settingDef('Landroid/provider/Settings;'),
+    settingDef('Landroid/provider/Settings$Global;'),
+    settingDef('Landroid/provider/Settings$Secure;'),
+    settingDef('Landroid/provider/Settings$System;'),
+    nativeDef('Landroid/content/ContentResolver;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getType(Landroid/net/Uri;)Ljava/lang/String;': () => null,
+        'getString(Landroid/net/Uri;)Ljava/lang/String;': () => null,
+        'query(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;': () => null,
+        'registerContentObserver(Landroid/net/Uri;ZLandroid/database/ContentObserver;)V': () => undefined,
+        'unregisterContentObserver(Landroid/database/ContentObserver;)V': () => undefined,
+        'notifyChange(Landroid/net/Uri;Landroid/database/ContentObserver;)V': () => undefined,
+        'notifyChange(Landroid/net/Uri;Landroid/database/ContentObserver;Z)V': () => undefined,
+        'takePersistableUriPermission(Landroid/net/Uri;I)V': () => undefined,
+      },
+    }),
+  ];
 }
 
 function coreGraphicDefs() {
@@ -5178,27 +5525,42 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
   const defStyleAttributes = defStyleAttr ? table?.getStyleAttributes?.((defStyleAttr >>> 0) & 0xffffffff) : null;
   const present = new Set();
   for (const attrId of ids) {
+    const id = attrId >>> 0;
     const nodeValue = attributeValueFor(attributeSet, attrId);
     if (nodeValue !== undefined && nodeValue !== null) {
-      result.set(attrId >>> 0, nodeValue);
-      present.add(attrId >>> 0);
+      result.set(id, nodeValue);
+      present.add(id);
       continue;
     }
-    const entry = table ? table.getEntry(attrId >>> 0) : null;
+    if (styleAttributes && styleAttributes.has(id)) {
+      const raw = styleAttributes.get(id);
+      result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
+      present.add(id);
+      continue;
+    }
+    if (defStyleAttributes && defStyleAttributes.has(id)) {
+      const raw = defStyleAttributes.get(id);
+      result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
+      present.add(id);
+      continue;
+    }
+    const entry = table ? table.getEntry(id) : null;
     const key = entry?.key;
     const styleAttrId = styleAttributes ? lookupStyleAttributeId(table, styleAttributes, key) : 0;
-    if (styleAttrId) {
-      const raw = styleAttributes.get(styleAttrId);
-      result.set(attrId >>> 0, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
-      present.add(attrId >>> 0);
+    const defStyleAttrId = !styleAttrId && defStyleAttributes ? lookupStyleAttributeId(table, defStyleAttributes, key) : 0;
+    if (styleAttrId || defStyleAttrId) {
+      const source = styleAttrId ? styleAttributes : defStyleAttributes;
+      const raw = source.get(styleAttrId || defStyleAttrId);
+      result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
+      present.add(id);
     } else if (key && Object.prototype.hasOwnProperty.call(store, key)) {
-      result.set(attrId >>> 0, store[key]);
-      present.add(attrId >>> 0);
+      result.set(id, store[key]);
+      present.add(id);
     } else if (key) {
       const cosmetic = /color/i.test(key);
-      result.set(attrId >>> 0, cosmetic ? 0xff2196f3 >>> 0 : 0);
+      result.set(id, cosmetic ? 0xff2196f3 >>> 0 : 0);
     } else {
-      result.set(attrId >>> 0, 0);
+      result.set(id, 0);
     }
   }
   Object.defineProperty(result, '__present', { value: present, enumerable: false });
@@ -5259,29 +5621,38 @@ function makeTypedArrayPeer(vm, values, present = null) {
       return value;
     },
     getBoolean: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (value === true || value === false) return value;
       if (typeof value === 'number') return value !== 0;
       return fallback;
     },
     getInt: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       return typeof value === 'number' ? value | 0 : fallback;
     },
     getInteger: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       return typeof value === 'number' ? value | 0 : fallback;
     },
     getResourceId: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (typeof value === 'number') return value >>> 0;
       if (value && typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
       return fallback;
     },
     getDimension: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (typeof value === 'number') return value;
       if (value === undefined) return fallback;
+      if (value && typeof value === 'object' && value.reference !== undefined) {
+        const dim = vm.resources?.getDimensionPixelSize?.(value.reference >>> 0);
+        if (typeof dim === 'number' && Number.isFinite(dim)) return dim;
+      }
       return convertDimension(value, vm.resources?.density || 1);
     },
     getDimensionPixelSize: (index, fallback) => {
@@ -5293,6 +5664,7 @@ function makeTypedArrayPeer(vm, values, present = null) {
       return Math.trunc(Number(value) || 0);
     },
     getColor: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (typeof value === 'number') return value >>> 0;
       if (value && typeof value === 'object' && value.reference !== undefined) {
@@ -5326,11 +5698,13 @@ function makeTypedArrayPeer(vm, values, present = null) {
     getText: (index) => makeTypedArrayPeer(vm, values).getString(index),
     getLayoutDimension: (index, fallback) => makeTypedArrayPeer(vm, values).getDimensionPixelSize(index, fallback),
     getFraction: (index, base, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (typeof value !== 'number') return fallback;
       return value;
     },
     getFloat: (index, fallback) => {
+      if (!isPresent(index)) return fallback;
       const value = lookup(index);
       return typeof value === 'number' ? value : fallback;
     },
