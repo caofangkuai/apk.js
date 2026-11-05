@@ -207,7 +207,13 @@ export class DexFile {
       }
 
       if (classDataOff) this.parseClassData(reader, dexClass, classDataOff);
-      if (staticValuesOff) dexClass.staticValues = this.parseEncodedArray(reader, staticValuesOff);
+      if (staticValuesOff) {
+        dexClass.staticValues = this.parseEncodedArray(reader, staticValuesOff);
+        const count = Math.min(dexClass.staticValues.length, dexClass.staticFields.length);
+        for (let n = 0; n < count; n += 1) {
+          dexClass.staticFields[n].value = dexClass.staticValues[n];
+        }
+      }
 
       this.classes[i] = dexClass;
       this.classesByDescriptor.set(dexClass.descriptor, dexClass);

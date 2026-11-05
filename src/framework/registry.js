@@ -1904,6 +1904,62 @@ function buildFrameworkDefinitions(vm) {
     })
   );
 
+  const PORTER_DUFF_MODES = [
+    ['CLEAR', 0], ['SRC', 1], ['DST', 2], ['SRC_OVER', 3], ['DST_OVER', 4],
+    ['SRC_IN', 5], ['DST_IN', 6], ['SRC_OUT', 7], ['DST_OUT', 8], ['SRC_ATOP', 9],
+    ['DST_ATOP', 10], ['XOR', 11], ['DARKEN', 12], ['LIGHTEN', 13], ['MULTIPLY', 14],
+    ['SCREEN', 15], ['ADD', 16], ['OVERLAY', 17],
+  ];
+  const porterDuffModePeer = (vm, name, ordinal) => {
+    if (!vm.__porterDuffModes) vm.__porterDuffModes = new Map();
+    const existing = vm.__porterDuffModes.get(name);
+    if (existing) return existing;
+    const object = vm.allocateRawObject('Landroid/graphics/PorterDuff$Mode;');
+    object.$peer = { name, ordinal };
+    vm.__porterDuffModes.set(name, object);
+    return object;
+  };
+  defs.push(
+    nativeDef('Landroid/graphics/PorterDuff$Mode;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map(
+        PORTER_DUFF_MODES.map(([name, ordinal]) => [
+          `${name}:Landroid/graphics/PorterDuff$Mode;`,
+          { lazy: (vm) => porterDuffModePeer(vm, name, ordinal) },
+        ])
+      ),
+      staticMethods: {
+        'values()[Landroid/graphics/PorterDuff$Mode;': (_self, _args, vm) => {
+          const array = vm.newArray('Landroid/graphics/PorterDuff$Mode;', PORTER_DUFF_MODES.length);
+          PORTER_DUFF_MODES.forEach(([name, ordinal], i) => {
+            array.$data[i] = porterDuffModePeer(vm, name, ordinal);
+          });
+          return array;
+        },
+        'valueOf(Ljava/lang/String;)Landroid/graphics/PorterDuff$Mode;': (_self, [name], vm) => {
+          const entry = PORTER_DUFF_MODES.find(([n]) => n === String(name));
+          return entry ? porterDuffModePeer(vm, entry[0], entry[1]) : null;
+        },
+      },
+      methods: {
+        'name()Ljava/lang/String;': (self) => self.name,
+        'ordinal()I': (self) => self.ordinal,
+        'toString()Ljava/lang/String;': (self) => self.name,
+        'hashCode()I': (self) => self.ordinal + 1,
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          if (other === self) return true;
+          if (!other || typeof other !== 'object') return false;
+          const peer = other.$peer || other;
+          return peer.name === self.name;
+        },
+        'compareTo(Ljava/lang/Enum;)I': (self, [other]) => {
+          const peer = other?.$peer || other;
+          return self.ordinal - Number(peer?.ordinal ?? 0);
+        },
+      },
+    })
+  );
+
   defs.push(
     nativeDef('Landroid/view/View;', {
       super: 'Ljava/lang/Object;',

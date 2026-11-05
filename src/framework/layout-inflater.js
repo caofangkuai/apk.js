@@ -287,6 +287,7 @@ export class LayoutInflater {
         const child = this.inflateNode(childNode, root);
         if (child) this.mountChild(root, child, childNode);
       }
+      this.finishInflate(root);
       return root;
     }
     const view = this.inflateNode(node, root);
@@ -311,9 +312,30 @@ export class LayoutInflater {
           if (child) this.mountChild(view, child, childNode);
         }
       }
+      this.finishInflate(view);
       return view;
     } finally {
       if (ownTheme) ownTheme.restore();
+    }
+  }
+
+  finishInflate(view) {
+    if (!view) return;
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    const object = view.$javaObject;
+    const descriptor = view.$descriptor;
+    if (!vm || !object || !descriptor || typeof vm.findVirtual !== 'function') return;
+    let resolved;
+    try {
+      resolved = vm.findVirtual(descriptor, 'onFinishInflate', '()V');
+    } catch {
+      return;
+    }
+    if (!resolved || resolved.kind !== 'dex') return;
+    try {
+      vm.invoke({ classDesc: descriptor, name: 'onFinishInflate', proto: resolved.method.proto }, object, [], 'virtual');
+    } catch {
+      // 与 Android 一致：初始化失败不应中断整棵布局的构建
     }
   }
 
