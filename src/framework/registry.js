@@ -33,6 +33,7 @@ import {
   GridLayout,
   HorizontalScrollView,
   LinearLayout,
+  ListView,
   RelativeLayout,
 } from './layouts.js';
 import {
@@ -45,7 +46,7 @@ import {
   WebView,
   resolveStateListColor,
 } from './widgets.js';
-import { DecorView, SurfaceScreen, Window } from './window.js';
+import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
 
 export const FRAMEWORK_CLASSES = {};
 
@@ -308,6 +309,7 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/EditText;': EditText,
   'Landroid/widget/ImageView;': ImageView,
   'Landroid/widget/ScrollView;': ScrollView,
+  'Landroid/widget/ListView;': ListView,
   'Landroid/widget/ProgressBar;': ProgressBar,
   'Landroid/widget/AbsoluteLayout;': AbsoluteLayout,
   'Landroid/widget/Switch;': Button,
@@ -382,6 +384,170 @@ function applyGravity(gravity, width, height, container, out, layoutDirection = 
   setRectField(out, 'top', ct + y);
   setRectField(out, 'right', cl + x + width);
   setRectField(out, 'bottom', ct + y + height);
+}
+
+function popupLayout(peer) {
+  const view = unwrapView(peer.contentView);
+  if (!view) return null;
+  const screen = peer.vm?.screen || null;
+  const maxWidth = screen?.width || 360;
+  const maxHeight = screen?.height || 640;
+  const left = Math.max(0, Math.min(peer.$left | 0, maxWidth - 1));
+  const top = Math.max(0, Math.min(peer.$top | 0, maxHeight - 1));
+  const availableWidth = Math.max(0, maxWidth - left - 4);
+  const availableHeight = Math.max(0, maxHeight - top - 4);
+  let width = peer.width > 0 ? peer.width | 0 : 0;
+  let height = peer.height > 0 ? peer.height | 0 : 0;
+  const widthSpec = width > 0
+    ? MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY)
+    : MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST);
+  const heightSpec = height > 0
+    ? MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+    : MeasureSpec.makeMeasureSpec(availableHeight, MeasureSpec.AT_MOST);
+  try {
+    view.measure(widthSpec, heightSpec);
+    if (!width) width = Math.min(view.getMeasuredWidth(), availableWidth);
+    if (!height) height = Math.min(view.getMeasuredHeight(), availableHeight);
+    view.layout(0, 0, width, height);
+  } catch {
+    return null;
+  }
+  peer.$width = width;
+  peer.$height = height;
+  return { view, left, top, width, height };
+}
+
+function dismissPopup(peer) {
+  if (!peer || !peer.showing) return;
+  const content = unwrapView(peer.contentView);
+  if (content) delete content.$dismissPopup;
+  peer.showing = false;
+  const screen = peer.vm?.screen;
+  if (peer.overlay && screen?.removeOverlay) screen.removeOverlay(peer.overlay);
+  peer.overlay = null;
+  const listener = peer.dismissListener;
+  if (listener && peer.vm) {
+    try {
+      peer.vm.invokeByName('onDismiss', '()V', listener, []);
+    } catch {
+      /* 忽略回调异常 */
+    }
+  }
+}
+
+function showPopup(peer, left, top) {
+  const vm = peer?.vm;
+  const screen = vm?.screen;
+  if (!screen || !peer.contentView) return;
+  dismissPopup(peer);
+  const maxWidth = screen.width || 360;
+  const maxHeight = screen.height || 640;
+  let resolvedLeft = Math.max(0, Math.min(left | 0, Math.max(0, maxWidth - 16)));
+  if ((left | 0) < 0 || (left | 0) + (peer.width > 0 ? peer.width : 0) > maxWidth) {
+    resolvedLeft = Math.max(0, maxWidth - (peer.width > 0 ? peer.width : 0) - 4);
+  }
+  peer.$left = resolvedLeft;
+  peer.$top = Math.max(0, Math.min(top | 0, Math.max(0, maxHeight - 16)));
+  peer.overlay = {
+    draw: (ctx) => {
+      const layout = popupLayout(peer);
+      if (!layout || !layout.width || !layout.height) return;
+      const { view, width, height } = layout;
+      const x = peer.$left | 0;
+      const y = peer.$top | 0;
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y, width, height);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      ctx.translate(x, y);
+      view.draw(createCanvasAdapter(ctx, screen));
+      ctx.restore();
+    },
+    handleTouch: (event) => {
+      const layout = popupLayout(peer);
+      if (!layout) {
+        dismissPopup(peer);
+        return true;
+      }
+      const x = peer.$left | 0;
+      const y = peer.$top | 0;
+      const inside = event.x >= x && event.x < x + layout.width && event.y >= y && event.y < y + layout.height;
+      if (inside) {
+        const target = layout.view;
+        const local = { ...event, x: event.x - x, y: event.y - y };
+        try {
+          target.dispatchTouchEvent(local);
+        } catch {
+          /* 忽略内容视图异常 */
+        }
+        return true;
+      }
+      dismissPopup(peer);
+      return true;
+    },
+  };
+  const contentView = unwrapView(peer.contentView);
+  if (contentView) contentView.$dismissPopup = () => dismissPopup(peer);
+  peer.showing = true;
+  screen.addOverlay(peer.overlay);
+  screen.invalidate?.();
+}
+
+function showPopupAsDropDown(peer, anchor, xoff, yoff) {
+  const anchorView = unwrapView(anchor);
+  if (!anchorView) return;
+  const point = [0, 0];
+  anchorView.getLocationOnScreen(point);
+  const anchorHeight = anchorView.getHeight?.() || 0;
+  showPopup(peer, point[0] + (xoff | 0), point[1] + anchorHeight + (yoff | 0));
+}
+
+function showPopupAtLocation(peer, parent, gravity, x, y) {
+  const screen = peer.vm?.screen;
+  const maxWidth = screen?.width || 360;
+  const maxHeight = screen?.height || 640;
+  let left = x | 0;
+  let top = y | 0;
+  if ((gravity | 0) & 0x01) left = Math.round((maxWidth - (peer.width > 0 ? peer.width : maxWidth / 2)) / 2);
+  if ((gravity | 0) & 0x10) top = Math.round((maxHeight - (peer.height > 0 ? peer.height : maxHeight / 2)) / 2);
+  showPopup(peer, left, top);
+}
+
+class PopupWindowPeer {
+  constructor(vm, object) {
+    this.vm = vm;
+    this.object = object;
+    this.contentView = null;
+    this.width = 0;
+    this.height = 0;
+    this.focusable = false;
+    this.outsideTouchable = false;
+    this.touchable = true;
+    this.touchModal = false;
+    this.clippingEnabled = true;
+    this.overlapAnchor = false;
+    this.showing = false;
+    this.overlay = null;
+    this.dismissListener = null;
+    this.background = null;
+    this.animationStyle = 0;
+    this.elevation = 0;
+    this.inputMethodMode = 0;
+    this.softInputMode = 0;
+    this.windowLayoutType = 0;
+    this.windowLayoutMode = 0;
+    this.$left = 0;
+    this.$top = 0;
+    this.$width = 0;
+    this.$height = 0;
+  }
 }
 
 function viewPeerConstructor(descriptor, superDescriptor = null) {
@@ -1961,6 +2127,171 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/PopupWindow;', {
+      super: 'Ljava/lang/Object;',
+      ctor: PopupWindowPeer,
+      methods: {
+        '<init>()V': () => undefined,
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        '<init>(Landroid/view/View;)V': (self, [contentView]) => {
+          self.contentView = contentView ?? null;
+        },
+        '<init>(Landroid/view/View;II)V': (self, [contentView, width, height]) => {
+          self.contentView = contentView ?? null;
+          self.width = width | 0;
+          self.height = height | 0;
+        },
+        '<init>(Landroid/view/View;IIZ)V': (self, [contentView, width, height, focusable]) => {
+          self.contentView = contentView ?? null;
+          self.width = width | 0;
+          self.height = height | 0;
+          self.focusable = !!focusable;
+        },
+        '<init>(II)V': (self, [width, height]) => {
+          self.width = width | 0;
+          self.height = height | 0;
+        },
+        'getContentView()Landroid/view/View;': (self) => self.contentView,
+        'setContentView(Landroid/view/View;)V': (self, [contentView]) => {
+          self.contentView = contentView ?? null;
+        },
+        'getWidth()I': (self) => self.width | 0,
+        'setWidth(I)V': (self, [width]) => {
+          self.width = width | 0;
+        },
+        'getHeight()I': (self) => self.height | 0,
+        'setHeight(I)V': (self, [height]) => {
+          self.height = height | 0;
+        },
+        'getBackground()Landroid/graphics/drawable/Drawable;': (self) => self.background,
+        'setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [background]) => {
+          self.background = background ?? null;
+        },
+        'setAnimationStyle(I)V': (self, [style]) => {
+          self.animationStyle = style | 0;
+        },
+        'getAnimationStyle()I': (self) => self.animationStyle | 0,
+        'setFocusable(Z)V': (self, [focusable]) => {
+          self.focusable = !!focusable;
+        },
+        'getFocusable()Z': (self) => !!self.focusable,
+        'setOutsideTouchable(Z)V': (self, [outsideTouchable]) => {
+          self.outsideTouchable = !!outsideTouchable;
+        },
+        'isOutsideTouchable()Z': (self) => !!self.outsideTouchable,
+        'setTouchable(Z)V': (self, [touchable]) => {
+          self.touchable = !!touchable;
+        },
+        'isTouchable()Z': (self) => !!self.touchable,
+        'setTouchModal(Z)V': (self, [touchModal]) => {
+          self.touchModal = !!touchModal;
+        },
+        'setClippingEnabled(Z)V': (self, [enabled]) => {
+          self.clippingEnabled = !!enabled;
+        },
+        'getClippingEnabled()Z': (self) => !!self.clippingEnabled,
+        'setOverlapAnchor(Z)V': (self, [overlap]) => {
+          self.overlapAnchor = !!overlap;
+        },
+        'getOverlapAnchor()Z': (self) => !!self.overlapAnchor,
+        'setElevation(F)V': (self, [elevation]) => {
+          self.elevation = Number(elevation) || 0;
+        },
+        'getElevation()F': (self) => Number(self.elevation) || 0,
+        'setInputMethodMode(I)V': (self, [mode]) => {
+          self.inputMethodMode = mode | 0;
+        },
+        'getInputMethodMode()I': (self) => self.inputMethodMode | 0,
+        'setSoftInputMode(I)V': (self, [mode]) => {
+          self.softInputMode = mode | 0;
+        },
+        'getSoftInputMode()I': (self) => self.softInputMode | 0,
+        'setWindowLayoutType(I)V': (self, [type]) => {
+          self.windowLayoutType = type | 0;
+        },
+        'getWindowLayoutType()I': (self) => self.windowLayoutType | 0,
+        'setWindowLayoutMode(I)V': (self, [mode]) => {
+          self.windowLayoutMode = mode | 0;
+        },
+        'getWindowLayoutMode()I': (self) => self.windowLayoutMode | 0,
+        'setAttachedInDecor(Z)V': () => undefined,
+        'isAttachedInDecor()Z': () => false,
+        'setIgnoreCheekPress()V': () => undefined,
+        'setEnterTransition(Ljava/lang/Object;)V': () => undefined,
+        'setExitTransition(Ljava/lang/Object;)V': () => undefined,
+        'setTouchInterceptor(Landroid/view/View$OnTouchListener;)V': (self, [listener]) => {
+          self.touchInterceptor = listener ?? null;
+        },
+        'setOnDismissListener(Landroid/widget/PopupWindow$OnDismissListener;)V': (self, [listener]) => {
+          self.dismissListener = listener ?? null;
+        },
+        'setOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': () => undefined,
+        'showAsDropDown(Landroid/view/View;)V': (self, [anchor]) => {
+          showPopupAsDropDown(self, anchor, 0, 0);
+        },
+        'showAsDropDown(Landroid/view/View;II)V': (self, [anchor, xoff, yoff]) => {
+          showPopupAsDropDown(self, anchor, xoff, yoff);
+        },
+        'showAsDropDown(Landroid/view/View;III)V': (self, [anchor, xoff, yoff]) => {
+          showPopupAsDropDown(self, anchor, xoff, yoff);
+        },
+        'showAtLocation(Landroid/view/View;III)V': (self, [parent, gravity, x, y]) => {
+          showPopupAtLocation(self, parent, gravity, x, y);
+        },
+        'showAtLocation(Landroid/os/IBinder;III)V': (self, [_token, gravity, x, y]) => {
+          showPopupAtLocation(self, null, gravity, x, y);
+        },
+        'dismiss()V': (self) => {
+          dismissPopup(self);
+        },
+        'isShowing()Z': (self) => !!self.showing,
+        'update()V': (self) => {
+          if (self.showing && self.overlay) self.vm?.screen?.invalidate?.();
+        },
+        'update(II)V': (self, [width, height]) => {
+          self.width = width | 0;
+          self.height = height | 0;
+          if (self.showing && self.overlay) self.vm?.screen?.invalidate?.();
+        },
+        'update(III)V': (self, [width, height]) => {
+          self.width = width | 0;
+          self.height = height | 0;
+          if (self.showing && self.overlay) self.vm?.screen?.invalidate?.();
+        },
+        'update(Landroid/view/View;II)V': (self, [anchor, xoff, yoff]) => {
+          if (self.showing) showPopupAsDropDown(self, anchor, xoff, yoff);
+        },
+        'update(Landroid/view/View;IIZ)V': (self, [anchor, xoff, yoff]) => {
+          if (self.showing) showPopupAsDropDown(self, anchor, xoff, yoff);
+        },
+        'update(Landroid/view/View;IIII)V': (self, [anchor, xoff, yoff]) => {
+          if (self.showing) showPopupAsDropDown(self, anchor, xoff, yoff);
+        },
+        'update(Z)V': (self) => {
+          if (self.showing && self.overlay) self.vm?.screen?.invalidate?.();
+        },
+        'update(ZZ)V': () => undefined,
+        'getMaxAvailableHeight(Landroid/view/View;)I': (self) => {
+          const screen = self.vm?.screen;
+          return Math.floor((screen?.height || 640) * 0.8);
+        },
+        'getMaxAvailableHeight(Landroid/view/View;I)I': (self) => {
+          const screen = self.vm?.screen;
+          return Math.floor((screen?.height || 640) * 0.8);
+        },
+        'isAboveAnchor()Z': () => false,
+        'getEnterTransition()Ljava/lang/Object;': () => null,
+        'getExitTransition()Ljava/lang/Object;': () => null,
+        'getTransitionEpicenter()Landroid/graphics/Rect;': () => null,
+        'setEpicenterBounds(Landroid/graphics/Rect;)V': () => undefined,
+        'getEpicenterBounds()Landroid/graphics/Rect;': () => null,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/View;', {
       super: 'Ljava/lang/Object;',
       ctor: viewPeerConstructor('Landroid/view/View;'),
@@ -3111,6 +3442,253 @@ function buildFrameworkDefinitions(vm) {
       ctor: viewPeerConstructor('Landroid/widget/ScrollView;'),
       methods: {
         'scrollTo(II)V': (self, [x, y]) => self.view?.scrollTo?.(x, y),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/Adapter;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getCount()I': () => 0,
+        'isEmpty()Z': (self, _args, vm) => {
+          const count = vm.invokeByName('getCount', '()I', self.$object || self, []);
+          return !(Number(count) > 0);
+        },
+        'registerDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
+        'unregisterDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
+        'hasStableIds()Z': () => false,
+        'getItemViewType(I)I': () => 0,
+        'getViewTypeCount()I': () => 1,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/ListAdapter;', {
+      super: 'Ljava/lang/Object;',
+      interfaces: ['Landroid/widget/Adapter;'],
+      methods: {
+        'getCount()I': () => 0,
+        'getView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': () => null,
+        'getItem(I)Ljava/lang/Object;': () => null,
+        'getItemId(I)J': (_self, [position]) => position | 0,
+        'isEmpty()Z': () => true,
+        'areAllItemsEnabled()Z': () => true,
+        'isEnabled(I)Z': () => true,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/SpinnerAdapter;', {
+      super: 'Ljava/lang/Object;',
+      interfaces: ['Landroid/widget/Adapter;'],
+      methods: {
+        'getDropDownView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': () => null,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/BaseAdapter;', {
+      super: 'Ljava/lang/Object;',
+      interfaces: ['Landroid/widget/ListAdapter;', 'Landroid/widget/SpinnerAdapter;'],
+      methods: {
+        'getCount()I': () => 0,
+        'getView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': () => null,
+        'getItem(I)Ljava/lang/Object;': () => null,
+        'getItemId(I)J': (_self, [position]) => position | 0,
+        'getDropDownView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': () => null,
+        'hasStableIds()Z': () => false,
+        'getItemViewType(I)I': () => 0,
+        'getViewTypeCount()I': () => 1,
+        'isEmpty()Z': (self, _args, vm) => {
+          const count = vm.invokeByName('getCount', '()I', self.$object || self, []);
+          return !(Number(count) > 0);
+        },
+        'areAllItemsEnabled()Z': () => true,
+        'isEnabled(I)Z': () => true,
+        'registerDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
+        'unregisterDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
+        'notifyDataSetChanged()V': () => undefined,
+        'notifyDataSetInvalidated()V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/AdapterView;', {
+      super: 'Landroid/view/ViewGroup;',
+      ctor: viewPeerConstructor('Landroid/widget/AdapterView;'),
+      methods: {
+        ...viewMethods(),
+        'getAdapter()Landroid/widget/Adapter;': (self) => self.view?.adapter ?? null,
+        'setAdapter(Landroid/widget/Adapter;)V': (self, [adapter]) => {
+          if (!self.view) return;
+          self.view.adapter = adapter;
+          self.view.$itemCount = -1;
+          self.view.requestLayout?.();
+        },
+        'getCount()I': (self) => self.view?.adapterCount?.() ?? 0,
+        'getItemAtPosition(I)Ljava/lang/Object;': (self, [position], vm) => {
+          const view = self.view;
+          if (!view?.adapter) return null;
+          return vm.invokeByName('getItem', '(I)Ljava/lang/Object;', view.adapter, [position | 0]);
+        },
+        'getItemIdAtPosition(I)J': (self, [position], vm) => {
+          const view = self.view;
+          if (!view?.adapter) return position | 0;
+          return vm.invokeByName('getItemId', '(I)J', view.adapter, [position | 0]);
+        },
+        'performItemClick(Landroid/view/View;IJ)Z': (self, [_view, position]) => {
+          return self.view?.performItemClick?.(position | 0) ?? false;
+        },
+        'setOnItemClickListener(Landroid/widget/AdapterView$OnItemClickListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onItemClickListener = listener;
+        },
+        'getOnItemClickListener()Landroid/widget/AdapterView$OnItemClickListener;': (self) => self.view?.$onItemClickListener ?? null,
+        'setOnItemSelectedListener(Landroid/widget/AdapterView$OnItemSelectedListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onItemSelectedListener = listener;
+        },
+        'getOnItemSelectedListener()Landroid/widget/AdapterView$OnItemSelectedListener;': (self) => self.view?.$onItemSelectedListener ?? null,
+        'getSelectedItemPosition()I': () => -1,
+        'getSelectedItemId()J': () => 0,
+        'getFirstVisiblePosition()I': () => 0,
+        'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
+        'getChildCount()I': (self) => self.view?.$items?.length ?? 0,
+        'getChildAt(I)Landroid/view/View;': (self, [index]) => self.view?.$items?.[index | 0]?.$javaObject ?? null,
+        'getPositionForView(Landroid/view/View;)I': () => -1,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/AbsListView;', {
+      super: 'Landroid/widget/AdapterView;',
+      ctor: viewPeerConstructor('Landroid/widget/AbsListView;'),
+      methods: {
+        ...viewMethods(),
+        'setAdapter(Landroid/widget/ListAdapter;)V': (self, [adapter]) => {
+          if (!self.view) return;
+          self.view.adapter = adapter;
+          self.view.$itemCount = -1;
+          self.view.requestLayout?.();
+        },
+        'getAdapter()Landroid/widget/ListAdapter;': (self) => self.view?.adapter ?? null,
+        'setOnItemClickListener(Landroid/widget/AdapterView$OnItemClickListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onItemClickListener = listener;
+        },
+        'getOnItemClickListener()Landroid/widget/AdapterView$OnItemClickListener;': (self) => self.view?.$onItemClickListener ?? null,
+        'setOnScrollListener(Landroid/widget/AbsListView$OnScrollListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onScrollListener = listener;
+        },
+        'setSelection(I)V': () => undefined,
+        'setSelectionFromTop(II)V': () => undefined,
+        'smoothScrollToPosition(I)V': () => undefined,
+        'smoothScrollToPositionFromTop(III)V': () => undefined,
+        'setDivider(Landroid/graphics/drawable/Drawable;)V': (self, [divider]) => {
+          if (self.view) self.view.divider = divider;
+        },
+        'setDividerHeight(I)V': (self, [height]) => {
+          if (self.view) self.view.dividerHeight = height | 0;
+        },
+        'setSelector(Landroid/graphics/drawable/Drawable;)V': (self, [selector]) => {
+          if (self.view) self.view.selector = selector;
+        },
+        'setCacheColorHint(I)V': () => undefined,
+        'setScrollingCacheEnabled(Z)V': () => undefined,
+        'setTextFilterEnabled(Z)V': () => undefined,
+        'setFastScrollEnabled(Z)V': () => undefined,
+        'setVerticalScrollBarEnabled(Z)V': () => undefined,
+        'setHorizontalScrollBarEnabled(Z)V': () => undefined,
+        'setScrollbarFadingEnabled(Z)V': () => undefined,
+        'setTranscriptMode(I)V': () => undefined,
+        'setStackFromBottom(Z)V': () => undefined,
+        'setItemsCanFocus(Z)V': () => undefined,
+        'setChoiceMode(I)V': (self, [mode]) => {
+          if (self.view) self.view.choiceMode = mode | 0;
+        },
+        'getChoiceMode()I': (self) => self.view?.choiceMode ?? 0,
+        'setEmptyView(Landroid/view/View;)V': () => undefined,
+        'getEmptyView()Landroid/view/View;': () => null,
+        'getCount()I': (self) => self.view?.adapterCount?.() ?? 0,
+        'getChildCount()I': (self) => self.view?.$items?.length ?? 0,
+        'getChildAt(I)Landroid/view/View;': (self, [index]) => self.view?.$items?.[index | 0]?.$javaObject ?? null,
+        'getFirstVisiblePosition()I': () => 0,
+        'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/ListView;', {
+      super: 'Landroid/widget/AbsListView;',
+      ctor: viewPeerConstructor('Landroid/widget/ListView;'),
+      methods: {
+        ...viewMethods(),
+        'setAdapter(Landroid/widget/ListAdapter;)V': (self, [adapter]) => {
+          if (!self.view) return;
+          self.view.adapter = adapter;
+          self.view.$itemCount = -1;
+          self.view.requestLayout?.();
+        },
+        'getAdapter()Landroid/widget/ListAdapter;': (self) => self.view?.adapter ?? null,
+        'setOnItemClickListener(Landroid/widget/AdapterView$OnItemClickListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onItemClickListener = listener;
+        },
+        'getOnItemClickListener()Landroid/widget/AdapterView$OnItemClickListener;': (self) => self.view?.$onItemClickListener ?? null,
+        'setOnItemSelectedListener(Landroid/widget/AdapterView$OnItemSelectedListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onItemSelectedListener = listener;
+        },
+        'setOnScrollListener(Landroid/widget/AbsListView$OnScrollListener;)V': (self, [listener]) => {
+          if (self.view) self.view.$onScrollListener = listener;
+        },
+        'getCount()I': (self) => self.view?.adapterCount?.() ?? 0,
+        'getItemAtPosition(I)Ljava/lang/Object;': (self, [position], vm) => {
+          const view = self.view;
+          if (!view?.adapter) return null;
+          return vm.invokeByName('getItem', '(I)Ljava/lang/Object;', view.adapter, [position | 0]);
+        },
+        'getItemIdAtPosition(I)J': (self, [position], vm) => {
+          const view = self.view;
+          if (!view?.adapter) return position | 0;
+          return vm.invokeByName('getItemId', '(I)J', view.adapter, [position | 0]);
+        },
+        'performItemClick(Landroid/view/View;IJ)Z': (self, [_view, position]) => {
+          return self.view?.performItemClick?.(position | 0) ?? false;
+        },
+        'getFirstVisiblePosition()I': () => 0,
+        'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
+        'getSelectedItemPosition()I': () => -1,
+        'setSelection(I)V': () => undefined,
+        'smoothScrollToPosition(I)V': () => undefined,
+        'setDivider(Landroid/graphics/drawable/Drawable;)V': (self, [divider]) => {
+          if (self.view) self.view.divider = divider;
+        },
+        'setDividerHeight(I)V': (self, [height]) => {
+          if (self.view) self.view.dividerHeight = height | 0;
+        },
+        'setSelector(Landroid/graphics/drawable/Drawable;)V': (self, [selector]) => {
+          if (self.view) self.view.selector = selector;
+        },
+        'setDrawSelectorOnTop(Z)V': () => undefined,
+        'setCacheColorHint(I)V': () => undefined,
+        'setScrollingCacheEnabled(Z)V': () => undefined,
+        'setTextFilterEnabled(Z)V': () => undefined,
+        'setFastScrollEnabled(Z)V': () => undefined,
+        'setVerticalScrollBarEnabled(Z)V': () => undefined,
+        'setHorizontalScrollBarEnabled(Z)V': () => undefined,
+        'setScrollbarFadingEnabled(Z)V': () => undefined,
+        'setTranscriptMode(I)V': () => undefined,
+        'setStackFromBottom(Z)V': () => undefined,
+        'setItemsCanFocus(Z)V': () => undefined,
+        'setChoiceMode(I)V': (self, [mode]) => {
+          if (self.view) self.view.choiceMode = mode | 0;
+        },
+        'getChoiceMode()I': (self) => self.view?.choiceMode ?? 0,
+        'setEmptyView(Landroid/view/View;)V': () => undefined,
+        'getEmptyView()Landroid/view/View;': () => null,
       },
     })
   );

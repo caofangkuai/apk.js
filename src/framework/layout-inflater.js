@@ -21,6 +21,7 @@ import {
   GridLayout,
   HorizontalScrollView,
   LinearLayout,
+  ListView,
   RelativeLayout,
   TableLayout,
   TableRow,
@@ -55,6 +56,7 @@ const RESOLVED_CLASSES = {
   'android.widget.ImageView': ImageView,
   'android.widget.ScrollView': ScrollView,
   'android.widget.HorizontalScrollView': HorizontalScrollView,
+  'android.widget.ListView': ListView,
   'android.widget.ProgressBar': ProgressBar,
   'android.widget.TableLayout': TableLayout,
   'android.widget.TableRow': TableRow,
@@ -432,6 +434,7 @@ export class LayoutInflater {
       'Landroid/widget/Toolbar;': Toolbar,
       'Landroid/widget/ScrollView;': ScrollView,
       'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
+      'Landroid/widget/ListView;': ListView,
       'Landroid/widget/TextView;': TextView,
       'Landroid/widget/Button;': Button,
       'Landroid/widget/EditText;': EditText,
@@ -722,6 +725,49 @@ export class LayoutInflater {
   }
 }
 
+function resolveThemeSize(themeValue, resources, density) {
+  let value = themeValue;
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'object') {
+      if (value.dimension !== undefined) return Math.round(convertDimension(value, density));
+      if (value.reference !== undefined) {
+        value = value.reference;
+        continue;
+      }
+      return null;
+    }
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (text.startsWith('@') && resources?.resolveName) {
+        const resolved = resources.resolveName(text);
+        if (resolved !== null && resolved !== undefined && resolved !== value) {
+          value = resolved;
+          continue;
+        }
+      }
+      return null;
+    }
+    if (typeof value !== 'number') return null;
+    const numeric = value >>> 0;
+    if (numeric >= 0x01000000 && numeric <= 0x7fffffff) {
+      const entry = resources?.table?.getEntry?.(numeric);
+      const themeAttrs = resources?.vm?.themeAttributes;
+      if (entry?.key && themeAttrs && themeAttrs[entry.key] !== undefined && themeAttrs[entry.key] !== value) {
+        value = themeAttrs[entry.key];
+        continue;
+      }
+      const resolved = resources?.resolve?.(numeric);
+      if (resolved !== null && resolved !== undefined && resolved !== value) {
+        value = resolved;
+        continue;
+      }
+    }
+    return Math.round(value > 0 && value <= 168 ? value * density : value);
+  }
+  return null;
+}
+
 function toLayoutSize(attr, resources, density) {
   let value = attr.value;
   const themeAttrs = resources?.vm?.themeAttributes;
@@ -731,10 +777,8 @@ function toLayoutSize(attr, resources, density) {
     const key = entry?.key || attr.name;
     const themeValue = key ? themeAttrs[key] : undefined;
     if (themeValue !== undefined && themeValue !== null) {
-      if (typeof themeValue === 'number') return Math.round(themeValue > 0 && themeValue <= 168 ? themeValue * density : themeValue);
-      if (typeof themeValue === 'object' && themeValue.dimension !== undefined) {
-        return Math.round(convertDimension(themeValue, density));
-      }
+      const resolvedTheme = resolveThemeSize(themeValue, resources, density);
+      if (resolvedTheme !== null) return resolvedTheme;
     }
   }
   if (

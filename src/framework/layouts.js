@@ -9,6 +9,7 @@ import {
   getChildMeasureSpec,
   isGone,
   resolveSize,
+  toHostTouchEvent,
 } from './view.js';
 
 export class FrameLayout extends ViewGroup {
@@ -995,5 +996,176 @@ export class ViewStub extends View {
     view.layoutParams = this.layoutParams || { width: -1, height: -1 };
     parent.addView(view, index >= 0 ? index : parent.children.length);
     return view;
+  }
+}
+
+export class ListView extends ViewGroup {
+  constructor(context = null) {
+    super(context);
+    this.adapter = null;
+    this.$onItemClickListener = null;
+    this.$onItemSelectedListener = null;
+    this.$onScrollListener = null;
+    this.divider = null;
+    this.dividerHeight = 0;
+    this.selector = null;
+    this.choiceMode = 0;
+    this.$items = [];
+    this.$itemCount = -1;
+    this.$pressedItem = -1;
+  }
+
+  generateDefaultLayoutParams() {
+    return { width: -1, height: -2, gravity: -1, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
+  }
+
+  invokeAdapter(name, proto, args) {
+    const vm = this.$vm || this.vm;
+    if (!vm || !this.adapter) return null;
+    try {
+      return vm.invokeByName(name, proto, this.adapter, args);
+    } catch {
+      return null;
+    }
+  }
+
+  adapterCount() {
+    const count = this.invokeAdapter('getCount', '()I', []);
+    const value = Number(count);
+    return Number.isFinite(value) && value > 0 ? value | 0 : 0;
+  }
+
+  ensureItems() {
+    const count = this.adapterCount();
+    if (count === this.$itemCount && this.$items.length === count) return;
+    this.$items = [];
+    this.children = [];
+    this.$itemCount = count;
+    const vm = this.$vm || this.vm;
+    if (!vm || !this.adapter) return;
+    const parent = this.$javaObject || null;
+    for (let i = 0; i < count; i += 1) {
+      let item = null;
+      try {
+        const object = vm.invokeByName(
+          'getView',
+          '(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;',
+          this.adapter,
+          [i, null, parent],
+        );
+        item = object?.$view || null;
+      } catch {
+        item = null;
+      }
+      if (!item) continue;
+      item.parent = this;
+      this.$items.push(item);
+      this.children.push(item);
+    }
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    this.ensureItems();
+    const widthMode = MeasureSpec.getMode(widthSpec);
+    const heightMode = MeasureSpec.getMode(heightSpec);
+    let maxWidth = 0;
+    let totalHeight = 0;
+    const widthSize = widthMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(widthSpec);
+    const childWidthSpec = widthMode === MeasureSpec.UNSPECIFIED
+      ? MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+      : getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, -1);
+    const availableHeight = heightMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(heightSpec);
+    const childHeightSpec = availableHeight > 0
+      ? MeasureSpec.makeMeasureSpec(availableHeight, MeasureSpec.AT_MOST)
+      : MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+    for (const item of this.$items) {
+      if (isGone(item)) continue;
+      item.measure(childWidthSpec, childHeightSpec);
+      const height = item.getMeasuredHeight();
+      totalHeight += height + this.dividerHeight;
+      maxWidth = Math.max(maxWidth, item.getMeasuredWidth());
+    }
+    if (widthMode !== MeasureSpec.UNSPECIFIED) maxWidth = Math.max(maxWidth, widthSize - this.paddingLeft - this.paddingRight);
+    this.setMeasuredDimension(
+      resolveSize(maxWidth + this.paddingLeft + this.paddingRight, widthSpec),
+      resolveSize(totalHeight + this.paddingTop + this.paddingBottom, heightSpec),
+    );
+  }
+
+  onLayout(changed, left, top, right, bottom) {
+    let y = this.paddingTop;
+    for (const item of this.$items) {
+      if (isGone(item)) continue;
+      const width = item.getMeasuredWidth();
+      const height = item.getMeasuredHeight();
+      item.layout(this.paddingLeft, y, this.paddingLeft + width, y + height);
+      y += height + this.dividerHeight;
+    }
+  }
+
+  itemIndexAt(x, y) {
+    const localY = y - this.paddingTop;
+    let cursor = 0;
+    for (let i = 0; i < this.$items.length; i += 1) {
+      const item = this.$items[i];
+      if (isGone(item)) continue;
+      const height = item.getMeasuredHeight();
+      if (localY >= cursor && localY < cursor + height) return i;
+      cursor += height + this.dividerHeight;
+    }
+    return -1;
+  }
+
+  performItemClick(position) {
+    const vm = this.$vm || this.vm;
+    const item = this.$items[position | 0];
+    if (!vm || !item) return false;
+    const listener = this.$onItemClickListener;
+    if (listener) {
+      let id = position | 0;
+      try {
+        const value = vm.invokeByName('getItemId', '(I)J', this.adapter, [position | 0]);
+        if (value !== null && value !== undefined) id = value;
+      } catch {
+        id = position | 0;
+      }
+      try {
+        vm.invokeByName(
+          'onItemClick',
+          '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V',
+          listener,
+          [this.$javaObject || null, item.$javaObject || null, position | 0, id],
+        );
+        this.$dismissPopup?.();
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  onTouchEvent(event) {
+    const host = toHostTouchEvent(event);
+    if (host.action === 'down') {
+      this.$pressedItem = this.itemIndexAt(host.x, host.y);
+      this.pressed = this.$pressedItem >= 0;
+      return this.pressed;
+    }
+    if (host.action === 'move') return this.pressed === true;
+    if (host.action === 'up') {
+      const index = this.itemIndexAt(host.x, host.y);
+      const pressed = this.$pressedItem;
+      this.$pressedItem = -1;
+      this.pressed = false;
+      if (index >= 0 && index === pressed) return this.performItemClick(index) || true;
+      return true;
+    }
+    if (host.action === 'cancel') {
+      this.$pressedItem = -1;
+      this.pressed = false;
+      return true;
+    }
+    return false;
   }
 }

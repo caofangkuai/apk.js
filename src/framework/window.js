@@ -2,6 +2,86 @@ import { ViewGroup, VISIBILITY, MeasureSpec, getChildMeasureSpec, resolveSize } 
 import { FrameLayout } from './layouts.js';
 import { cssColor, Paint, drawVectorRaw } from './graphics.js';
 
+export function createCanvasAdapter(ctx, screen) {
+  return {
+    context: ctx,
+    width: screen.width,
+    height: screen.height,
+    originX: 0,
+    originY: 0,
+    save: () => ctx.save(),
+    restore: () => ctx.restore(),
+    translate: (x, y) => ctx.translate(x, y),
+    scale: (x, y) => ctx.scale(x, y),
+    rotate: (d) => ctx.rotate((d * Math.PI) / 180),
+    clipRect: (l, t, r, b) => {
+      ctx.beginPath();
+      ctx.rect(l, t, r - l, b - t);
+      ctx.clip();
+    },
+    drawColor: (color) => {
+      ctx.fillStyle = cssColor(color);
+      ctx.fillRect(0, 0, screen.width, screen.height);
+    },
+    drawRect: (l, t, r, b, paint) => drawRectRaw(ctx, l, t, r, b, paint),
+    drawRoundRect: (l, t, r, b, rx, ry, paint) => drawRoundRectRaw(ctx, l, t, r, b, rx, ry, paint),
+    drawCircle: (cx, cy, radius, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      if (paint?.style === 'stroke') ctx.stroke();
+      else ctx.fill();
+      ctx.restore();
+    },
+    drawLine: (x1, y1, x2, y2, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.restore();
+    },
+    drawPath: (commands, paint) => {
+      if (!commands || !commands.length) return;
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      ctx.beginPath();
+      let cx = 0, cy = 0, sx = 0, sy = 0;
+      for (const cmd of commands) {
+        if (cmd.type === 'moveTo') { cx = sx = cmd.x; cy = sy = cmd.y; ctx.moveTo(cx, cy); }
+        else if (cmd.type === 'lineTo') { cx = cmd.x; cy = cmd.y; ctx.lineTo(cx, cy); }
+        else if (cmd.type === 'rLineTo') { cx += cmd.x; cy += cmd.y; ctx.lineTo(cx, cy); }
+        else if (cmd.type === 'close') { ctx.closePath(); cx = sx; cy = sy; }
+      }
+      if (paint?.style === 'stroke') ctx.stroke();
+      else { ctx.fill(); if (paint?.style === 'fillAndStroke') ctx.stroke(); }
+      ctx.restore();
+    },
+    drawText: (text, x, y, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(String(text ?? ''), x, y);
+      ctx.restore();
+    },
+    drawBitmap: (bitmap, left, top) => {
+      if (bitmap?.image) ctx.drawImage(bitmap.image, left, top, bitmap.width, bitmap.height);
+    },
+    drawBitmapRect: (bitmap, src, dst) => {
+      if (!bitmap?.image) return;
+      const sx = src ? src.left : 0;
+      const sy = src ? src.top : 0;
+      const sw = src ? src.width() : bitmap.width;
+      const sh = src ? src.height() : bitmap.height;
+      ctx.drawImage(bitmap.image, sx, sy, sw, sh, dst.left, dst.top, dst.width(), dst.height());
+    },
+    drawVector: (drawable, left, top, width, height) =>
+      drawVectorRaw(ctx, 0, 0, drawable, left, top, width, height),
+      };
+}
+
 export class Window {
   constructor(context, decorView, screen) {
     this.context = context;
@@ -497,83 +577,7 @@ export class SurfaceScreen {
     ctx.save();
     ctx.clearRect(0, 0, this.width, this.height);
     if (this.decorView) {
-      const canvas = {
-        context: ctx,
-        width: this.width,
-        height: this.height,
-        originX: 0,
-        originY: 0,
-        save: () => ctx.save(),
-        restore: () => ctx.restore(),
-        translate: (x, y) => ctx.translate(x, y),
-        scale: (x, y) => ctx.scale(x, y),
-        rotate: (d) => ctx.rotate((d * Math.PI) / 180),
-        clipRect: (l, t, r, b) => {
-          ctx.beginPath();
-          ctx.rect(l, t, r - l, b - t);
-          ctx.clip();
-        },
-        drawColor: (color) => {
-          ctx.fillStyle = cssColor(color);
-          ctx.fillRect(0, 0, this.width, this.height);
-        },
-        drawRect: (l, t, r, b, paint) => drawRectRaw(ctx, l, t, r, b, paint),
-        drawRoundRect: (l, t, r, b, rx, ry, paint) => drawRoundRectRaw(ctx, l, t, r, b, rx, ry, paint),
-        drawCircle: (cx, cy, radius, paint) => {
-          ctx.save();
-          applyPaintRaw(ctx, paint);
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          if (paint?.style === 'stroke') ctx.stroke();
-          else ctx.fill();
-          ctx.restore();
-        },
-        drawLine: (x1, y1, x2, y2, paint) => {
-          ctx.save();
-          applyPaintRaw(ctx, paint);
-          ctx.beginPath();
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
-          ctx.stroke();
-          ctx.restore();
-        },
-        drawPath: (commands, paint) => {
-          if (!commands || !commands.length) return;
-          ctx.save();
-          applyPaintRaw(ctx, paint);
-          ctx.beginPath();
-          let cx = 0, cy = 0, sx = 0, sy = 0;
-          for (const cmd of commands) {
-            if (cmd.type === 'moveTo') { cx = sx = cmd.x; cy = sy = cmd.y; ctx.moveTo(cx, cy); }
-            else if (cmd.type === 'lineTo') { cx = cmd.x; cy = cmd.y; ctx.lineTo(cx, cy); }
-            else if (cmd.type === 'rLineTo') { cx += cmd.x; cy += cmd.y; ctx.lineTo(cx, cy); }
-            else if (cmd.type === 'close') { ctx.closePath(); cx = sx; cy = sy; }
-          }
-          if (paint?.style === 'stroke') ctx.stroke();
-          else { ctx.fill(); if (paint?.style === 'fillAndStroke') ctx.stroke(); }
-          ctx.restore();
-        },
-        drawText: (text, x, y, paint) => {
-          ctx.save();
-          applyPaintRaw(ctx, paint);
-          ctx.textBaseline = 'alphabetic';
-          ctx.fillText(String(text ?? ''), x, y);
-          ctx.restore();
-        },
-        drawBitmap: (bitmap, left, top) => {
-          if (bitmap?.image) ctx.drawImage(bitmap.image, left, top, bitmap.width, bitmap.height);
-        },
-        drawBitmapRect: (bitmap, src, dst) => {
-          if (!bitmap?.image) return;
-          const sx = src ? src.left : 0;
-          const sy = src ? src.top : 0;
-          const sw = src ? src.width() : bitmap.width;
-          const sh = src ? src.height() : bitmap.height;
-          ctx.drawImage(bitmap.image, sx, sy, sw, sh, dst.left, dst.top, dst.width(), dst.height());
-        },
-        drawVector: (drawable, left, top, width, height) =>
-          drawVectorRaw(ctx, 0, 0, drawable, left, top, width, height),
-      };
+      const canvas = createCanvasAdapter(ctx, this);
       this.decorView.draw(canvas);
     }
     if (this.onDraw) this.onDraw(ctx, this);
