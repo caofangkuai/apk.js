@@ -65,8 +65,7 @@ export class DexInterpreter {
       this.stats.instructions++;
       this.vm.currentPc = pc;
       if (DBG.npe && method.classDesc === 'Lpc/a;' && (method.name === '<clinit>' || method.name === 'g')) console.error('EXEC', method.name, 'pc=' + pc, 'op=0x' + op.toString(16), method.name==='g' ? 'v0='+registers[0]+' v1='+(registers[1]===null?'null':typeof registers[1]) : '');
-      if (this.trace && !globalThis.__TRACED && method.classDesc === 'Landroidx/fragment/app/FragmentManager;' && method.name === 'i0') { globalThis.__TRACED = true; }
-      if (this.trace) this.trace(pc, op, method);
+      if (this.trace) this.trace(pc, op, method, registers);
 
 
       try {
@@ -113,12 +112,14 @@ export class DexInterpreter {
             this.vm.pendingResult = undefined;
             pc += 1;
             break;
-          case 0x0b:
-            registers[unit >>> 8] = this.vm.pendingResult === undefined ? 0n : toLong(this.vm.pendingResult);
+          case 0x0b: {
+            const wideResult = this.vm.pendingResult;
+            registers[unit >>> 8] = wideResult === undefined ? 0n : (typeof wideResult === 'number' ? wideResult : toLong(wideResult));
             registers[(unit >>> 8) + 1] = 0;
             this.vm.pendingResult = undefined;
             pc += 1;
             break;
+          }
           case 0x0c: {
             const value = this.vm.pendingResult;
             registers[unit >>> 8] = value === 0 || value === undefined ? null : value;
@@ -186,9 +187,8 @@ export class DexInterpreter {
             break;
           }
           case 0x18: {
-            const vA = insns[pc + 1];
-            let value = BigInt(insns[pc + 2]) | (BigInt(insns[pc + 3]) << 16n) | (BigInt(insns[pc + 4]) << 32n);
-            value |= BigInt(unit >>> 8) << 48n;
+            const vA = unit >>> 8;
+            let value = BigInt(insns[pc + 1]) | (BigInt(insns[pc + 2]) << 16n) | (BigInt(insns[pc + 3]) << 32n) | (BigInt(insns[pc + 4]) << 48n);
             registers[vA] = BigInt.asIntN(64, value);
             registers[vA + 1] = 0;
             pc += 5;
@@ -421,7 +421,6 @@ export class DexInterpreter {
             const vC = (insns[pc + 1] >> 8) & 0xff;
             const array = registers[vB];
             const index = toInt(registers[vC]);
-            if (process.env.DBG_INV && (this.vm.methodStack||[]).slice(-1)[0] === 'androidx.fragment.app.q.onStart') { const th = registers[0]; console.error('QONSTART this=' + (th && (th.$nativeClass||th.$runtimeClass?.descriptor||th.$dexClass?.descriptor)) + ' D=' + (th && th.$fields && th.$fields[0x4ec] ? 'set:'+(th.$fields[0x4ec].$nativeClass||th.$fields[0x4ec].$runtimeClass?.descriptor) : 'NULL') + ' fields=' + Object.keys(th&&th.$fields||{}).join(',')); }
             if (process.env.DBG_INV && (this.vm.methodStack||[]).slice(-1)[0] === 'kotlin.jvm.internal.h.i') console.error('HI-AGET idx=' + index + ' arrlen=' + (array && array.$data ? array.$data.length : 'NULL') + ' className=' + (array && array.$data && array.$data[index] ? array.$data[index].$peer && array.$data[index].$peer.className : '(none)'));
             if (process.env.DBG_INV && (this.vm.methodStack||[]).slice(-1)[0] === 'h0.b.b') console.error('AGET this.f=' + JSON.stringify((registers[0] && registers[0].fields && registers[0].fields[0x1ea9]) || Object.keys(registers[0]||{})) + ' arr=' + (array===null?'NULL':String(array.$type)) + ' idx=' + index + ' regs=' + JSON.stringify(Object.keys(registers[0]||{})));
             this.checkArrayBounds(array, index, 'aget');
@@ -476,13 +475,29 @@ export class DexInterpreter {
             const { refIndex, argRegs, size } = readInvokeArgs(op, insns, pc);
             const ref = method.dex.methods[refIndex];
             if (this.vm.dbgInvoke) this.vm.dbgInvoke(method, ref, pc, argRegs, registers, insns, this.vm);
-            const args2 = argRegs.map((index) => registers[index]);
+            const rawArgs = argRegs.map((index) => registers[index]);
             const mode =
               op === 0x71 || op === 0x77 ? 'static'
               : op === 0x6f || op === 0x75 ? 'super'
               : op === 0x70 || op === 0x76 ? 'direct'
               : op === 0x72 || op === 0x78 ? 'interface'
               : 'virtual';
+            let args2;
+            const parameters = ref.proto?.parameters;
+            if (Array.isArray(parameters)) {
+              args2 = [];
+              let registerIndex = 0;
+              if (mode !== 'static' && registerIndex < rawArgs.length) {
+                args2.push(rawArgs[registerIndex++]);
+              }
+              for (const parameter of parameters) {
+                if (registerIndex >= rawArgs.length) break;
+                args2.push(rawArgs[registerIndex]);
+                registerIndex += parameter === 'J' || parameter === 'D' ? 2 : 1;
+              }
+            } else {
+              args2 = rawArgs.slice();
+            }
             const receiver = mode === 'static' ? null : args2.shift();
             this.stats.invokes++;
             try {
@@ -734,6 +749,10 @@ function numberToFloatBits(value) {
 const DOUBLE_BITS_VIEW = new DataView(new ArrayBuffer(8));
 
 function doubleBitsToNumber(value) {
+  if (typeof value === 'bigint') {
+    DOUBLE_BITS_VIEW.setBigUint64(0, BigInt.asUintN(64, value));
+    return DOUBLE_BITS_VIEW.getFloat64(0);
+  }
   if (typeof value !== 'number') return Number(value) || 0;
   return value;
 }

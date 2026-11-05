@@ -8,6 +8,10 @@ export class Paint {
     this.textAlign = 'left';
     this.typeface = 'Noto Sans CJK SC';
     this.letterSpacing = 0;
+    this.alpha = undefined;
+    this.strokeJoin = null;
+    this.strokeCap = null;
+    this.colorFilter = null;
   }
 
   setColor(color) {
@@ -28,6 +32,27 @@ export class Paint {
 
   setAntiAlias(value) {
     this.antiAlias = !!value;
+  }
+
+  setAlpha(value) {
+    this.alpha = Math.max(0, Math.min(255, Number(value) || 0)) / 255;
+    return this.alpha;
+  }
+
+  getAlpha() {
+    return Math.round((this.alpha ?? 1) * 255);
+  }
+
+  getStrokeWidth() {
+    return this.strokeWidth;
+  }
+
+  setStrokeJoin(join) {
+    this.strokeJoin = typeof join === 'number' ? ['miter', 'round', 'bevel'][join] || 'miter' : join;
+  }
+
+  setStrokeCap(cap) {
+    this.strokeCap = typeof cap === 'number' ? ['butt', 'round', 'square'][cap] || 'butt' : cap;
   }
 
   setStrokeWidth(width) {
@@ -235,6 +260,52 @@ export class Canvas {
     ctx.restore();
   }
 
+  drawPath(commands, paint) {
+    if (!commands || !commands.length) return;
+    const ctx = this.context;
+    ctx.save();
+    applyPaint(ctx, paint);
+    ctx.beginPath();
+    let cx = 0;
+    let cy = 0;
+    let startX = 0;
+    let startY = 0;
+    for (const cmd of commands) {
+      switch (cmd.type) {
+        case 'moveTo':
+          cx = cmd.x;
+          cy = cmd.y;
+          startX = cx;
+          startY = cy;
+          ctx.moveTo(this.originX + cx, this.originY + cy);
+          break;
+        case 'lineTo':
+          cx = cmd.x;
+          cy = cmd.y;
+          ctx.lineTo(this.originX + cx, this.originY + cy);
+          break;
+        case 'rLineTo':
+          cx += cmd.x;
+          cy += cmd.y;
+          ctx.lineTo(this.originX + cx, this.originY + cy);
+          break;
+        case 'close':
+          ctx.closePath();
+          cx = startX;
+          cy = startY;
+          break;
+        default:
+          break;
+      }
+    }
+    if (paint?.style === 'stroke') ctx.stroke();
+    else {
+      ctx.fill();
+      if (paint?.style === 'fillAndStroke') ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   drawText(text, x, y, paint) {
     const ctx = this.context;
     ctx.save();
@@ -391,6 +462,8 @@ function applyPaint(ctx, paint) {
   ctx.fillStyle = cssColor(p.color);
   ctx.strokeStyle = cssColor(p.color);
   ctx.lineWidth = p.strokeWidth || 1;
+  if (p.strokeJoin) ctx.lineJoin = p.strokeJoin;
+  if (p.strokeCap) ctx.lineCap = p.strokeCap;
   ctx.font = `${p.fontWeight || 'normal'} ${p.textSize}px ${p.typeface || 'Noto Sans CJK SC'}`;
   ctx.textAlign = p.textAlign || 'left';
   ctx.globalAlpha = p.alpha ?? 1;
@@ -434,7 +507,8 @@ export function drawVectorRaw(ctx, originX, originY, drawable, left, top, width,
   ctx.save();
   ctx.translate(originX + left, originY + top);
   ctx.scale(width / viewportWidth, height / viewportHeight);
-  for (const child of root.children || []) drawVectorNode(ctx, child);
+  const tint = drawable?.tint;
+  for (const child of root.children || []) drawVectorNode(ctx, child, tint);
   ctx.restore();
   return true;
 }
@@ -454,7 +528,7 @@ function attrsToMap(attrs) {
   return map;
 }
 
-function drawVectorNode(ctx, node) {
+function drawVectorNode(ctx, node, tint) {
   if (!node) return;
   if (node.name === 'group') {
     const attrs = attrsToMap(node.attrs);
@@ -477,16 +551,16 @@ function drawVectorNode(ctx, node) {
       ctx.scale(scaleX, scaleY);
       ctx.translate(-pivotX, -pivotY);
     }
-    for (const child of node.children || []) drawVectorNode(ctx, child);
+    for (const child of node.children || []) drawVectorNode(ctx, child, tint);
     ctx.restore();
     return;
   }
   if (node.name === 'path') {
-    drawVectorPath(ctx, node);
+    drawVectorPath(ctx, node, tint);
   }
 }
 
-function drawVectorPath(ctx, node) {
+function drawVectorPath(ctx, node, tint) {
   const attrs = attrsToMap(node.attrs);
   const pathData = attrs.pathData;
   if (!pathData) return;
@@ -503,13 +577,13 @@ function drawVectorPath(ctx, node) {
   applyPathData(ctx, pathData);
   if (fillColor !== undefined && fillColor !== null && fillAlpha > 0) {
     ctx.globalAlpha = fillAlpha;
-    ctx.fillStyle = cssColor(normalizeColor(fillColor));
+    ctx.fillStyle = cssColor(tint === undefined || tint === null ? normalizeColor(fillColor) : normalizeColor(tint));
     if (fillType === 'evenOdd' || fillType === 1) ctx.fill('evenodd');
     else ctx.fill();
   }
   if (strokeColor !== undefined && strokeColor !== null && strokeWidth > 0 && strokeAlpha > 0) {
     ctx.globalAlpha = strokeAlpha;
-    ctx.strokeStyle = cssColor(normalizeColor(strokeColor));
+    ctx.strokeStyle = cssColor(tint === undefined || tint === null ? normalizeColor(strokeColor) : normalizeColor(tint));
     ctx.lineWidth = strokeWidth;
     ctx.lineCap = ['butt', 'round', 'square'][strokeLineCap] || 'butt';
     ctx.lineJoin = ['miter', 'round', 'bevel'][strokeLineJoin] || 'miter';

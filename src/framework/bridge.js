@@ -1,6 +1,7 @@
 import { View, ViewGroup } from './view.js';
 import {
   FrameLayout,
+  GridLayout,
   AbsoluteLayout,
   LinearLayout,
   RelativeLayout,
@@ -21,6 +22,7 @@ const DESCRIPTOR_BY_CLASS = new Map([
   ['ViewGroup', 'Landroid/view/ViewGroup;'],
   ['LinearLayout', 'Landroid/widget/LinearLayout;'],
   ['FrameLayout', 'Landroid/widget/FrameLayout;'],
+  ['GridLayout', 'Landroid/widget/GridLayout;'],
   ['RelativeLayout', 'Landroid/widget/RelativeLayout;'],
   ['AbsoluteLayout', 'Landroid/widget/AbsoluteLayout;'],
   ['TextView', 'Landroid/widget/TextView;'],
@@ -46,6 +48,7 @@ export function descriptorOfView(view) {
     WebView,
     LinearLayout,
     FrameLayout,
+    GridLayout,
     RelativeLayout,
     AbsoluteLayout,
     DecorView,

@@ -1,8 +1,13 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
-import { numberToFloatBits } from '../runtime/values.js';
+import { numberToFloatBits, toInt } from '../runtime/values.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
 import { JAVA_CORE_CLASSES, deviceCapabilities, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
-import { LayoutInflater } from './layout-inflater.js';
+import {
+  LayoutInflater,
+  buildLayoutParamsViaDex,
+  coerceLayoutParams,
+  layoutParamsDescriptorFor,
+} from './layout-inflater.js';
 import { Resources, convertDimension } from './resources.js';
 import { Handler, Looper, Message, MessageQueue } from './os.js';
 import { Toast } from './toast.js';
@@ -18,16 +23,17 @@ import {
   colorToCss,
   resolveSize,
   getDefaultSize,
+  getChildMeasureSpec,
+  createMotionEventObject,
+  toMotionEventObject,
 } from './view.js';
 import {
   AbsoluteLayout,
   FrameLayout,
+  GridLayout,
   HorizontalScrollView,
   LinearLayout,
   RelativeLayout,
-  ActionBarContainer,
-  ActionBarOverlayLayout,
-  Toolbar,
 } from './layouts.js';
 import {
   Button,
@@ -37,6 +43,7 @@ import {
   ScrollView,
   TextView,
   WebView,
+  resolveStateListColor,
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window } from './window.js';
 
@@ -292,6 +299,7 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/view/View;': View,
   'Landroid/view/ViewGroup;': ViewGroup,
   'Landroid/widget/FrameLayout;': FrameLayout,
+  'Landroid/widget/GridLayout;': GridLayout,
   'Landroid/widget/LinearLayout;': LinearLayout,
   'Landroid/widget/RelativeLayout;': RelativeLayout,
   'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
@@ -305,10 +313,17 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/Switch;': Button,
   'Landroid/widget/CompoundButton;': Button,
   'Landroid/webkit/WebView;': WebView,
-  'Landroidx/appcompat/widget/ActionBarContainer;': ActionBarContainer,
-  'Landroidx/appcompat/widget/ActionBarOverlayLayout;': ActionBarOverlayLayout,
-  'Landroidx/appcompat/widget/Toolbar;': Toolbar,
 };
+
+function stateSetStatic(ids) {
+  return {
+    lazy(vm) {
+      const array = vm.newArray('[I', ids.length);
+      for (let i = 0; i < ids.length; i++) array.$data[i] = ids[i] | 0;
+      return array;
+    },
+  };
+}
 
 const RELATIVE_RULE_NAMES = {
   0: 'leftOf', 1: 'rightOf', 2: 'above', 3: 'below',
@@ -321,77 +336,6 @@ const RELATIVE_RULE_NAMES = {
 
 function ruleVerb(rule) {
   return RELATIVE_RULE_NAMES[rule >>> 0] || `rule${rule >>> 0}`;
-}
-
-function findNestedLayoutParamsClass(vm, parentDescriptor) {
-  const targets = ['Landroid/view/ViewGroup$LayoutParams;', 'Landroid/view/ViewGroup$MarginLayoutParams;'];
-  let best = null;
-  let bestDepth = -1;
-  const sources = [vm?.dexFile, ...(Array.isArray(vm?.dexFiles) ? vm.dexFiles : [])];
-  for (const dex of sources) {
-    if (!dex || !Array.isArray(dex.classes)) continue;
-    for (const cls of dex.classes) {
-      const descriptor = cls?.descriptor;
-      if (typeof descriptor !== 'string') continue;
-      if (!descriptor.startsWith(parentDescriptor.slice(0, -1) + '$')) continue;
-      const superDescriptor = cls.superclass;
-      if (!superDescriptor) continue;
-      let depth = 0;
-      let cursor = superDescriptor;
-      const seen = new Set();
-      while (cursor && !seen.has(cursor)) {
-        seen.add(cursor);
-        if (targets.includes(cursor)) break;
-        const resolved = vm?.registry?.resolve(cursor);
-        cursor = resolved?.superDescriptor || resolved?.dexClass?.superclass || null;
-        depth += 1;
-      }
-      if (!targets.includes(cursor)) continue;
-      if (depth > bestDepth) {
-        bestDepth = depth;
-        best = descriptor;
-      }
-    }
-  }
-  return best;
-}
-
-function layoutParamsDescriptorFor(view, vm) {
-  const parent = view?.parent;
-  const parentName = parent?.constructor?.name;
-  const parentDescriptor = parent?.$descriptor;
-  if (parentDescriptor && vm?.registry?.resolve) {
-    const nested = findNestedLayoutParamsClass(vm, parentDescriptor);
-    if (nested) return nested;
-    const declared = generateLayoutParamsReturnType(vm, parentDescriptor);
-    if (declared) return declared;
-  }
-  if (parentName === 'RelativeLayout') return 'Landroid/widget/RelativeLayout$LayoutParams;';
-  if (parentName === 'LinearLayout') return 'Landroid/widget/LinearLayout$LayoutParams;';
-  if (parentName === 'FrameLayout' || parentName === 'DecorView') return 'Landroid/widget/FrameLayout$LayoutParams;';
-  if (parentName === 'AbsoluteLayout') return 'Landroid/widget/AbsoluteLayout$LayoutParams;';
-  if (view?.layoutParams?.leftMargin !== undefined) return 'Landroid/view/ViewGroup$MarginLayoutParams;';
-  return 'Landroid/view/ViewGroup$LayoutParams;';
-}
-
-
-function generateLayoutParamsReturnType(vm, descriptor) {
-  const seen = new Set();
-  let desc = descriptor;
-  while (desc && !seen.has(desc)) {
-    seen.add(desc);
-    const rc = vm.registry.resolve(desc);
-    const dexClass = rc?.dexClass;
-    if (dexClass?.methodsByName) {
-      for (const [key, method] of dexClass.methodsByName) {
-        if (!key.startsWith('generateLayoutParams(')) continue;
-        const type = method?.proto?.returnType;
-        if (type && type !== 'Landroid/view/ViewGroup$LayoutParams;') return type;
-      }
-    }
-    desc = rc?.superDescriptor || null;
-  }
-  return null;
 }
 
 function rectField(rect, name) {
@@ -440,92 +384,6 @@ function applyGravity(gravity, width, height, container, out, layoutDirection = 
   setRectField(out, 'bottom', ct + y + height);
 }
 
-function buildLayoutParamsViaDex(vm, descriptor, params) {
-  try {
-    const runtimeClass = vm.registry.resolve(descriptor);
-    if (!runtimeClass?.dexClass) return null;
-    let object = null;
-    try {
-      object = vm.instantiate(descriptor, [params.width | 0, params.height | 0]);
-    } catch {
-      object = null;
-    }
-    if (!object || !object.$fields) {
-      try {
-        object = vm.instantiate(descriptor, []);
-      } catch {
-        object = null;
-      }
-    }
-    if (!object || !object.$fields) return null;
-    const setBaseField = (name, value) => {
-      for (const key of object.$fields.keys()) {
-        if (key.endsWith('->' + name + ':I')) { object.$fields.set(key, value | 0); return true; }
-      }
-      object.$fields.set('Landroid/view/ViewGroup$LayoutParams;->' + name + ':I', value | 0);
-      return true;
-    };
-    setBaseField('width', params.width | 0);
-    setBaseField('height', params.height | 0);
-    if (descriptor === 'Landroidx/viewpager/widget/ViewPager$g;') {
-      for (const key of object.$fields.keys()) {
-        if (key.endsWith('->c:F') && !object.$fields.get(key)) object.$fields.set(key, numberToFloatBits(1));
-      }
-    }
-    const hasMargins = params.leftMargin !== undefined || params.topMargin !== undefined
-      || params.rightMargin !== undefined || params.bottomMargin !== undefined || params.gravity !== undefined;
-    if (hasMargins && object.$fields) {
-      const setIfPresent = (name, type, value) => {
-        for (const key of object.$fields.keys()) {
-          if (key.endsWith('->' + name + ':' + type)) object.$fields.set(key, value);
-        }
-      };
-      if (params.leftMargin !== undefined) setIfPresent('leftMargin', 'I', params.leftMargin | 0);
-      if (params.topMargin !== undefined) setIfPresent('topMargin', 'I', params.topMargin | 0);
-      if (params.rightMargin !== undefined) setIfPresent('rightMargin', 'I', params.rightMargin | 0);
-      if (params.bottomMargin !== undefined) setIfPresent('bottomMargin', 'I', params.bottomMargin | 0);
-      if (typeof params.gravity === 'number') setIfPresent('gravity', 'I', params.gravity | 0);
-    }
-    return object;
-  } catch {
-    return null;
-  }
-}
-
-function coerceLayoutParams(params) {
-  if (!params || typeof params !== 'object') return params;
-  if (!params.$fields) {
-    return params;
-  }
-  const out = { ...(params.$layoutParams || {}) };
-  const axes = ['width', 'height', 'x', 'y', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight', 'startMargin', 'endMargin', 'column', 'span', 'margins'];
-  for (const [key, value] of params.$fields) {
-    for (const axis of axes) {
-      if (key.endsWith(`->${axis}:I`) && typeof value === 'number') out[axis] = value;
-      if (key.endsWith(`->${axis}:F`) && typeof value === 'number') out[axis] = value;
-    }
-  }
-  if (params.$dexClass?.descriptor?.endsWith('MarginsLayoutParams$LayoutParams;')) {
-    if (out.width === undefined) out.width = -2;
-    if (out.height === undefined) out.height = -2;
-  }
-  if (out.width === undefined) out.width = -2;
-  if (out.height === undefined) out.height = -2;
-  return out;
-}
-
-function populateDexLayoutParams(object, descriptor, params) {
-  if (!object?.$fields) return;
-  const setField = (name, type, value) => object.$fields.set(`${descriptor}->${name}:${type}`, value);
-  if (descriptor === "Landroidx/drawerlayout/widget/DrawerLayout$e;") {
-    const gravity = typeof params.gravity === 'number' && params.gravity !== -1 ? params.gravity : 0;
-    setField('a', 'I', gravity >>> 0);
-    setField('b', 'F', 0);
-    setField('c', 'Z', false);
-    setField('d', 'I', 0);
-  }
-}
-
 function viewPeerConstructor(descriptor, superDescriptor = null) {
   const ViewClass = NATIVE_VIEW_CLASSES[descriptor]
     || (superDescriptor ? NATIVE_VIEW_CLASSES[superDescriptor] : null)
@@ -563,14 +421,45 @@ export function registerFrameworkNativeClasses(vm) {
   return vm;
 }
 
-function isViewDescriptor(descriptor) {
+function computeVelocity(peer, units, maxVelocity) {
+  if (!peer) return;
+  const scale = Number(units) || 1;
+  const samples = Array.isArray(peer.samples) ? peer.samples : [];
+  if (samples.length < 2) {
+    peer.xVelocity = 0;
+    peer.yVelocity = 0;
+    return;
+  }
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const elapsed = last.t - first.t;
+  if (!Number.isFinite(elapsed) || elapsed <= 0) {
+    peer.xVelocity = 0;
+    peer.yVelocity = 0;
+    return;
+  }
+  let vx = ((last.x - first.x) / elapsed) * scale;
+  let vy = ((last.y - first.y) / elapsed) * scale;
+  const limit = Number(maxVelocity) || 0;
+  if (limit > 0) {
+    vx = Math.max(-limit, Math.min(limit, vx));
+    vy = Math.max(-limit, Math.min(limit, vy));
+  }
+  peer.xVelocity = vx;
+  peer.yVelocity = vy;
+}
+
+function isViewDescriptor(vm, descriptor) {
   if (!descriptor || !descriptor.startsWith('L')) return false;
   if (Object.prototype.hasOwnProperty.call(NATIVE_VIEW_CLASSES, descriptor)) return true;
-  return descriptor.startsWith('Landroidx/appcompat/widget/') ||
-    descriptor.startsWith('Landroid/widget/') ||
-    descriptor.startsWith('Landroid/view/') ||
-    descriptor.startsWith('Landroid/webkit/') ||
-    descriptor.startsWith('Lcom/google/android/material/');
+  const seen = new Set();
+  let desc = descriptor;
+  while (desc && !seen.has(desc)) {
+    seen.add(desc);
+    if (desc === 'Landroid/view/View;' || desc === 'Landroid/view/ViewGroup;') return true;
+    desc = vm?.registry?.findDexClass?.(desc)?.superclass || null;
+  }
+  return false;
 }
 
 const VIEW_CONSTRUCTOR_SIGNATURES = [
@@ -583,7 +472,7 @@ const VIEW_CONSTRUCTOR_SIGNATURES = [
 function injectViewConstructors(vm) {
   for (const [descriptor, def] of vm.registry.nativeDefs) {
     if (!def || !def.ctor) continue;
-    if (!isViewDescriptor(descriptor)) continue;
+    if (!isViewDescriptor(vm, descriptor)) continue;
     for (const signature of VIEW_CONSTRUCTOR_SIGNATURES) {
       const key = `<init>${signature}`;
       if (def.methods.has(key)) continue;
@@ -685,11 +574,37 @@ function buildFrameworkDefinitions(vm) {
       },
       methods: {
         'onCreatePanelView(I)Landroid/view/View;': () => null,
-        'onCreatePanelMenu(ILandroid/view/Menu;)Z': () => false,
-        'onPreparePanel(ILandroid/view/View;Landroid/view/Menu;)Z': () => false,
+        'onCreatePanelMenu(ILandroid/view/Menu;)Z': (self, [featureId, menu], vm) => {
+          if ((featureId | 0) !== 0 || !menu) return false;
+          try {
+            return !!vm.invokeByName('onCreateOptionsMenu', '(Landroid/view/Menu;)Z', self.object || self, [menu]);
+          } catch {
+            return false;
+          }
+        },
+        'onPreparePanel(ILandroid/view/View;Landroid/view/Menu;)Z': (self, [featureId, view, menu], vm) => {
+          if ((featureId | 0) !== 0 || !menu) return false;
+          try {
+            return vm.invokeByName('onPrepareOptionsMenu', '(Landroid/view/Menu;)Z', self.object || self, [menu]) !== false;
+          } catch {
+            return true;
+          }
+        },
         'onMenuOpened(ILandroid/view/Menu;)Z': () => true,
         'onPanelClosed(ILandroid/view/Menu;)V': () => undefined,
-        'onMenuItemSelected(ILandroid/view/MenuItem;)Z': () => false,
+        'onMenuItemSelected(ILandroid/view/MenuItem;)Z': (self, [featureId, item], vm) => {
+          try {
+            if ((featureId | 0) === 0) {
+              return !!vm.invokeByName('onOptionsItemSelected', '(Landroid/view/MenuItem;)Z', self.object || self, [item]);
+            }
+            if ((featureId | 0) === 6) {
+              return !!vm.invokeByName('onContextItemSelected', '(Landroid/view/MenuItem;)Z', self.object || self, [item]);
+            }
+          } catch {
+            return false;
+          }
+          return false;
+        },
         'dispatchKeyEvent(Landroid/view/KeyEvent;)Z': (self, [event], vm) => dispatchActivityKeyEvent(self, event, vm),
         'dispatchKeyShortcutEvent(Landroid/view/KeyEvent;)Z': (self, [event], vm) => dispatchActivityKeyEvent(self, event, vm),
 
@@ -824,21 +739,9 @@ function buildFrameworkDefinitions(vm) {
         'requestWindowFeature(I)Z': () => true,
         'setRequestedOrientation(I)V': () => undefined,
         'onCreateOptionsMenu(Landroid/view/Menu;)Z': () => false,
+        'onPrepareOptionsMenu(Landroid/view/Menu;)Z': () => true,
         'onOptionsItemSelected(Landroid/view/MenuItem;)Z': () => false,
-      },
-    })
-  );
-
-  defs.push(
-    nativeDef('Landroidx/appcompat/app/e;', {
-      super: 'Landroid/app/Activity;',
-      methods: {
-        'findViewById(I)Landroid/view/View;': (self, [id], vm) => {
-          const root = self.view || self.$decorView || self.decorView || self.window?.decorView || vm.currentActivityView?.();
-          if (globalThis.__DBG_ARG) console.error('HOST_E_FINDVIEW id=' + (id>>>0) + ' root=' + (root ? (root.$descriptor || root.constructor?.name) : String(root)) + ' selfKeys=' + Object.keys(self || {}).slice(0,10).join(','));
-          const found = findView(root, id >>> 0);
-          return found ? viewObject(vm, found) : null;
-        },
+        'onContextItemSelected(Landroid/view/MenuItem;)Z': () => false,
       },
     })
   );
@@ -1146,13 +1049,16 @@ function buildFrameworkDefinitions(vm) {
         'getAttributeCount()I': (self) => attributeSetNode(self)?.attrs?.length ?? 0,
         'getAttributeName(I)Ljava/lang/String;': (self, [i]) => {
           const a = attributeSetNode(self)?.attrs?.[i | 0];
-          return a ? (a.namespaceName || a.name) : null;
+          return a ? localAttrName(a) : null;
         },
         'getAttributeNamespace(I)Ljava/lang/String;': (self, [i]) => attributeSetNode(self)?.attrs?.[i | 0]?.namespace ?? null,
         'getAttributeNameResource(I)I': (self, [i]) => (attributeSetNode(self)?.attrs?.[i | 0]?.resId | 0) || 0,
         'getAttributeValue(I)Ljava/lang/String;': (self, [i]) => {
           const a = attributeSetNode(self)?.attrs?.[i | 0];
-          return a == null || a.value == null ? null : String(a.value);
+          if (a == null) return null;
+          if (a.rawValue !== null && a.rawValue !== undefined) return String(a.rawValue);
+          if (a.value === null || a.value === undefined) return null;
+          return (a.value && typeof a.value === 'object') ? null : String(a.value);
         },
         'getAttributeValue(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [ns, name]) =>
           attributeValueToString(attributeSetNode(self), jsString(name)),
@@ -2014,6 +1920,26 @@ function buildFrameworkDefinitions(vm) {
         ['VISIBLE:I', 0],
         ['INVISIBLE:I', 4],
         ['GONE:I', 8],
+        ['EMPTY_STATE_SET:[I', stateSetStatic([])],
+        ['SELECTED_STATE_SET:[I', stateSetStatic([0x010100a1])],
+        ['ENABLED_STATE_SET:[I', stateSetStatic([0x0101009e])],
+        ['ENABLED_SELECTED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x010100a1])],
+        ['FOCUSED_STATE_SET:[I', stateSetStatic([0x0101009c])],
+        ['ENABLED_FOCUSED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x0101009c])],
+        ['FOCUSED_SELECTED_STATE_SET:[I', stateSetStatic([0x0101009c, 0x010100a1])],
+        ['ENABLED_FOCUSED_SELECTED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x0101009c, 0x010100a1])],
+        ['PRESSED_STATE_SET:[I', stateSetStatic([0x010100a7])],
+        ['ENABLED_PRESSED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x010100a7])],
+        ['PRESSED_ENABLED_STATE_SET:[I', stateSetStatic([0x010100a7, 0x0101009e])],
+        ['ACTIVATED_STATE_SET:[I', stateSetStatic([0x010102fe])],
+        ['ENABLED_ACTIVATED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x010102fe])],
+        ['HOVERED_STATE_SET:[I', stateSetStatic([0x01010367])],
+        ['ENABLED_HOVERED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x01010367])],
+        ['CHECKED_STATE_SET:[I', stateSetStatic([0x010100a0])],
+        ['ENABLED_CHECKED_STATE_SET:[I', stateSetStatic([0x0101009e, 0x010100a0])],
+        ['CHECKED_SELECTED_STATE_SET:[I', stateSetStatic([0x010100a0, 0x010100a1])],
+        ['CHECKED_FOCUSED_STATE_SET:[I', stateSetStatic([0x010100a0, 0x0101009c])],
+        ['CHECKED_PRESSED_STATE_SET:[I', stateSetStatic([0x010100a0, 0x010100a7])],
       ]),
     })
   );
@@ -2035,7 +1961,10 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) child.layoutParams = coerceLayoutParams(params);
+            if (params) {
+              child.layoutParams = coerceLayoutParams(params);
+              if (params.$fields) child.$layoutParamsObject = params;
+            }
             self.view.addView(child);
           }
         },
@@ -2049,7 +1978,10 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;)V': (self, [view, index, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) child.layoutParams = coerceLayoutParams(params);
+            if (params) {
+              child.layoutParams = coerceLayoutParams(params);
+              if (params.$fields) child.$layoutParamsObject = params;
+            }
             self.view.addView(child, index | 0);
           }
         },
@@ -2057,7 +1989,10 @@ function buildFrameworkDefinitions(vm) {
           if (globalThis.DBG_AVIL) console.error('AVIL self.view=', !!self?.view, 'child=', !!view, 'idx=', index);
           const child = view?.$view || view;
           if (!child || !self.view) return false;
-          if (params && typeof params === 'object' && !params.$peer) child.layoutParams = params;
+          if (params && typeof params === 'object' && !params.$peer) {
+            child.layoutParams = params;
+            if (params.$fields) child.$layoutParamsObject = params;
+          }
           self.view.addView(child, index | 0);
           return true;
         },
@@ -2176,6 +2111,18 @@ function buildFrameworkDefinitions(vm) {
         'getNestedScrollAxes()I': () => 0,
         'setNestedScrollAxes(I)V': () => undefined,
       },
+      staticMethods: {
+        'getChildMeasureSpec(III)I': (_self, [spec, padding, childDimension]) => {
+          return getChildMeasureSpec(toInt(spec), toInt(padding), toInt(childDimension));
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/ViewPropertyAnimator;', {
+      super: 'Ljava/lang/Object;',
+      methods: viewPropertyAnimatorMethods(),
     })
   );
 
@@ -2191,12 +2138,35 @@ function buildFrameworkDefinitions(vm) {
       methods: {
         'inflate(ILandroid/view/Menu;)V': (self, [resId, menu]) => {
           if (!menu) return;
-          const resources = self.vm?.resources;
-          const parsed = resources ? parseMenuResource(resources, resId >>> 0, self.vm) : null;
+          const vm = self.vm;
+          const resources = vm?.resources;
+          const parsed = resources ? parseMenuResource(resources, resId >>> 0, vm) : null;
           if (!parsed || !parsed.length) return;
           const menuPeer = menu.$peer || menu;
+          const call = (target, name, proto, args) => {
+            if (!target) return null;
+            try {
+              return vm?.invokeByName?.(name, proto, target, args) ?? null;
+            } catch {
+              return null;
+            }
+          };
           for (const item of parsed) {
-            menuPeer.add?.(item.groupId | 0, item.itemId | 0, item.order | 0, item.title);
+            let added = null;
+            if (typeof menuPeer.add === 'function') {
+              added = menuPeer.add(item.groupId | 0, item.itemId | 0, item.order | 0, item.title);
+            } else {
+              added = call(menu, 'add', '(IIILjava/lang/CharSequence;)Landroid/view/MenuItem;', [item.groupId | 0, item.itemId | 0, item.order | 0, item.title]);
+            }
+            if (!added) continue;
+            if (item.visible === false) call(added, 'setVisible', '(Z)Landroid/view/MenuItem;', [false]);
+            if (item.enabled === false) call(added, 'setEnabled', '(Z)Landroid/view/MenuItem;', [false]);
+            if (item.checkable) {
+              call(added, 'setCheckable', '(Z)Landroid/view/MenuItem;', [true]);
+              if (item.checked) call(added, 'setChecked', '(Z)Landroid/view/MenuItem;', [true]);
+            }
+            if (item.showAsAction) call(added, 'setShowAsAction', '(I)V', [item.showAsAction | 0]);
+            if (item.icon) call(added, 'setIcon', '(I)Landroid/view/MenuItem;', [item.icon >>> 0]);
           }
         },
       },
@@ -2598,12 +2568,21 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/TextView;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => self.view?.setText(jsString(text)),
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText(jsString(text)); },
         'setText(I)V': (self, [resId]) => self.view?.setText(self.vm.resources.getString(resId >>> 0)),
+        'setTextAppearance(Landroid/content/Context;I)V': (self, _args, _vm, resId) => applyTextAppearance(self, _args[1]),
+        'setTextAppearance(I)V': (self, [resId]) => applyTextAppearance(self, resId),
         'getText()Ljava/lang/CharSequence;': (self) => self.view?.getText() ?? '',
         'setTextSize(F)V': (self, [size]) => self.view?.setTextSize(Number(size)),
         'setTextSize(IF)V': (self, [unit, size]) => self.view?.setTextSize(convertDimension({ dimension: { value: Number(size), unit: unit === 2 ? 'sp' : 'dp' } }, self.vm.resources.density)),
-        'setTextColor(I)V': (self, [color]) => self.view?.setTextColor(color >>> 0),
+        'setTextColor(I)V': (self, [color], vm) => {
+          let value = color >>> 0;
+          if (value >= 0x01010000 && value < 0x02000000) {
+            const resolved = resolveStyleColor(vm, value);
+            if (typeof resolved === 'number') value = resolved >>> 0;
+          }
+          self.view?.setTextColor(value);
+        },
         'setGravity(I)V': (self, [gravity]) => self.view?.setGravity(gravity | 0),
         'getTransformationMethod()Landroid/text/method/TransformationMethod;': () => null,
         'setMovementMethod(Landroid/text/method/MovementMethod;)V': (self, [method]) => {
@@ -2613,9 +2592,7 @@ function buildFrameworkDefinitions(vm) {
         'setTextColor(Landroid/content/res/ColorStateList;)V': (self, [csl]) => {
           if (!self.view) return;
           self.view.$textColorStateList = csl || null;
-          const color = csl?.color ?? (typeof csl?.getColorForState === 'function'
-            ? csl.getColorForState(self.view.$textStateSet || [], csl?.getDefaultColor?.() ?? 0)
-            : (csl?.$peer?.color ?? csl?.color));
+          const color = resolveStateListColor(csl, self.view.$textStateSet || []);
           if (typeof color === 'number') self.view.setTextColor?.(color >>> 0);
         },
         'setHintTextColor(Landroid/content/res/ColorStateList;)V': () => undefined,
@@ -2857,7 +2834,7 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Button;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => self.view?.setText(jsString(text)),
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText(jsString(text)); },
       },
     })
   );
@@ -2886,6 +2863,73 @@ function buildFrameworkDefinitions(vm) {
           if (self.view) self.view.inputType = type | 0;
         },
         'showSoftInput()V': (self) => self.view?.showKeyboard?.(),
+      },
+    })
+  );
+
+  function resetScroller(self) {
+    self.scrollerFinished = true;
+    self.scrollerStartTime = 0;
+    self.scrollerDuration = 0;
+    self.scrollerStartX = 0;
+    self.scrollerStartY = 0;
+    self.scrollerFinalX = 0;
+    self.scrollerFinalY = 0;
+    self.scrollerCurrX = 0;
+    self.scrollerCurrY = 0;
+  }
+
+  function startScroller(self, sx, sy, dx, dy, duration) {
+    self.scrollerFinished = false;
+    self.scrollerStartTime = Date.now();
+    self.scrollerDuration = Math.max(1, Number(duration) || 250);
+    self.scrollerStartX = Number(sx) | 0;
+    self.scrollerStartY = Number(sy) | 0;
+    self.scrollerFinalX = (self.scrollerStartX + (Number(dx) | 0)) | 0;
+    self.scrollerFinalY = (self.scrollerStartY + (Number(dy) | 0)) | 0;
+    self.scrollerCurrX = self.scrollerStartX;
+    self.scrollerCurrY = self.scrollerStartY;
+  }
+
+  defs.push(
+    nativeDef('Landroid/widget/Scroller;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>(Landroid/content/Context;)V': (self) => { resetScroller(self); },
+        '<init>(Landroid/content/Context;Landroid/view/animation/Interpolator;)V': (self) => { resetScroller(self); },
+        'startScroll(IIII)V': (self, [sx, sy, dx, dy]) => startScroller(self, sx, sy, dx, dy, 250),
+        'startScroll(IIIII)V': (self, [sx, sy, dx, dy, duration]) => startScroller(self, sx, sy, dx, dy, duration),
+        'computeScrollOffset()Z': (self) => {
+          if (self.scrollerFinished) return false;
+          const elapsed = Date.now() - self.scrollerStartTime;
+          const duration = Math.max(1, self.scrollerDuration | 0);
+          if (elapsed >= duration) {
+            self.scrollerCurrX = self.scrollerFinalX;
+            self.scrollerCurrY = self.scrollerFinalY;
+            self.scrollerFinished = true;
+          } else {
+            const t = elapsed / duration;
+            self.scrollerCurrX = Math.round(self.scrollerStartX + (self.scrollerFinalX - self.scrollerStartX) * t);
+            self.scrollerCurrY = Math.round(self.scrollerStartY + (self.scrollerFinalY - self.scrollerStartY) * t);
+          }
+          return true;
+        },
+        'isFinished()Z': (self) => !!self.scrollerFinished,
+        'abortAnimation()V': (self) => { self.scrollerFinished = true; },
+        'forceFinished(Z)V': (self, [finished]) => { self.scrollerFinished = !!finished; },
+        'getCurrX()I': (self) => self.scrollerCurrX | 0,
+        'getCurrY()I': (self) => self.scrollerCurrY | 0,
+        'getStartX()I': (self) => self.scrollerStartX | 0,
+        'getStartY()I': (self) => self.scrollerStartY | 0,
+        'getFinalX()I': (self) => self.scrollerFinalX | 0,
+        'getFinalY()I': (self) => self.scrollerFinalY | 0,
+        'getDuration()I': (self) => self.scrollerDuration | 0,
+        'setFriction(F)V': () => undefined,
+        'extendDuration(I)V': () => undefined,
+        'timePassed()I': (self) => (Date.now() - (self.scrollerStartTime || Date.now())) | 0,
+        'isScrollingInDirection(FF)Z': (self, [xvel, yvel]) => {
+          return !self.scrollerFinished && Math.sign(xvel) === Math.sign(self.scrollerFinalX - self.scrollerCurrX);
+        },
       },
     })
   );
@@ -2968,58 +3012,25 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/GridLayout;', {
+      super: 'Landroid/view/ViewGroup;',
+      ctor: viewPeerConstructor('Landroid/widget/GridLayout;'),
+      methods: {
+        ...viewMethods(),
+        'setColumnCount(I)V': (self, [value]) => self.view?.setColumnCount(value | 0),
+        'setRowCount(I)V': (self, [value]) => self.view?.setRowCount(value | 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/AbsoluteLayout;', {
       super: 'Landroid/view/ViewGroup;',
       ctor: viewPeerConstructor('Landroid/widget/AbsoluteLayout;'),
     })
   );
 
-  defs.push(
-    nativeDef('Landroidx/appcompat/widget/ContentFrameLayout;', {
-      super: 'Landroid/widget/FrameLayout;',
-      ctor: viewPeerConstructor('Landroid/widget/FrameLayout;'),
-      methods: {
-        ...viewMethods(),
-        'setDecorPadding(IIII)V': (self, [l, t, r, b]) => {
-          const object = self.object;
-          const key = 'Landroidx/appcompat/widget/ContentFrameLayout;->mDecorPadding:Landroid/graphics/Rect;';
-          let rect = object?.$fields?.get(key);
-          if (!rect) {
-            rect = self.vm.allocateRawObject('Landroid/graphics/Rect;');
-            rect.$peer = { rect: new Rect(l | 0, t | 0, r | 0, b | 0) };
-            object?.$fields?.set(key, rect);
-          } else if (rect.$peer?.rect) {
-            rect.$peer.rect.set(l | 0, t | 0, r | 0, b | 0);
-          } else if (rect.$peer) {
-            rect.$peer.rect = new Rect(l | 0, t | 0, r | 0, b | 0);
-          }
-        },
-        'dispatchFitSystemWindows(Landroid/graphics/Rect;)V': () => undefined,
-        'setAttachListener(Landroidx/appcompat/widget/ContentFrameLayout$OnAttachListener;)V': (self, [listener]) => {
-          if (self.object) self.object.$attachListener = listener;
-        },
-        'getFixedHeightMajor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mFixedHeightMajor', vm),
-        'getFixedHeightMinor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mFixedHeightMinor', vm),
-        'getFixedWidthMajor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mFixedWidthMajor', vm),
-        'getFixedWidthMinor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mFixedWidthMinor', vm),
-        'getMinWidthMajor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mMinWidthMajor', vm),
-        'getMinWidthMinor()Landroid/util/TypedValue;': (self, _a, vm) => ensureTypedValue(self, 'mMinWidthMinor', vm),
-      },
-    })
-  );
-
   for (const [descriptor, superDescriptor] of [
-    ['Landroidx/appcompat/widget/FitWindowsFrameLayout;', 'Landroid/widget/FrameLayout;'],
-    ['Landroidx/appcompat/widget/FitWindowsLinearLayout;', 'Landroid/widget/LinearLayout;'],
-    ['Landroidx/appcompat/widget/ViewStubCompat;', 'Landroid/view/View;'],
-    ['Landroidx/appcompat/widget/ActionBarContextView;', 'Landroid/widget/LinearLayout;'],
-    ['Landroidx/appcompat/widget/ActionBarContainer;', 'Landroid/widget/FrameLayout;'],
-    ['Landroidx/appcompat/widget/ActionBarOverlayLayout;', 'Landroid/widget/FrameLayout;'],
-    ['Landroidx/appcompat/widget/ActionBarBackgroundDrawable;', 'Landroid/graphics/drawable/Drawable;'],
-    ['Landroidx/appcompat/widget/AppCompatTextView;', 'Landroid/widget/TextView;'],
-    ['Landroidx/appcompat/widget/AppCompatImageView;', 'Landroid/widget/ImageView;'],
-    ['Landroidx/appcompat/widget/AppCompatButton;', 'Landroid/widget/Button;'],
-    ['Landroidx/appcompat/widget/AppCompatEditText;', 'Landroid/widget/EditText;'],
     ['Landroid/widget/ImageButton;', 'Landroid/widget/ImageView;'],
   ]) {
     defs.push(
@@ -3209,6 +3220,167 @@ function buildFrameworkDefinitions(vm) {
         ['x:I', 0],
         ['y:I', 0],
       ]),
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/MotionEvent;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class MotionEventPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.object = object;
+          this.action = 0;
+          this.x = 0;
+          this.y = 0;
+          this.rawX = 0;
+          this.rawY = 0;
+          this.downTime = 0;
+          this.eventTime = 0;
+          this.edgeFlags = 0;
+          this.source = 0;
+          this.pointerCount = 1;
+          this.pointerIds = [0];
+          this.axisValues = null;
+        }
+      },
+      methods: {
+        'getAction()I': (self) => toInt(self.action),
+        'getActionMasked()I': (self) => toInt(self.action) & 0xff,
+        'getActionIndex()I': (self) => (toInt(self.action) & 0xff00) >> 8,
+        'getX()F': (self) => Number(self.x) || 0,
+        'getY()F': (self) => Number(self.y) || 0,
+        'getRawX()F': (self) => (self.rawX !== undefined && self.rawX !== null ? Number(self.rawX) : Number(self.x)) || 0,
+        'getRawY()F': (self) => (self.rawY !== undefined && self.rawY !== null ? Number(self.rawY) : Number(self.y)) || 0,
+        'getX(I)F': (self, [index]) => {
+          const i = toInt(index);
+          if (i === 0) return Number(self.x) || 0;
+          return Number(self.pointerXs?.[i]) || 0;
+        },
+        'getY(I)F': (self, [index]) => {
+          const i = toInt(index);
+          if (i === 0) return Number(self.y) || 0;
+          return Number(self.pointerYs?.[i]) || 0;
+        },
+        'getPointerCount()I': (self) => Math.max(1, toInt(self.pointerCount) || (self.pointerIds?.length ?? 1)),
+        'getPointerId(I)I': (self, [index]) => {
+          const i = toInt(index);
+          return toInt(self.pointerIds?.[i] ?? i);
+        },
+        'findPointerIndex(I)I': (self, [pointerId]) => {
+          const id = toInt(pointerId);
+          const ids = Array.isArray(self.pointerIds) ? self.pointerIds : [0];
+          const index = ids.findIndex((value) => toInt(value) === id);
+          return index >= 0 ? index : -1;
+        },
+        'getDownTime()J': (self) => BigInt(Math.trunc(Number(self.downTime) || 0)),
+        'getEventTime()J': (self) => BigInt(Math.trunc(Number(self.eventTime) || 0)),
+        'getEdgeFlags()I': (self) => toInt(self.edgeFlags),
+        'getSource()I': (self) => toInt(self.source),
+        'getAxisValue(I)F': (self, [axis]) => {
+          const values = self.axisValues;
+          if (!values) return 0;
+          const value = values instanceof Map ? values.get(toInt(axis)) : values[toInt(axis)];
+          return Number(value) || 0;
+        },
+        'getAxisValue(II)F': (self, [axis]) => {
+          const values = self.axisValues;
+          if (!values) return 0;
+          const value = values instanceof Map ? values.get(toInt(axis)) : values[toInt(axis)];
+          return Number(value) || 0;
+        },
+        'setLocation(FF)V': (self, [x, y]) => {
+          self.x = Number(x) || 0;
+          self.y = Number(y) || 0;
+        },
+        'offsetLocation(FF)V': (self, [dx, dy]) => {
+          self.x = (Number(self.x) || 0) + (Number(dx) || 0);
+          self.y = (Number(self.y) || 0) + (Number(dy) || 0);
+        },
+        'transform(Landroid/graphics/Matrix;)V': () => undefined,
+        'recycle()V': () => undefined,
+      },
+      staticMethods: {
+        'obtain(JJIFFI)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, x, y, edgeFlags], vm) =>
+          createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            x: Number(x),
+            y: Number(y),
+            edgeFlags: Number(edgeFlags),
+          }),
+        'obtain(Landroid/view/MotionEvent;)Landroid/view/MotionEvent;': (_self, [source], vm) =>
+          createMotionEventObject(vm, source?.$peer || source || {}),
+        'obtainNoHistory(Landroid/view/MotionEvent;)Landroid/view/MotionEvent;': (_self, [source], vm) =>
+          createMotionEventObject(vm, source?.$peer || source || {}),
+      },
+      staticFields: new Map([
+        ['ACTION_DOWN:I', 0],
+        ['ACTION_UP:I', 1],
+        ['ACTION_MOVE:I', 2],
+        ['ACTION_CANCEL:I', 3],
+        ['ACTION_OUTSIDE:I', 4],
+        ['ACTION_POINTER_DOWN:I', 5],
+        ['ACTION_POINTER_UP:I', 6],
+        ['ACTION_SCROLL:I', 8],
+        ['ACTION_MASK:I', 0xff],
+        ['ACTION_POINTER_INDEX_MASK:I', 0xff00],
+        ['ACTION_POINTER_INDEX_SHIFT:I', 8],
+      ]),
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/VelocityTracker;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class VelocityTrackerPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.object = object;
+          this.samples = [];
+          this.xVelocity = 0;
+          this.yVelocity = 0;
+        }
+      },
+      methods: {
+        'addMovement(Landroid/view/MotionEvent;)V': (self, [event]) => {
+          const peer = event?.$peer || event;
+          if (!peer || typeof peer !== 'object') return;
+          const eventTime = Number(peer.eventTime);
+          if (!Number.isFinite(eventTime) || eventTime <= 0) return;
+          self.samples.push({
+            t: eventTime,
+            x: Number(peer.x) || 0,
+            y: Number(peer.y) || 0,
+          });
+          if (self.samples.length > 20) self.samples.shift();
+        },
+        'computeCurrentVelocity(I)V': (self, [units]) => computeVelocity(self, units, 0),
+        'computeCurrentVelocity(IF)V': (self, [units, maxVelocity]) => computeVelocity(self, units, maxVelocity),
+        'getXVelocity()F': (self) => Number(self.xVelocity) || 0,
+        'getYVelocity()F': (self) => Number(self.yVelocity) || 0,
+        'getXVelocity(I)F': (self) => Number(self.xVelocity) || 0,
+        'getYVelocity(I)F': (self) => Number(self.yVelocity) || 0,
+        'clear()V': (self) => {
+          self.samples = [];
+          self.xVelocity = 0;
+          self.yVelocity = 0;
+        },
+        'recycle()V': (self) => {
+          self.samples = [];
+          self.xVelocity = 0;
+          self.yVelocity = 0;
+        },
+      },
+      staticMethods: {
+        'obtain()Landroid/view/VelocityTracker;': (_self, _args, vm) => {
+          if (!vm) return null;
+          const object = vm.allocateRawObject('Landroid/view/VelocityTracker;');
+          object.$peer = { vm, object, samples: [], xVelocity: 0, yVelocity: 0 };
+          return object;
+        },
+      },
     })
   );
 
@@ -3453,12 +3625,24 @@ function buildFrameworkDefinitions(vm) {
         '<init>()V': (self) => {
           self.paint = new Paint();
         },
-        'setColor(I)V': (self, [color]) => self.paint.setColor(color),
+        'setColor(I)V': (self, [color], vm) => {
+          let value = color >>> 0;
+          if (value >= 0x01010000 && value < 0x02000000) {
+            const resolved = resolveStyleColor(vm, value);
+            if (typeof resolved === 'number') value = resolved >>> 0;
+          }
+          self.paint.setColor(value);
+        },
         'getColor()I': (self) => self.paint.getColor(),
         'setTextSize(F)V': (self, [size]) => self.paint.setTextSize(size),
         'getTextSize()F': (self) => self.paint.getTextSize(),
         'setAntiAlias(Z)V': (self, [value]) => self.paint.setAntiAlias(value),
         'setStrokeWidth(F)V': (self, [width]) => self.paint.setStrokeWidth(width),
+        'getStrokeWidth()F': (self) => self.paint.getStrokeWidth(),
+        'setAlpha(I)V': (self, [alpha]) => self.paint.setAlpha(alpha),
+        'getAlpha()I': (self) => self.paint.getAlpha(),
+        'setStrokeJoin(Landroid/graphics/Paint$Join;)V': (self, [join]) => self.paint.setStrokeJoin(join),
+        'setStrokeCap(Landroid/graphics/Paint$Cap;)V': (self, [cap]) => self.paint.setStrokeCap(cap),
         'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) => self.paint.setStyle(style),
         'measureText(Ljava/lang/String;)F': (self, [text]) => self.paint.measureText(jsString(text)),
         'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self) => self.paint.getFontMetrics(),
@@ -3515,6 +3699,76 @@ function buildFrameworkDefinitions(vm) {
           self.canvas?.drawText(jsString(text), x, y, paint?.paint),
         'drawRect(FFFFLandroid/graphics/Paint;)V': (self, [l, t, r, b, paint]) =>
           self.canvas?.drawRect(l, t, r, b, paint?.paint),
+        'save()I': (self) => {
+          self.canvas?.save();
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'restore()V': (self) => {
+          if (self.$saveDepth > 0) self.$saveDepth--;
+          self.canvas?.restore();
+        },
+        'restoreToCount(I)V': (self, [count]) => {
+          while ((self.$saveDepth || 0) > (count | 0)) {
+            self.$saveDepth--;
+            self.canvas?.restore();
+          }
+        },
+        'translate(FF)V': (self, [dx, dy]) => self.canvas?.translate(dx, dy),
+        'rotate(F)V': (self, [degrees]) => self.canvas?.rotate(degrees),
+        'drawPath(Landroid/graphics/Path;Landroid/graphics/Paint;)V': (self, [path, paint]) => {
+          const pathPeer = path?.$peer || path;
+          const paintPeer = paint?.$peer || paint;
+          self.canvas?.drawPath(pathPeer?.commands || [], paintPeer?.paint ?? paintPeer);
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/graphics/Paint$Style;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['FILL:I', 0], ['STROKE:I', 1], ['FILL_AND_STROKE:I', 2],
+        ['FILL:Landroid/graphics/Paint$Style;', 0],
+        ['STROKE:Landroid/graphics/Paint$Style;', 1],
+        ['FILL_AND_STROKE:Landroid/graphics/Paint$Style;', 2],
+      ]),
+    }),
+    nativeDef('Landroid/graphics/Paint$Join;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['MITER:I', 0], ['ROUND:I', 1], ['BEVEL:I', 2],
+        ['MITER:Landroid/graphics/Paint$Join;', 0],
+        ['ROUND:Landroid/graphics/Paint$Join;', 1],
+        ['BEVEL:Landroid/graphics/Paint$Join;', 2],
+      ]),
+    }),
+    nativeDef('Landroid/graphics/Paint$Cap;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['BUTT:I', 0], ['ROUND:I', 1], ['SQUARE:I', 2],
+        ['BUTT:Landroid/graphics/Paint$Cap;', 0],
+        ['ROUND:Landroid/graphics/Paint$Cap;', 1],
+        ['SQUARE:Landroid/graphics/Paint$Cap;', 2],
+      ]),
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/graphics/Path;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class PathPeer {
+        constructor() { this.commands = []; }
+      },
+      methods: {
+        '<init>()V': (self) => { self.commands = []; },
+        '<init>(Landroid/graphics/Path;)V': (self, [other]) => { self.commands = [...(other?.commands || [])]; },
+        'rewind()V': (self) => { self.commands = []; },
+        'reset()V': (self) => { self.commands = []; },
+        'moveTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'moveTo', x: Number(x) || 0, y: Number(y) || 0 }); },
+        'lineTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'lineTo', x: Number(x) || 0, y: Number(y) || 0 }); },
+        'rLineTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'rLineTo', x: Number(x) || 0, y: Number(y) || 0 }); },
+        'close()V': (self) => { self.commands.push({ type: 'close' }); },
       },
     })
   );
@@ -3715,17 +3969,6 @@ function buildFrameworkDefinitions(vm) {
   );
   defs.push(
     nativeDef('Landroid/content/pm/ResolveInfo;', { super: 'Ljava/lang/Object;' })
-  );
-  defs.push(
-    nativeDef('Landroidx/activity/ComponentActivity;', {
-      super: 'Landroid/app/Activity;',
-      methods: {
-        'getLastNonConfigurationInstance()Ljava/lang/Object;': () => null,
-        'onRetainNonConfigurationInstance()Ljava/lang/Object;': () => null,
-        'getOnBackPressedDispatcher()Landroidx/activity/OnBackPressedDispatcher;': () => null,
-        'addOnContextAvailableListener(Landroidx/activity/contextaware/OnContextAvailableListener;)V': () => undefined,
-      },
-    })
   );
   defs.push(
     nativeDef('Landroid/content/pm/ApplicationInfo;', { super: 'Ljava/lang/Object;' })
@@ -4044,7 +4287,18 @@ function buildFrameworkDefinitions(vm) {
         'openRawResourceFd(I)Landroid/content/res/AssetFileDescriptor;': () => null,
         'getIdentifier(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I': (self, [name, type, pkg], vm) =>
           vm.resources.getIdentifier(jsString(name), jsString(type), jsString(pkg)),
-        'getDisplayMetrics()Landroid/util/DisplayMetrics;': (self, _args, vm) => vm.resources.getDisplayMetrics(),
+        'getDisplayMetrics()Landroid/util/DisplayMetrics;': (self, _args, vm) => {
+          const src = vm.resources.getDisplayMetrics();
+          const metrics = vm.allocateObject(vm.registry.resolve('Landroid/util/DisplayMetrics;'));
+          metrics.$nativeClass = 'Landroid/util/DisplayMetrics;';
+          const floatFields = new Set(['density', 'scaledDensity', 'xdpi', 'ydpi']);
+          for (const [k, v] of Object.entries(src)) {
+            if (typeof v === 'number') {
+              metrics.$fields.set('Landroid/util/DisplayMetrics;->' + k + ':' + (floatFields.has(k) ? 'F' : 'I'), floatFields.has(k) ? numberToFloatBits(v) : v);
+            }
+          }
+          return metrics;
+        },
         'getConfiguration()Landroid/content/res/Configuration;': (self, _args, vm) => {
           const config = vm.resources.getConfiguration();
           config.locale = makeDefaultLocaleObject(vm);
@@ -4560,8 +4814,18 @@ function coreGraphicDefs() {
     nativeDef('Landroid/graphics/Rect;', {
       super: 'Ljava/lang/Object;',
       ctor: class RectPeer {
-        constructor() {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
           this.rect = new Rect();
+          for (const name of ['left', 'top', 'right', 'bottom']) {
+            Object.defineProperty(this, name, {
+              configurable: true,
+              enumerable: true,
+              get: () => this.rect[name],
+              set: (value) => { this.rect[name] = value | 0; },
+            });
+          }
         }
       },
       methods: {
@@ -4880,7 +5144,9 @@ function coreGraphicDefs() {
     nativeDef('Landroid/view/View$MeasureSpec;', {
       super: 'Ljava/lang/Object;',
       staticMethods: {
-        'makeMeasureSpec(II)I': (_self, [size, mode]) => MeasureSpec.makeMeasureSpec(toInt(size), toInt(mode)),
+        'makeMeasureSpec(II)I': (_self, [size, mode]) => {
+          return MeasureSpec.makeMeasureSpec(toInt(size), toInt(mode));
+        },
         'getMode(I)I': (_self, [spec]) => MeasureSpec.getMode(toInt(spec)),
         'getSize(I)I': (_self, [spec]) => MeasureSpec.getSize(toInt(spec)),
       },
@@ -5054,7 +5320,10 @@ function viewMethods() {
     },
     'performClick()Z': (self) => self.view?.performClick() ?? false,
     'isShown()Z': (self) => self.view?.isShown() ?? true,
-    'getParent()Landroid/view/ViewParent;': (self) => self.view?.getParent() ?? null,
+    'getParent()Landroid/view/ViewParent;': (self, _args, vm) => {
+      const parent = self.view?.getParent();
+      return parent ? viewObject(vm, parent) : null;
+    },
     'setMinimumWidth(I)V': (self, [width]) => self.view?.setMinimumWidth(width),
     'setMinimumHeight(I)V': (self, [height]) => self.view?.setMinimumHeight(height),
     'getMinimumWidth()I': (self) => self.view?.getMinimumWidth() ?? 0,
@@ -5124,7 +5393,7 @@ function viewMethods() {
       if (!self.view) return;
       self.view.setOnTouchListener(
         listener
-          ? (event) => !!vm.invokeInterface(listener, 'onTouch', '(Landroid/view/View;Landroid/view/MotionEvent;)Z', [viewObject(vm, self.view), event])
+          ? (event) => !!vm.invokeInterface(listener, 'onTouch', '(Landroid/view/View;Landroid/view/MotionEvent;)Z', [viewObject(vm, self.view), toMotionEventObject(vm, event)])
           : null
       );
     },
@@ -5223,12 +5492,27 @@ function viewMethods() {
         return existing;
       }
       const params = view.layoutParams || { width: -2, height: -2 };
-      let object = buildLayoutParamsViaDex(vm, descriptor, params);
+      let object = buildLayoutParamsViaDex(
+        vm,
+        descriptor,
+        params,
+        view.$layoutParamsAttrSet || null,
+        vm.contextObject || null
+      );
       if (!object) {
         object = vm.allocateObject(vm.registry.resolve(descriptor));
-        populateDexLayoutParams(object, descriptor, params);
       }
-      object.$layoutParams = params;
+      const effective = { ...params };
+      if (object.$fields) {
+        for (const [key, value] of object.$fields) {
+          if (typeof value !== 'number') continue;
+          for (const axis of ['width', 'height', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight', 'startMargin', 'endMargin']) {
+            if (key.endsWith(`->${axis}:I`)) effective[axis] = value;
+          }
+        }
+      }
+      object.$layoutParams = effective;
+      view.layoutParams = effective;
       view.$layoutParamsObject = object;
       if (process.env.DBG_LP) console.error('GLP parentName=', view.parent?.constructor?.name, 'parentDesc=', view.parent?.$descriptor, 'desc=', descriptor, 'view=', view.constructor?.name, 'viewDesc=', view.$descriptor);
       return object;
@@ -5258,7 +5542,9 @@ function viewMethods() {
     },
     'resolveSize(II)I': (self, [size, spec]) => resolveSize(size, spec),
     'getDefaultSize(II)I': (self, [size, spec]) => getDefaultSize(size, spec),
-    'measure(II)V': (self, [w, h]) => self.view?.measure(w, h),
+    'measure(II)V': (self, [w, h]) => {
+      return self.view?.measure(w, h);
+    },
     'layout(IIII)V': (self, [l, t, r, b]) => {
       return self.view?.layout(l, t, r, b);
     },
@@ -5372,6 +5658,45 @@ function ensureTypedValue(self, fieldName, vm) {
   return value;
 }
 
+const VIEW_PROPERTY_ANIMATOR_METHODS = [
+  'setDuration', 'setStartDelay', 'setInterpolator', 'setListener', 'setUpdateListener',
+  'withStartAction', 'withEndAction', 'start', 'cancel',
+  'alpha', 'alphaBy', 'translationX', 'translationXBy', 'translationY', 'translationYBy',
+  'translationZ', 'translationZBy', 'scaleX', 'scaleXBy', 'scaleY', 'scaleYBy',
+  'rotation', 'rotationBy', 'rotationX', 'rotationXBy', 'rotationY', 'rotationYBy',
+  'x', 'xBy', 'y', 'yBy', 'z', 'zBy',
+];
+
+function viewPropertyAnimatorMethods() {
+  const methods = {};
+  for (const name of VIEW_PROPERTY_ANIMATOR_METHODS) {
+    methods[`${name}(*)`] = (self, args) => {
+      const fn = self?.[name];
+      if (typeof fn !== 'function') return self;
+      const result = fn(...args);
+      return result === undefined ? self : result;
+    };
+  }
+  return methods;
+}
+
+function bridgeAnimatorListener(vm, listener) {
+  if (!listener) return null;
+  if (typeof listener === 'function') return listener;
+  if (typeof listener.onAnimationEnd === 'function') return listener;
+  const call = (name) => {
+    try {
+      vm.invokeByName(name, '()V', listener, []);
+    } catch {}
+  };
+  return {
+    onAnimationStart: () => call('onAnimationStart'),
+    onAnimationEnd: () => call('onAnimationEnd'),
+    onAnimationCancel: () => call('onAnimationCancel'),
+    onAnimationRepeat: () => call('onAnimationRepeat'),
+  };
+}
+
 function makeViewPropertyAnimator(vm, view) {
   const object = vm.allocateRawObject('Landroid/view/ViewPropertyAnimator;');
   const animator = view.animate();
@@ -5381,7 +5706,7 @@ function makeViewPropertyAnimator(vm, view) {
     setDuration: (d) => { animator.setDuration(d); return object; },
     setStartDelay: (d) => { animator.setStartDelay(d); return object; },
     setInterpolator: () => object,
-    setListener: (listener) => { animator.setListener?.(listener); return object; },
+    setListener: (listener) => { animator.setListener?.(bridgeAnimatorListener(vm, listener)); return object; },
     setUpdateListener: () => object,
     withStartAction: (action) => { animator.withStartAction?.(() => vm.runRunnable(action)); return object; },
     withEndAction: (action) => { animator.withEndAction(() => vm.runRunnable(action)); return object; },
@@ -5476,6 +5801,76 @@ function themeStore(vm) {
   return vm.themeAttributes;
 }
 
+const FRAMEWORK_ATTR_KEYS = new Map([
+  [0x01010036, 'textColorPrimary'],
+  [0x01010037, 'textColorSecondary'],
+  [0x01010038, 'textColorTertiary'],
+  [0x01010039, 'textColorPrimaryInverse'],
+  [0x0101003a, 'textColorSecondaryInverse'],
+  [0x01010099, 'textColorHighlight'],
+  [0x0101009a, 'textColorHint'],
+  [0x0101009b, 'textColorLink'],
+  [0x01010095, 'textSize'],
+  [0x01010098, 'textColor'],
+]);
+
+function resolveStyleColor(vm, raw) {
+  const table = vm?.resources?.table;
+  if (!table || raw === undefined || raw === null) return null;
+  let ref = null;
+  if (typeof raw === 'number') ref = raw >>> 0;
+  else if (typeof raw === 'object' && 'reference' in raw) ref = raw.reference >>> 0;
+  if (!ref) return null;
+  if (ref >= 0x01010000 && ref < 0x02000000) {
+    const key = FRAMEWORK_ATTR_KEYS.get(ref);
+    if (!key) return null;
+    const store = themeStore(vm);
+    const refId = store.$attrReferences?.[key];
+    if (refId) {
+      const list = vm.resources.getColorStateList?.(refId >>> 0);
+      if (list && typeof list.color === 'number') return list.color >>> 0;
+    }
+    const value = store[key];
+    if (typeof value === 'number') return value >>> 0;
+    return null;
+  }
+  const list = vm.resources.getColorStateList?.(ref);
+  if (list && typeof list.color === 'number') return list.color >>> 0;
+  const resolved = table.resolve(ref);
+  if (typeof resolved === 'number') return resolved >>> 0;
+  return null;
+}
+
+function applyTextAppearance(self, styleId) {
+  const vm = self?.vm || self?.$vm;
+  const view = self?.view;
+  const table = vm?.resources?.table;
+  if (!vm || !view || !table || !styleId) return;
+  let attrs;
+  try {
+    attrs = table.getStyleAttributes(styleId >>> 0);
+  } catch (_) {
+    return;
+  }
+  if (!attrs || !attrs.size) return;
+  const sizeRaw = attrs.get(0x01010095);
+  if (sizeRaw !== undefined && typeof view.setTextSize === 'function') {
+    let value = sizeRaw;
+    if (value && typeof value === 'object' && 'reference' in value) {
+      value = table.resolve(value.reference) ?? value.reference;
+    }
+    if (value && typeof value === 'object' && value.dimension) {
+      view.setTextSize(convertDimension(value, vm.resources.density || 1));
+    } else if (typeof value === 'number') {
+      view.setTextSize(value);
+    }
+  }
+  const color = resolveStyleColor(vm, attrs.get(0x01010098));
+  if (typeof color === 'number' && typeof view.setTextColor === 'function') {
+    view.setTextColor(color >>> 0);
+  }
+}
+
 export function loadThemeFromStyleId(vm, styleId) {
   const table = vm?.resources?.table;
   if (!table || typeof styleId !== 'number') return false;
@@ -5497,10 +5892,12 @@ export function loadThemeFromStyleId(vm, styleId) {
     changed = true;
     for (const [attrId, rawValue] of attributes) {
       const attrEntry = table.getEntry(attrId);
-      const key = attrEntry?.key;
+      const key = attrEntry?.key || FRAMEWORK_ATTR_KEYS.get(attrId >>> 0);
       if (!key) continue;
       let value = rawValue;
       if (value && typeof value === 'object' && 'reference' in value) {
+        store.$attrReferences ||= {};
+        store.$attrReferences[key] = value.reference >>> 0;
         const resolved = table.resolve(value.reference);
         value = resolved === null || resolved === undefined ? value.reference : resolved;
       }
@@ -5516,17 +5913,33 @@ export function loadThemeFromStyleId(vm, styleId) {
   return changed;
 }
 
+function resolveThemeStyleId(vm, defStyleAttr) {
+  const table = vm?.resources?.table || null;
+  if (!table) return 0;
+  const attrId = (defStyleAttr >>> 0) & 0xffffffff;
+  const key = table.getEntry(attrId)?.key;
+  if (!key) return 0;
+  const value = themeStore(vm)[key];
+  if (typeof value === 'number') return value >>> 0;
+  if (value && typeof value === 'object') {
+    if (typeof value.parent === 'number') return value.parent >>> 0;
+    if (typeof value.reference === 'number') return value.reference >>> 0;
+  }
+  return 0;
+}
+
 function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyleAttr = 0) {
   const store = themeStore(vm);
   const table = vm.resources?.table || null;
   const result = new Map();
   const styleAttributes = styleId ? table?.getStyleAttributes?.((styleId >>> 0) & 0xffffffff) : null;
   const ids = Array.isArray(attrIds) ? attrIds : (attrIds?.$data || []);
-  const defStyleAttributes = defStyleAttr ? table?.getStyleAttributes?.((defStyleAttr >>> 0) & 0xffffffff) : null;
+  const defStyleId = defStyleAttr ? resolveThemeStyleId(vm, defStyleAttr) : 0;
+  const defStyleAttributes = defStyleId ? table?.getStyleAttributes?.(defStyleId) : null;
   const present = new Set();
   for (const attrId of ids) {
     const id = attrId >>> 0;
-    const nodeValue = attributeValueFor(attributeSet, attrId);
+    const nodeValue = attributeValueFor(attributeSet, attrId, table);
     if (nodeValue !== undefined && nodeValue !== null) {
       result.set(id, nodeValue);
       present.add(id);
@@ -5682,8 +6095,12 @@ function makeTypedArrayPeer(vm, values, present = null) {
       return fallback;
     },
     getDrawable: (index) => {
+      if (!isPresent(index)) return null;
       const value = lookup(index);
-      return typeof value === 'number' && value ? vm.resources.getDrawable(value >>> 0) : null;
+      let resId = 0;
+      if (typeof value === 'number') resId = value >>> 0;
+      else if (value && typeof value === 'object' && value.reference !== undefined) resId = value.reference >>> 0;
+      return resId ? vm.resources.getDrawable(resId) : null;
     },
     getString: (index) => {
       if (!isPresent(index)) return null;
@@ -5944,6 +6361,15 @@ function parseMenuResource(resources, resId, vm) {
     }
     return String(value);
   };
+  const resolveBoolean = (value, fallback) => {
+    if (value === undefined || value === null) return fallback;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    const text = String(value).trim().toLowerCase();
+    if (text === 'true' || text === '1') return true;
+    if (text === 'false' || text === '0') return false;
+    return fallback;
+  };
   const collect = (node) => {
     if (!node || node.type !== 'element') return;
     if (node.name === 'item') {
@@ -5954,6 +6380,12 @@ function parseMenuResource(resources, resId, vm) {
         itemId: itemId | 0,
         order: asInt(attributeValueForNode(node, 'orderInCategory')),
         title,
+        visible: resolveBoolean(attributeValueForNode(node, 'visible'), true),
+        enabled: resolveBoolean(attributeValueForNode(node, 'enabled'), true),
+        checkable: resolveBoolean(attributeValueForNode(node, 'checkable'), false),
+        checked: resolveBoolean(attributeValueForNode(node, 'checked'), false),
+        showAsAction: asInt(attributeValueForNode(node, 'showAsAction')),
+        icon: attributeResourceValueFor(node, 'icon', 0) >>> 0,
       });
     }
     for (const child of node.children || []) collect(child);
@@ -6012,11 +6444,21 @@ function truthyAttr(value) {
   return s === 'true' || s === '1';
 }
 
-function attributeValueFor(attributeSet, attrId) {
+function findAttributeByIdOrName(attributeSet, node, attrId, table = null) {
+  const byId = node.attrs.find((a) => a.resId && (a.resId >>> 0) === attrId);
+  if (byId) return byId;
+  const resources = attributeSet?.$attrResources || attributeSet?.$peer?.resources || null;
+  const resourceTable = table || resources?.table || null;
+  const key = resourceTable?.getEntry?.(attrId)?.key;
+  if (!key) return null;
+  return node.attrs.find((a) => !a.resId && localAttrName(a) === key) || null;
+}
+
+function attributeValueFor(attributeSet, attrId, table = null) {
   const node = attributeSetNode(attributeSet);
   if (!node || !Array.isArray(node.attrs)) return undefined;
   const id = attrId >>> 0;
-  const attr = node.attrs.find((a) => (a.resId >>> 0) === id && a.resId);
+  const attr = findAttributeByIdOrName(attributeSet, node, id, table);
   if (!attr) return undefined;
   const dataType = attr.dataType & 0xff;
   if (dataType === 0x01) {
@@ -6072,13 +6514,6 @@ function getThemeObject(vm) {
     vm.themeObject = object;
   }
   return vm.themeObject;
-}
-
-export function toInt(value) {
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  if (typeof value === 'bigint') return Number(BigInt.asIntN(32, value));
-  if (typeof value === 'number') return value | 0;
-  return 0;
 }
 
 function pbkdf2Sha1(password, salt, iterations, keyLength) {

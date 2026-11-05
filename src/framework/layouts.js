@@ -8,6 +8,7 @@ import {
   colorToCss,
   getChildMeasureSpec,
   isGone,
+  resolveSize,
 } from './view.js';
 
 export class FrameLayout extends ViewGroup {
@@ -85,7 +86,7 @@ export class FrameLayout extends ViewGroup {
       } else if ((gravity & 0x50) === 0x50) {
         y = parentBottom - height - (lp.bottomMargin || 0);
       }
-      child.layout(left + x, top + y, left + x + width, top + y + height);
+      child.layout(x, y, x + width, y + height);
     }
   }
 }
@@ -137,292 +138,6 @@ export class HorizontalScrollView extends FrameLayout {
     canvas.translate(-this.scrollX, -this.scrollY);
     super.dispatchDraw(canvas);
     canvas.restore();
-  }
-}
-
-export class ViewPagerHost extends FrameLayout {
-  constructor(context = null) {
-    super(context);
-    this.$preferHostLayout = true;
-  }
-}
-export class TabLayoutHost extends FrameLayout {
-  constructor(context = null) {
-    super(context);
-    this.$preferHostLayout = true;
-    this.$tabBackground = null;
-    this.$tabIndicatorColor = null;
-    this.$tabSelectedTextColor = null;
-    this.$tabTextColor = null;
-    this.$tabMode = 0;
-    this.$tabGravity = 0;
-    this.$tabIndicatorHeight = null;
-  }
-
-  $tabEntries() {
-    const content = this.children[0];
-    if (!content) return [];
-    return content.children || [];
-  }
-
-  $applyTabStyles() {
-    const selected = this.$tabSelectedTextColor;
-    const unselected = this.$tabTextColor;
-    const background = this.$tabBackground;
-    for (const tab of this.$tabEntries()) {
-      if (tab.$tabBackgroundApplied !== background && background != null) {
-        tab.background = { type: 'color', color: background >>> 0 };
-        tab.$tabBackgroundApplied = background;
-      }
-      if (tab.visibility === 8) continue;
-      const isSelected = tab.selected === true || tab.$dexSelected === true;
-      const color = isSelected ? selected : unselected;
-      if (color == null) continue;
-      const walk = (node) => {
-        if (node.text !== undefined && node.$isTabLabel) node.textColor = color >>> 0;
-        for (const child of node.children || []) walk(child);
-      };
-      if (!tab.$tabLabelMarked) {
-        const mark = (node) => {
-          if (node.text !== undefined && typeof node.text === 'string' && node.text.length) node.$isTabLabel = true;
-          for (const child of node.children || []) mark(child);
-        };
-        mark(tab);
-        tab.$tabLabelMarked = true;
-      }
-      walk(tab);
-    }
-  }
-
-  onDraw(canvas) {
-    const color = this.$tabIndicatorColor;
-    if (color == null) return;
-    let selected = null;
-    for (const tab of this.$tabEntries()) {
-      if (tab.visibility === 8) continue;
-      if (tab.selected === true || tab.$dexSelected === true) { selected = tab; break; }
-    }
-    if (!selected) return;
-    const height = this.$tabIndicatorHeight != null
-      ? this.$tabIndicatorHeight
-      : Math.round(2 * (this.getDensity ? this.getDensity() : 1));
-    const tabWidth = Math.min(selected.getWidth(), this.getWidth());
-    const x = selected.left - this.left + Math.floor((selected.getWidth() - tabWidth) / 2);
-    const y = this.getHeight() - height;
-    const ctx = canvas.context;
-    ctx.save();
-    ctx.fillStyle = colorToCss(color);
-    ctx.fillRect(x, y, tabWidth, height);
-    ctx.restore();
-  }
-
-  onLayout(changed, left, top, right, bottom) {
-    this.$applyTabStyles();
-    const content = this.children[0];
-    if (!content) return;
-    const width = right - left;
-    const height = bottom - top;
-    const density = this.getDensity ? this.getDensity() : 1;
-    const tabPad = Math.round(12 * density);
-    const firstPad = Math.round(8 * density);
-    const tabs = (content.children || []).filter((t) => t.visibility !== 8);
-    let naturalWidth = 0;
-    for (const tab of tabs) naturalWidth += tab.getMeasuredWidth() + tabPad * 2;
-    const fixed = this.$tabMode === 1;
-    const contentWidth = Math.max(naturalWidth, width);
-    content.layout(left, top, left + contentWidth, top + height);
-    let cursor = left;
-    if (fixed && tabs.length > 0) {
-      const share = Math.floor(width / tabs.length);
-      for (const tab of tabs) {
-        const h = tab.getMeasuredHeight();
-        const y = top + Math.floor((height - h) / 2);
-        tab.layout(cursor, y, cursor + share, y + h);
-        cursor += share;
-      }
-      return;
-    }
-    if (fixed) return;
-    for (const tab of tabs) {
-      const w = tab.getMeasuredWidth();
-      const h = tab.getMeasuredHeight();
-      const y = top + Math.floor((height - h) / 2);
-      const x = cursor;
-      const cellWidth = w + tabPad * 2;
-      tab.layout(x, y, x + cellWidth, y + h);
-      cursor += cellWidth;
-    }
-  }
-}
-
-export class SimpleFrameHost extends FrameLayout {
-  constructor(context = null) {
-    super(context);
-    this.$preferHostLayout = true;
-  }
-}
-
-export class DrawerLayout extends ViewGroup {
-  constructor(context = null) {
-    super(context);
-    this.drawerElevation = 0;
-    this.drawerState = 0;
-    this.$preferHostLayout = true;
-    this.$preferHostMeasure = true;
-  }
-
-  generateDefaultLayoutParams() {
-    return { width: -1, height: -1, gravity: -1, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
-  }
-
-  isDrawer(child, edge) {
-    const lp = child.layoutParams || {};
-    const gravity = lp.gravity ?? -1;
-    return gravity === edge || (edge === 0x03 && gravity === 0x800003) || (edge === 0x05 && gravity === 0x800005);
-  }
-
-  onMeasure(widthSpec, heightSpec) {
-    const widthMode = MeasureSpec.getMode(widthSpec);
-    const heightMode = MeasureSpec.getMode(heightSpec);
-    const widthSize = MeasureSpec.getSize(widthSpec);
-    const drawerMargin = Math.floor(widthSize * 0.16);
-    let maxWidth = 0;
-    let maxHeight = 0;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      const lp = child.layoutParams || this.generateDefaultLayoutParams();
-      const isLeft = this.isDrawer(child, 0x03);
-      const isRight = this.isDrawer(child, 0x05);
-      let childWidthSpec;
-      let childHeightSpec;
-      if (isLeft || isRight) {
-        const maxDrawerWidth = Math.max(0, widthSize - drawerMargin);
-        if (lp.width === -1) {
-          childWidthSpec = MeasureSpec.makeMeasureSpec(maxDrawerWidth, MeasureSpec.EXACTLY);
-        } else {
-          childWidthSpec = MeasureSpec.makeMeasureSpec(maxDrawerWidth, MeasureSpec.AT_MOST);
-        }
-        childHeightSpec = heightMode === MeasureSpec.UNSPECIFIED
-          ? MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-          : getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, lp.height === -1 ? -1 : lp.height);
-        child.measure(childWidthSpec, childHeightSpec);
-        if (child.getMeasuredWidth() <= 0) {
-          const target = lp.width === -1 ? maxDrawerWidth : Math.min(maxDrawerWidth, 304 * (this.getDensity?.() || 1));
-          child.setMeasuredDimension(target, child.getMeasuredHeight() || heightSize);
-        }
-      } else {
-        childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, lp.width);
-        childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, lp.height);
-        child.measure(childWidthSpec, childHeightSpec);
-      }
-      maxWidth = Math.max(maxWidth, child.getMeasuredWidth() + (lp.leftMargin || 0) + (lp.rightMargin || 0));
-      maxHeight = Math.max(maxHeight, child.getMeasuredHeight() + (lp.topMargin || 0) + (lp.bottomMargin || 0));
-    }
-    maxWidth = Math.max(maxWidth + this.paddingLeft + this.paddingRight, this.minWidth);
-    maxHeight = Math.max(maxHeight + this.paddingTop + this.paddingBottom, this.minHeight);
-    this.setMeasuredDimension(resolveSizeSafe(maxWidth, widthSpec), resolveSizeSafe(maxHeight, heightSpec));
-  }
-
-  onLayout(changed, left, top, right, bottom) {
-    const width = right - left - this.paddingLeft - this.paddingRight;
-    const height = bottom - top - this.paddingTop - this.paddingBottom;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      const lp = child.layoutParams || this.generateDefaultLayoutParams();
-      const childWidth = Math.min(child.getMeasuredWidth(), width);
-      const childHeight = child.getMeasuredHeight();
-      const isLeft = this.isDrawer(child, 0x03);
-      const isRight = this.isDrawer(child, 0x05);
-      let childLeft;
-      if (isLeft) childLeft = this.paddingLeft + (lp.leftMargin || 0) - childWidth;
-      else if (isRight) childLeft = right - left - this.paddingRight - (lp.rightMargin || 0) + childWidth;
-      else childLeft = this.paddingLeft;
-      const childTop = this.paddingTop + (lp.topMargin || 0);
-      child.layout(left + childLeft, top + childTop, left + childLeft + childWidth, top + childTop + childHeight);
-    }
-  }
-
-  dispatchDraw(canvas) {
-    for (const child of this.children) {
-      const isLeft = this.isDrawer(child, 0x03);
-      const isRight = this.isDrawer(child, 0x05);
-      if (!isLeft && !isRight) child.draw(canvas);
-    }
-  }
-}
-
-export class CoordinatorLayout extends ViewGroup {
-  constructor(context = null) {
-    super(context);
-    this.$preferHostLayout = true;
-  }
-
-  generateDefaultLayoutParams() {
-    return { width: -1, height: -1, gravity: -1, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
-  }
-
-  behaviorOf(child) {
-    const lp = child.layoutParams || {};
-    const raw = lp.behavior ?? lp.getBehavior?.();
-    if (!raw) return null;
-    if (typeof raw === 'string' || typeof raw === 'object') return raw;
-    return null;
-  }
-
-  isAppBar(child) {
-    return /AppBarLayout[;$]/.test(child.$descriptor || '') || /AppBarLayout$/.test(child.constructor?.name || '');
-  }
-
-  dependentOf(child) {
-    const lp = child.layoutParams || {};
-    const raw = lp.behavior;
-    if (!raw || typeof raw !== 'object') return null;
-    const dep = raw.dependency ?? raw.mDependency ?? null;
-    return dep && typeof dep === 'object' ? dep : null;
-  }
-
-  appBarHeight() {
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      if (this.isAppBar(child)) return child.getMeasuredHeight();
-    }
-    return 0;
-  }
-
-  onMeasure(widthSpec, heightSpec) {
-    const widthMode = MeasureSpec.getMode(widthSpec);
-    const heightMode = MeasureSpec.getMode(heightSpec);
-    let maxWidth = 0;
-    let maxHeight = 0;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      const lp = child.layoutParams || this.generateDefaultLayoutParams();
-      const childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, lp.width);
-      const childHeightSpec = heightMode === MeasureSpec.UNSPECIFIED
-        ? MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        : getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, lp.height);
-      child.measure(childWidthSpec, childHeightSpec);
-      maxWidth = Math.max(maxWidth, child.getMeasuredWidth());
-      maxHeight = Math.max(maxHeight, child.getMeasuredHeight());
-    }
-    maxWidth = Math.max(maxWidth + this.paddingLeft + this.paddingRight, this.minWidth);
-    maxHeight = Math.max(maxHeight + this.paddingTop + this.paddingBottom, this.minHeight);
-    this.setMeasuredDimension(resolveSizeSafe(maxWidth, widthSpec), resolveSizeSafe(maxHeight, heightSpec));
-  }
-
-  onLayout(changed, left, top, right, bottom) {
-    const width = right - left - this.paddingLeft - this.paddingRight;
-    const height = bottom - top - this.paddingTop - this.paddingBottom;
-    const appBarHeight = this.appBarHeight();
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      const lp = child.layoutParams || this.generateDefaultLayoutParams();
-      const childWidth = Math.min(child.getMeasuredWidth(), width);
-      const childHeight = child.getMeasuredHeight();
-      let childTop = this.paddingTop + (lp.topMargin || 0);
-      if (!this.isAppBar(child) && appBarHeight > 0) childTop += appBarHeight;
-      child.layout(left + this.paddingLeft, top + childTop, left + this.paddingLeft + childWidth, top + childTop + childHeight);
-    }
   }
 }
 
@@ -503,23 +218,16 @@ export class LinearLayout extends ViewGroup {
       const marginsV = (lp.topMargin || 0) + (lp.bottomMargin || 0);
       const marginsH = (lp.leftMargin || 0) + (lp.rightMargin || 0);
       let childWidthSpec;
-      if (widthMode === MeasureSpec.UNSPECIFIED) {
-        childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
-      } else if (widthMode === MeasureSpec.EXACTLY && lp.width === 0 && weight > 0) {
+      if (widthMode === MeasureSpec.EXACTLY && lp.width === 0 && weight > 0) {
         childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
       } else {
         childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight + marginsH, lp.width);
       }
-      let childHeightSpec;
-      if (heightMode === MeasureSpec.UNSPECIFIED) {
-        childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
-      } else {
-        childHeightSpec = getChildMeasureSpec(
-          heightSpec,
-          this.paddingTop + this.paddingBottom + marginsV,
-          lp.height
-        );
-      }
+      const childHeightSpec = getChildMeasureSpec(
+        heightSpec,
+        this.paddingTop + this.paddingBottom + marginsV,
+        lp.height
+      );
       child.measure(childWidthSpec, childHeightSpec);
       measured[i] = { child, lp, marginsV, marginsH, weight };
       totalHeight += child.getMeasuredHeight() + marginsV;
@@ -574,16 +282,9 @@ export class LinearLayout extends ViewGroup {
       totalWeight += weight;
       const marginsH = (lp.leftMargin || 0) + (lp.rightMargin || 0);
       const marginsV = (lp.topMargin || 0) + (lp.bottomMargin || 0);
-      let childHeightSpec;
-      if (heightMode === MeasureSpec.UNSPECIFIED) {
-        childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
-      } else {
-        childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom + marginsV, lp.height);
-      }
+      const childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom + marginsV, lp.height);
       let childWidthSpec;
-      if (widthMode === MeasureSpec.UNSPECIFIED) {
-        childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
-      } else if (widthMode === MeasureSpec.EXACTLY && lp.width === 0 && weight > 0) {
+      if (widthMode === MeasureSpec.EXACTLY && lp.width === 0 && weight > 0) {
         childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
       } else {
         childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight + marginsH, lp.width);
@@ -666,7 +367,7 @@ export class LinearLayout extends ViewGroup {
         childLeft = width - this.paddingRight - childWidth - (lp.rightMargin || 0);
       }
       childTop += (lp.topMargin || 0);
-      child.layout(left + childLeft, top + childTop, left + childLeft + childWidth, top + childTop + childHeight);
+      child.layout(childLeft, childTop, childLeft + childWidth, childTop + childHeight);
       childTop += childHeight + (lp.bottomMargin || 0);
     }
   }
@@ -690,8 +391,201 @@ export class LinearLayout extends ViewGroup {
         childTop = height - this.paddingBottom - childHeight - (lp.bottomMargin || 0);
       }
       childLeft += (lp.leftMargin || 0);
-      child.layout(left + childLeft, top + childTop, left + childLeft + childWidth, top + childTop + childHeight);
+      child.layout(childLeft, childTop, childLeft + childWidth, childTop + childHeight);
       childLeft += childWidth + (lp.rightMargin || 0);
+    }
+  }
+}
+
+export class GridLayout extends ViewGroup {
+  constructor(context = null) {
+    super(context);
+    this.columnCount = 2;
+    this.rowCount = 0;
+    this.orientation = HORIZONTAL;
+  }
+
+  generateDefaultLayoutParams() {
+    return {
+      width: -2,
+      height: -2,
+      leftMargin: 0,
+      topMargin: 0,
+      rightMargin: 0,
+      bottomMargin: 0,
+      column: -1,
+      row: -1,
+      columnSpan: 1,
+      rowSpan: 1,
+    };
+  }
+
+  setColumnCount(value) {
+    this.columnCount = Math.max(1, value | 0);
+    this.requestLayout();
+  }
+
+  setRowCount(value) {
+    this.rowCount = Math.max(0, value | 0);
+    this.requestLayout();
+  }
+
+  _placeChildren() {
+    let columns = Math.max(1, this.columnCount | 0);
+    for (const child of this.children) {
+      if (isGone(child)) continue;
+      const lp = child.layoutParams || this.generateDefaultLayoutParams();
+      const col = lp.column | 0;
+      const span = Math.max(1, (lp.columnSpan | 0) || 1);
+      if (col >= 0) columns = Math.max(columns, col + span);
+    }
+    const occupied = new Set();
+    const key = (row, col) => row + ',' + col;
+    const isFree = (row, col, rspan, cspan) => {
+      for (let dr = 0; dr < rspan; dr += 1) {
+        for (let dc = 0; dc < cspan; dc += 1) {
+          if (occupied.has(key(row + dr, col + dc))) return false;
+        }
+      }
+      return true;
+    };
+    const cells = [];
+    let autoRow = 0;
+    let autoCol = 0;
+    for (const child of this.children) {
+      if (isGone(child)) continue;
+      const lp = child.layoutParams || this.generateDefaultLayoutParams();
+      const cspan = Math.max(1, (lp.columnSpan | 0) || 1);
+      const rspan = Math.max(1, (lp.rowSpan | 0) || 1);
+      let row = lp.row | 0;
+      let col = lp.column | 0;
+      if (row < 0 && col < 0) {
+        row = autoRow;
+        col = autoCol;
+        let guard = 0;
+        while (!isFree(row, col, rspan, cspan) && guard < 10000) {
+          col += 1;
+          if (col + cspan > columns) {
+            col = 0;
+            row += 1;
+          }
+          guard += 1;
+        }
+        autoRow = row;
+        autoCol = col + cspan;
+        if (autoCol + 1 > columns) {
+          autoCol = 0;
+          autoRow = row + 1;
+        }
+      } else if (row < 0) {
+        row = 0;
+        let guard = 0;
+        while (!isFree(row, col, rspan, cspan) && guard < 10000) {
+          row += 1;
+          guard += 1;
+        }
+      } else if (col < 0) {
+        col = 0;
+        let guard = 0;
+        while (!isFree(row, col, rspan, cspan) && guard < 10000) {
+          col += 1;
+          if (col + cspan > columns) {
+            col = 0;
+            break;
+          }
+          guard += 1;
+        }
+      }
+      for (let dr = 0; dr < rspan; dr += 1) {
+        for (let dc = 0; dc < cspan; dc += 1) occupied.add(key(row + dr, col + dc));
+      }
+      cells.push({ child, lp, row, col, cspan, rspan });
+    }
+    for (const cell of cells) columns = Math.max(columns, cell.col + cell.cspan);
+    return { cells, columns: Math.max(1, columns) };
+  }
+
+  _measureCells(cells, widthSpec, widthMode, availW) {
+    const colWidths = [];
+    const rowHeights = [];
+    for (const cell of cells) {
+      const { child, lp, cspan, rspan } = cell;
+      const marginsH = (lp.leftMargin || 0) + (lp.rightMargin || 0);
+      const marginsV = (lp.topMargin || 0) + (lp.bottomMargin || 0);
+      let childWidthSpec;
+      if ((lp.width | 0) >= 0) {
+        childWidthSpec = MeasureSpec.makeMeasureSpec(lp.width | 0, MeasureSpec.EXACTLY);
+      } else if (widthMode === MeasureSpec.UNSPECIFIED) {
+        childWidthSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      } else {
+        childWidthSpec = MeasureSpec.makeMeasureSpec(Math.max(0, availW - marginsH), MeasureSpec.AT_MOST);
+      }
+      const childHeightSpec = (lp.height | 0) >= 0
+        ? MeasureSpec.makeMeasureSpec(lp.height | 0, MeasureSpec.EXACTLY)
+        : MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      child.measure(childWidthSpec, childHeightSpec);
+      const measuredWidth = child.getMeasuredWidth() + marginsH;
+      const measuredHeight = child.getMeasuredHeight() + marginsV;
+      if (cspan === 1) colWidths[cell.col] = Math.max(colWidths[cell.col] || 0, measuredWidth);
+      if (rspan === 1) rowHeights[cell.row] = Math.max(rowHeights[cell.row] || 0, measuredHeight);
+    }
+    for (const cell of cells) {
+      const { child, lp, cspan, rspan } = cell;
+      const needW = child.getMeasuredWidth() + (lp.leftMargin || 0) + (lp.rightMargin || 0);
+      const needH = child.getMeasuredHeight() + (lp.topMargin || 0) + (lp.bottomMargin || 0);
+      if (cspan > 1) {
+        let sum = 0;
+        for (let c = cell.col; c < cell.col + cspan; c += 1) sum += colWidths[c] || 0;
+        if (sum < needW) colWidths[cell.col] = (colWidths[cell.col] || 0) + (needW - sum);
+      }
+      if (rspan > 1) {
+        let sum = 0;
+        for (let r = cell.row; r < cell.row + rspan; r += 1) sum += rowHeights[r] || 0;
+        if (sum < needH) rowHeights[cell.row] = (rowHeights[cell.row] || 0) + (needH - sum);
+      }
+    }
+    return { colWidths, rowHeights };
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    const widthMode = MeasureSpec.getMode(widthSpec);
+    const availW = Math.max(0, (widthMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(widthSpec)) - this.paddingLeft - this.paddingRight);
+    const { cells, columns } = this._placeChildren();
+    const { colWidths, rowHeights } = this._measureCells(cells, widthSpec, widthMode, availW);
+    let contentWidth = this.paddingLeft + this.paddingRight;
+    for (let c = 0; c < columns; c += 1) contentWidth += colWidths[c] || 0;
+    let contentHeight = this.paddingTop + this.paddingBottom;
+    for (let r = 0; r < rowHeights.length; r += 1) contentHeight += rowHeights[r] || 0;
+    this.setMeasuredDimension(resolveSize(contentWidth, widthSpec), resolveSize(contentHeight, heightSpec));
+  }
+
+  onLayout(changed, left, top, right, bottom) {
+    const availW = Math.max(0, right - left - this.paddingLeft - this.paddingRight);
+    const { cells, columns } = this._placeChildren();
+    const { colWidths, rowHeights } = this._measureCells(cells, MeasureSpec.makeMeasureSpec(availW, MeasureSpec.AT_MOST), MeasureSpec.EXACTLY, availW);
+    const colX = [];
+    let cursorX = this.paddingLeft;
+    for (let c = 0; c < columns; c += 1) {
+      colX[c] = cursorX;
+      cursorX += colWidths[c] || 0;
+    }
+    const rowY = [];
+    let cursorY = this.paddingTop;
+    for (let r = 0; r < rowHeights.length; r += 1) {
+      rowY[r] = cursorY;
+      cursorY += rowHeights[r] || 0;
+    }
+    for (const cell of cells) {
+      const { child, lp, row, col, cspan, rspan } = cell;
+      let cellWidth = 0;
+      for (let c = col; c < col + cspan; c += 1) cellWidth += colWidths[c] || 0;
+      let cellHeight = 0;
+      for (let r = row; r < row + rspan; r += 1) cellHeight += rowHeights[r] || 0;
+      const childWidth = Math.max(0, cellWidth - (lp.leftMargin || 0) - (lp.rightMargin || 0));
+      const childHeight = Math.max(0, cellHeight - (lp.topMargin || 0) - (lp.bottomMargin || 0));
+      const x = (colX[col] || this.paddingLeft) + (lp.leftMargin || 0);
+      const y = (rowY[row] || this.paddingTop) + (lp.topMargin || 0);
+      child.layout(x, y, x + childWidth, y + childHeight);
     }
   }
 }
@@ -961,101 +855,6 @@ function actionBarColorOf(view) {
   const theme = view?.$vm?.themeAttributes;
   const color = theme?.colorPrimary;
   return typeof color === 'number' ? color >>> 0 : 0xff3f51b5;
-}
-
-export class ActionBarContainer extends FrameLayout {
-  onMeasure(widthSpec, heightSpec) {
-    const width = MeasureSpec.getSize(widthSpec);
-    const height = actionBarHeightOf(this);
-    let contentHeight = 0;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      child.measure(
-        MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-        MeasureSpec.makeMeasureSpec(height, MeasureSpec.AT_MOST)
-      );
-      contentHeight = Math.max(contentHeight, child.getMeasuredHeight());
-    }
-    this.setMeasuredDimension(
-      resolveSizeSafe(width, widthSpec),
-      resolveSizeSafe(contentHeight > 0 ? Math.min(contentHeight, height) : height, heightSpec)
-    );
-  }
-
-  onLayout(changed, left, top, right, bottom) {
-    const width = right - left;
-    const height = bottom - top;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      child.layout(0, 0, width, child.getMeasuredHeight() || height);
-    }
-  }
-
-  draw(canvas) {
-    if (this.background == null) this.background = { type: 'color', color: actionBarColorOf(this) };
-    super.draw(canvas);
-  }
-}
-
-export class ActionBarOverlayLayout extends FrameLayout {
-  onMeasure(widthSpec, heightSpec) {
-    const width = MeasureSpec.getSize(widthSpec);
-    const height = MeasureSpec.getSize(heightSpec);
-    let barHeight = 0;
-    for (const child of this.children) {
-      const isBar = !!child.id && (child.id >>> 0) === 0x7f070029;
-      if (isBar) {
-        child.measure(
-          MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-          MeasureSpec.makeMeasureSpec(actionBarHeightOf(this), MeasureSpec.EXACTLY)
-        );
-        barHeight = child.getMeasuredHeight();
-      } else {
-        const contentHeight = Math.max(0, height - (this.$barHeight || actionBarHeightOf(this)));
-        child.measure(
-          MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-          MeasureSpec.makeMeasureSpec(contentHeight, MeasureSpec.EXACTLY)
-        );
-      }
-    }
-    this.setMeasuredDimension(
-      resolveSizeSafe(width, widthSpec),
-      resolveSizeSafe(height, heightSpec)
-    );
-    this.$barHeight = barHeight;
-  }
-
-  onLayout(changed, left, top, right, bottom) {
-    const width = right - left;
-    const height = bottom - top;
-    const barHeight = this.$barHeight || 0;
-    for (const child of this.children) {
-      if (isGone(child)) continue;
-      const isBar = !!child.id && (child.id >>> 0) === 0x7f070029;
-      if (isBar) {
-        child.layout(0, 0, width, barHeight);
-      } else {
-        child.layout(0, barHeight, width, height);
-      }
-    }
-  }
-}
-
-function toolbarTitleOf(view) {
-  const vm = view?.$vm;
-  if (vm?.toolbarTitle) return String(vm.toolbarTitle);
-  const manifest = vm?.apk?.manifest;
-  const app = manifest?.application || (manifest?.children || []).find((c) => c.name === 'application');
-  const labelAttr = (app?.attrs || []).find((a) => a.name === 'label');
-  if (labelAttr) {
-    const value = labelAttr.value;
-    if (typeof value === 'string') return value;
-    if (value && typeof value === 'object' && 'reference' in value) {
-      const resolved = vm?.resources?.table?.resolve(value.reference);
-      if (typeof resolved === 'string') return resolved;
-    }
-  }
-  return '';
 }
 
 export class Toolbar extends FrameLayout {

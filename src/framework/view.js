@@ -28,6 +28,91 @@ export function isGone(view) {
   return GONE_VALUES.has(view?.visibility);
 }
 
+export const MOTION_EVENT_DESCRIPTOR = 'Landroid/view/MotionEvent;';
+
+const MOTION_ACTION_CODES = { down: 0, up: 1, move: 2, cancel: 3 };
+
+export function motionActionCode(action) {
+  if (typeof action === 'number') return action | 0;
+  const text = String(action ?? '').toLowerCase();
+  return Object.prototype.hasOwnProperty.call(MOTION_ACTION_CODES, text)
+    ? MOTION_ACTION_CODES[text]
+    : 2;
+}
+
+export function motionActionName(action) {
+  const code = typeof action === 'number' ? action & 0xff : motionActionCode(action);
+  switch (code) {
+    case 0:
+      return 'down';
+    case 1:
+      return 'up';
+    case 3:
+      return 'cancel';
+    default:
+      return 'move';
+  }
+}
+
+export function isMotionEventObject(value) {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    value.$nativeClass === MOTION_EVENT_DESCRIPTOR ||
+    value.$runtimeClass?.descriptor === MOTION_EVENT_DESCRIPTOR ||
+    value.$dexClass?.descriptor === MOTION_EVENT_DESCRIPTOR
+  );
+}
+
+export function createMotionEventObject(vm, init = {}) {
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const action = motionActionCode(init.action);
+  const x = Number(init.x) || 0;
+  const y = Number(init.y) || 0;
+  const now = Date.now();
+  const downTime = init.downTime !== undefined && init.downTime !== null
+    ? Number(init.downTime) || 0
+    : now;
+  const eventTime = init.eventTime !== undefined && init.eventTime !== null
+    ? Number(init.eventTime) || 0
+    : now;
+  const object = vm.allocateRawObject(MOTION_EVENT_DESCRIPTOR);
+  object.$peer = {
+    action,
+    x,
+    y,
+    rawX: init.rawX !== undefined && init.rawX !== null ? Number(init.rawX) || 0 : x,
+    rawY: init.rawY !== undefined && init.rawY !== null ? Number(init.rawY) || 0 : y,
+    downTime,
+    eventTime,
+    edgeFlags: Number(init.edgeFlags) || 0,
+    source: Number(init.source) || 0,
+    pointerCount: Number(init.pointerCount) || 1,
+    axisValues: init.axisValues && typeof init.axisValues === 'object' ? init.axisValues : null,
+  };
+  return object;
+}
+
+export function toMotionEventObject(vm, event) {
+  if (isMotionEventObject(event)) return event;
+  return createMotionEventObject(vm, event || {});
+}
+
+export function toHostTouchEvent(event) {
+  if (!isMotionEventObject(event)) return event || { action: 'move', x: 0, y: 0 };
+  const peer = event.$peer || {};
+  const x = Number(peer.x) || 0;
+  const y = Number(peer.y) || 0;
+  return {
+    action: typeof peer.action === 'string' ? peer.action : motionActionName(peer.action),
+    x,
+    y,
+    rawX: peer.rawX !== undefined && peer.rawX !== null ? Number(peer.rawX) || 0 : x,
+    rawY: peer.rawY !== undefined && peer.rawY !== null ? Number(peer.rawY) || 0 : y,
+    downTime: peer.downTime,
+    eventTime: peer.eventTime,
+  };
+}
+
 export const GRAVITY = {
   TOP: 0x30,
   BOTTOM: 0x50,
@@ -970,12 +1055,10 @@ export class View {
   }
 
   measure(widthSpec, heightSpec) {
-    if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) { try { console.error('RVT enter depth=' + measureDepth + ' h=' + ((heightSpec>>>30)&3) + ':' + (heightSpec&0x3fffffff) + ' meash=' + this.measuredHeight + ' kids=' + this.children.length); } catch {} }
     measureDepth++;
     try {
-      if (this.measureWithDex(widthSpec, heightSpec)) { if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) console.error('RVT dex-ok meash=' + this.measuredHeight + ' kids=' + this.children.length); return; }
+      if (this.measureWithDex(widthSpec, heightSpec)) return;
       this.onMeasure(widthSpec, heightSpec);
-      if (globalThis.__RVT && /\/RecyclerView;$/.test(this.$descriptor || '')) console.error('RVT host-fallback meash=' + this.measuredHeight + ' kids=' + this.children.length);
     } finally {
       measureDepth--;
     }
@@ -985,7 +1068,6 @@ export class View {
     const vm = this.vm || this.$vm;
     const object = this.$javaObject;
     const descriptor = this.$descriptor;
-    if (globalThis.__RVL && /\/RecyclerView;$/.test(descriptor || '')) { console.error('RVL top=' + this.top + ' scrollY=' + this.scrollY + ' kids=' + this.children.length + ' ' + this.children.map(c=>c.top).join(',')); }
     if (!vm || !object || !descriptor || typeof vm.findVirtual !== 'function') return false;
     if (this.$preferHostMeasure) return false;
     if (this.$jsMeasureHandled) return false;
@@ -1003,7 +1085,6 @@ export class View {
       console.error('MSPEC ' + descriptor + ' w=' + sm(widthSpec) + ' h=' + sm(heightSpec) + ' lpH=' + (this.layoutParams&&this.layoutParams.height));
     }
     this.$jsMeasureHandled = true;
-    if (globalThis.__DBG_MS && /tabs\/TabLayout/.test(descriptor)) { const sm=(x)=>[(x>>>30)&3,(x&0x3fffffff)]; console.error('TL_DEX_MEASURE kind=' + resolved.kind + ' h=' + JSON.stringify(sm(heightSpec))); }
     try {
       vm.invoke(
         { classDesc: descriptor, name: 'onMeasure', proto: ref.proto },
@@ -1011,50 +1092,8 @@ export class View {
         [widthSpec, heightSpec],
         'virtual'
       );
-      if (globalThis.__DBG_RV && /\/RecyclerView;$/.test(descriptor)) console.error('RVFB meash=' + this.measuredHeight + ' kids=' + this.children.length);
-      if (/\/RecyclerView;$/.test(descriptor) && this.measuredHeight === 0 && this.children.length > 0) {
-        let maxBottom = 0;
-        for (const child of this.children) {
-          if (child.visibility === 8) continue;
-          maxBottom = Math.max(maxBottom, child.bottom || 0, (child.top || 0) + (child.getMeasuredHeight ? child.getMeasuredHeight() : (child.measuredHeight || 0)));
-        }
-        if (maxBottom > 0) {
-          const hMode = (heightSpec >>> 30) & 3;
-          let h = maxBottom + this.paddingTop + this.paddingBottom;
-          if (hMode === 2) h = Math.min(h, heightSpec & 0x3fffffff);
-          this.setMeasuredDimension(this.measuredWidth || MeasureSpec.getSize(widthSpec), h);
-          if (globalThis.__DBG_RV) console.error('RVFB set h=' + h + ' maxBottom=' + maxBottom);
-        }
-      }
-      if (/com\.google\.android\.material\.tabs\.TabLayout;$/.test(descriptor) && (this.measuredHeight === 0 || this.measuredWidth === 0)) {
-        const wMode = (widthSpec >>> 30) & 3;
-        const hMode = (heightSpec >>> 30) & 3;
-        const defW = MeasureSpec.getSize(widthSpec) || 360;
-        const density = this.$density || this.resources?.getDisplayMetrics?.()?.density || 1;
-        const defH = Math.round(48 * density);
-        const childrenH = (() => {
-          let m = 0;
-          const content = this.children[0];
-          if (content) for (const tab of content.children || []) m = Math.max(m, (tab.getMeasuredHeight ? tab.getMeasuredHeight() : tab.measuredHeight) || 0);
-          return m;
-        })();
-        const h = childrenH > 0 ? Math.max(childrenH + Math.round(16 * density), defH) : defH;
-        this.setMeasuredDimension(
-          wMode === 2 ? (widthSpec & 0x3fffffff) : Math.min(defW, widthSpec & 0x3fffffff),
-          hMode === 2 ? (heightSpec & 0x3fffffff) : h
-        );
-      }
-      if (/androidx\/appcompat\/widget\/Toolbar;/.test(descriptor) && this.measuredHeight === 0) {
-        const lpHeight = this.layoutParams?.height;
-        const fallback = lpHeight > 0 ? lpHeight : (this.getMinimumHeight?.() || 0);
-        if (fallback > 0) {
-          this.setMeasuredDimension(this.measuredWidth || MeasureSpec.getSize(widthSpec), fallback);
-        }
-      }
       return true;
     } catch (e) {
-      if (/RecyclerView;$/.test(descriptor)) console.error('RVMEASURE_ERR ' + String(e && (e.stack || e.message || e)).split('\n').slice(0,10).join('\n   '));
-      if (/TabLayout;$/.test(descriptor)) console.error('TLMEASURE_ERR ' + String(e && (e.stack || e.message || e)).split('\n').slice(0,6).join(' | '));
       if (globalThis.__DBG_ARG) console.error('MEASURE_ERR', descriptor, String(e.message).slice(0,80));
       return false;
     } finally {
@@ -1121,7 +1160,6 @@ export class View {
     if (!resolved || resolved.kind !== 'dex') return false;
     const ref = resolved.method;
     this.$jsLayoutHandled = true;
-    if (globalThis.__DBG_MS && /tabs\/TabLayout/.test(descriptor)) { const sm=(x)=>[(x>>>30)&3,(x&0x3fffffff)]; console.error('TL_MEASURE spec=' + JSON.stringify(sm(heightSpec)) + ' wspec=' + JSON.stringify(sm(widthSpec))); }
     try {
       for (const child of this.children) child.$relayoutBase = { left: child.left, top: child.top };
       vm.invoke(
@@ -1130,29 +1168,6 @@ export class View {
         [changed ? 1 : 0, left, top, right, bottom],
         'virtual'
       );
-      if (left !== 0 || top !== 0) {
-        const prev = this.$dexAbsOffset || { dx: 0, dy: 0 };
-        this.$dexAbsOffset = { dx: left, dy: top };
-        let alreadyAbsolute = false;
-        for (const child of this.children) {
-          if (Math.abs(child.top - top) <= 1 && Math.abs(child.left - left) <= 1) {
-            alreadyAbsolute = true;
-            break;
-          }
-        }
-        const dx = alreadyAbsolute ? 0 : left - prev.dx;
-        const dy = alreadyAbsolute ? 0 : top - prev.dy;
-        if (dx !== 0 || dy !== 0) {
-          const shiftTree = (node, sx, sy) => {
-            node.left += sx;
-            node.right += sx;
-            node.top += sy;
-            node.bottom += sy;
-            for (const g of node.children || []) shiftTree(g, sx, sy);
-          };
-          for (const child of this.children) shiftTree(child, dx, dy);
-        }
-      }
       for (const child of this.children) delete child.$relayoutBase;
       return true;
     } catch (e) {
@@ -1165,11 +1180,41 @@ export class View {
 
   onLayout(changed, left, top, right, bottom) {}
 
+  $shouldDexComputeScroll() {
+    if (this.$dexComputeScroll !== undefined) return this.$dexComputeScroll;
+    this.$dexComputeScroll = false;
+    const vm = this.vm || this.$vm;
+    const descriptor = this.$descriptor;
+    if (!vm || !descriptor || !this.$javaObject || typeof vm.findVirtual !== 'function') return false;
+    try {
+      const res = vm.findVirtual(descriptor, 'computeScroll', '()V');
+      this.$dexComputeScroll = !!(res && res.kind === 'dex');
+    } catch {
+      this.$dexComputeScroll = false;
+    }
+    return this.$dexComputeScroll;
+  }
+
+  computeScrollWithDex() {
+    if (!this.$shouldDexComputeScroll()) return;
+    const vm = this.vm || this.$vm;
+    try {
+      vm.invoke(
+        { classDesc: this.$descriptor, name: 'computeScroll', proto: { descriptor: '()V', parameters: [], returnType: 'V' } },
+        this.$javaObject,
+        [],
+        'virtual',
+      );
+    } catch {
+      this.$dexComputeScroll = false;
+    }
+  }
+
   draw(canvas) {
     if (this.visibility !== VISIBILITY.VISIBLE) return;
-    const parent = this.parent;
-    const offsetX = this.left - (parent ? parent.left : 0);
-    const offsetY = this.top - (parent ? parent.top : 0);
+    this.computeScrollWithDex();
+    const offsetX = this.left;
+    const offsetY = this.top;
     canvas.save();
     canvas.translate(offsetX + this.translationX, offsetY + this.translationY);
     const alpha = this.alpha;
@@ -1241,6 +1286,15 @@ export class View {
   }
 
   dispatchDraw(canvas) {
+    const scrollX = this.scrollX | 0;
+    const scrollY = this.scrollY | 0;
+    if (scrollX || scrollY) {
+      canvas.save();
+      canvas.translate(-scrollX, -scrollY);
+      for (const child of this.children) child.draw(canvas);
+      canvas.restore();
+      return;
+    }
     for (const child of this.children) child.draw(canvas);
   }
 
@@ -1293,33 +1347,99 @@ export class View {
 
   onDraw(canvas) {}
 
+  invokeDexTouch(name, proto, motionEvent, guardKey) {
+    const vm = this.vm || this.$vm;
+    const object = this.$javaObject;
+    const descriptor = this.$descriptor;
+    if (!vm || !object || !descriptor || this[guardKey] || typeof vm.findVirtual !== 'function') {
+      return undefined;
+    }
+    let resolved;
+    try {
+      resolved = vm.findVirtual(descriptor, name, proto);
+    } catch {
+      return undefined;
+    }
+    if (!resolved || resolved.kind !== 'dex') return undefined;
+    this[guardKey] = true;
+    try {
+      const result = vm.invoke(
+        { classDesc: descriptor, name, proto: resolved.method.proto },
+        object,
+        [motionEvent],
+        'virtual',
+      );
+      return typeof result === 'number' ? result !== 0 : !!result;
+    } catch {
+      return undefined;
+    } finally {
+      this[guardKey] = false;
+    }
+  }
+
   dispatchTouchEvent(event) {
     if (this.visibility !== VISIBILITY.VISIBLE) return false;
-    if (this.listeners.touch) {
-      if (this.listeners.touch(this, event)) return true;
+    const vm = this.vm || this.$vm;
+    const motionEvent = toMotionEventObject(vm, event);
+    const hostEvent = toHostTouchEvent(event);
+    const action = hostEvent.action;
+    if (action === 'down') this.$jsTouchIntercepted = false;
+    const dispatched = this.invokeDexTouch(
+      'dispatchTouchEvent',
+      '(Landroid/view/MotionEvent;)Z',
+      motionEvent,
+      '$jsDispatchTouchHandled',
+    );
+    if (dispatched !== undefined) return dispatched;
+    if (!this.$jsTouchIntercepted) {
+      const intercepted = this.invokeDexTouch(
+        'onInterceptTouchEvent',
+        '(Landroid/view/MotionEvent;)Z',
+        motionEvent,
+        '$jsInterceptTouchHandled',
+      );
+      if (intercepted === true) this.$jsTouchIntercepted = true;
+    }
+    if (this.$jsTouchIntercepted) {
+      this.onTouchEvent(motionEvent);
+      if (action === 'up' || action === 'cancel') this.$jsTouchIntercepted = false;
+      return true;
     }
     for (let i = this.children.length - 1; i >= 0; i--) {
       const child = this.children[i];
       if (child.visibility === VISIBILITY.VISIBLE) {
-        const cx = event.x - child.left - child.translationX;
-        const cy = event.y - child.top - child.translationY;
+        const cx = hostEvent.x + (this.scrollX | 0) - child.left - child.translationX;
+        const cy = hostEvent.y + (this.scrollY | 0) - child.top - child.translationY;
         if (cx >= 0 && cy >= 0 && cx < child.getWidth() && cy < child.getHeight()) {
-          if (child.dispatchTouchEvent(event)) return true;
+          if (child.dispatchTouchEvent({ ...hostEvent, x: cx, y: cy })) return true;
         }
       }
     }
-    if (this.onTouchEvent(event)) return true;
+    if (this.listeners.touch) {
+      if (this.listeners.touch(this, motionEvent)) return true;
+    }
+    if (this.onTouchEvent(motionEvent)) return true;
     return false;
   }
 
   onTouchEvent(event) {
     if (!this.enabled) return false;
-    if (event.action === 'down') {
+    const vm = this.vm || this.$vm;
+    const motionEvent = toMotionEventObject(vm, event);
+    const handled = this.invokeDexTouch(
+      'onTouchEvent',
+      '(Landroid/view/MotionEvent;)Z',
+      motionEvent,
+      '$jsOnTouchEventHandled',
+    );
+    if (handled !== undefined) return handled;
+    const hostEvent = toHostTouchEvent(event);
+    if (hostEvent.action === 'down') {
       this.pressed = true;
       this.invalidate();
       return this.clickable;
     }
-    if (event.action === 'up') {
+    if (hostEvent.action === 'up') {
       if (this.pressed && this.clickable) {
         this.pressed = false;
         this.performClick();
@@ -1396,6 +1516,19 @@ export class View {
   }
 }
 
+function dispatchDexAttachedToWindow(view) {
+  const object = view?.$javaObject;
+  const vm = view?.$vm || object?.$vm;
+  if (!object || !vm || view.$dexAttached || typeof vm.invokeByName !== 'function') return;
+  view.$dexAttached = true;
+  try {
+    vm.invokeByName('onAttachedToWindow', '()V', object, [], 'virtual');
+  } catch (error) {
+    view.$dexAttached = false;
+    vm.log?.('warn', 'view', `onAttachedToWindow 执行失败: ${error?.message || error}`);
+  }
+}
+
 export class ViewGroup extends View {
   constructor(context = null) {
     super(context);
@@ -1415,6 +1548,7 @@ export class ViewGroup extends View {
     }
     this.children.splice(index, 0, child);
     if (typeof child.onAttachedToWindow === 'function') child.onAttachedToWindow();
+    dispatchDexAttachedToWindow(child);
     this.requestLayout();
     this.invalidate();
     return this;
@@ -1495,11 +1629,19 @@ export class ViewGroup extends View {
   }
 
   dispatchDraw(canvas) {
+    const scrollX = this.scrollX | 0;
+    const scrollY = this.scrollY | 0;
+    const scrolled = !!(scrollX || scrollY);
     if (this.clipChildren) {
       canvas.save();
       canvas.clipRect(0, 0, this.getWidth(), this.getHeight());
     }
+    if (scrolled) {
+      canvas.save();
+      canvas.translate(-scrollX, -scrollY);
+    }
     for (const child of this.children) child.draw(canvas);
+    if (scrolled) canvas.restore();
     if (this.clipChildren) canvas.restore();
   }
 }
@@ -1571,6 +1713,10 @@ class ViewPropertyAnimator {
     const view = this.view;
     if (this.cancelled) return;
     if (this.startAction) this.startAction();
+    const listeners = Array.isArray(this.listener) ? this.listener : (this.listener ? [this.listener] : []);
+    for (const listener of listeners) {
+      if (typeof listener?.onAnimationStart === 'function') listener.onAnimationStart();
+    }
     const target = { ...this.props };
     for (const [key, value] of Object.entries(target)) {
       if (key === 'alpha') view.alpha = value;
@@ -1580,7 +1726,6 @@ class ViewPropertyAnimator {
     view.invalidate();
     const finish = () => {
       if (this.endAction) this.endAction();
-      const listeners = Array.isArray(this.listener) ? this.listener : (this.listener ? [this.listener] : []);
       for (const listener of listeners) {
         if (typeof listener?.onAnimationEnd === 'function') listener.onAnimationEnd();
         else if (typeof listener === 'function') listener();

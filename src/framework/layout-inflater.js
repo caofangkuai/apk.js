@@ -16,22 +16,16 @@ import {
   WebView,
 } from './widgets.js';
 import {
-  ActionBarContainer,
-  ActionBarOverlayLayout,
   AbsoluteLayout,
-  CoordinatorLayout,
-  DrawerLayout,
   FrameLayout,
+  GridLayout,
   HorizontalScrollView,
   LinearLayout,
   RelativeLayout,
   TableLayout,
   TableRow,
   Toolbar,
-  SimpleFrameHost,
-  ViewPagerHost,
   ViewStub,
-  TabLayoutHost,
 } from './layouts.js';
 
 const VIEW_CLASSES = {
@@ -64,14 +58,213 @@ const RESOLVED_CLASSES = {
   'android.widget.ProgressBar': ProgressBar,
   'android.widget.TableLayout': TableLayout,
   'android.widget.TableRow': TableRow,
+  'android.widget.GridLayout': GridLayout,
   'android.widget.Space': View,
   'android.webkit.WebView': WebView,
-  'androidx.drawerlayout.widget.DrawerLayout': DrawerLayout,
-  'androidx.coordinatorlayout.widget.CoordinatorLayout': CoordinatorLayout,
-  'androidx.appcompat.widget.Toolbar': Toolbar,
-  'androidx.appcompat.widget.ActionBarContainer': ActionBarContainer,
-  'androidx.appcompat.widget.ActionBarOverlayLayout': ActionBarOverlayLayout,
 };
+
+function findNestedLayoutParamsClass(vm, parentDescriptor) {
+  const targets = ['Landroid/view/ViewGroup$LayoutParams;', 'Landroid/view/ViewGroup$MarginLayoutParams;'];
+  let best = null;
+  let bestDepth = -1;
+  const sources = [vm?.dexFile, ...(Array.isArray(vm?.dexFiles) ? vm.dexFiles : [])];
+  for (const dex of sources) {
+    if (!dex || !Array.isArray(dex.classes)) continue;
+    for (const cls of dex.classes) {
+      const descriptor = cls?.descriptor;
+      if (typeof descriptor !== 'string') continue;
+      if (!descriptor.startsWith(parentDescriptor.slice(0, -1) + '$')) continue;
+      const superDescriptor = cls.superclass;
+      if (!superDescriptor) continue;
+      let depth = 0;
+      let cursor = superDescriptor;
+      const seen = new Set();
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        if (targets.includes(cursor)) break;
+        const resolved = vm?.registry?.resolve(cursor);
+        cursor = resolved?.superDescriptor || resolved?.dexClass?.superclass || null;
+        depth += 1;
+      }
+      if (!targets.includes(cursor)) continue;
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        best = descriptor;
+      }
+    }
+  }
+  return best;
+}
+
+function generateLayoutParamsReturnType(vm, descriptor) {
+  const seen = new Set();
+  let desc = descriptor;
+  while (desc && !seen.has(desc)) {
+    seen.add(desc);
+    const rc = vm.registry.resolve(desc);
+    const dexClass = rc?.dexClass;
+    if (dexClass?.methodsByName) {
+      for (const [key, method] of dexClass.methodsByName) {
+        if (!key.startsWith('generateLayoutParams(')) continue;
+        const type = method?.proto?.returnType;
+        if (type && type !== 'Landroid/view/ViewGroup$LayoutParams;') return type;
+      }
+    }
+    desc = rc?.superDescriptor || null;
+  }
+  return null;
+}
+
+export function layoutParamsDescriptorFor(view, vm, parent = view?.parent) {
+  const parentName = parent?.constructor?.name;
+  const parentDescriptor = parent?.$descriptor;
+  if (parentDescriptor && vm?.registry?.resolve) {
+    const nested = findNestedLayoutParamsClass(vm, parentDescriptor);
+    if (nested) return nested;
+    const declared = generateLayoutParamsReturnType(vm, parentDescriptor);
+    if (declared) return declared;
+  }
+  if (parentName === 'RelativeLayout') return 'Landroid/widget/RelativeLayout$LayoutParams;';
+  if (parentName === 'LinearLayout') return 'Landroid/widget/LinearLayout$LayoutParams;';
+  if (parentName === 'FrameLayout' || parentName === 'DecorView') return 'Landroid/widget/FrameLayout$LayoutParams;';
+  if (parentName === 'AbsoluteLayout') return 'Landroid/widget/AbsoluteLayout$LayoutParams;';
+  if (view?.layoutParams?.leftMargin !== undefined) return 'Landroid/view/ViewGroup$MarginLayoutParams;';
+  return 'Landroid/view/ViewGroup$LayoutParams;';
+}
+
+function findDexMethod(vm, descriptor, name, protoDescriptor) {
+  let desc = descriptor;
+  const seen = new Set();
+  while (desc && !seen.has(desc)) {
+    seen.add(desc);
+    const rc = vm.registry.resolve(desc);
+    const method = rc?.dexClass?.findDeclaredMethod?.(name, protoDescriptor);
+    if (method) return method;
+    desc = rc?.superDescriptor || rc?.dexClass?.superclass || null;
+  }
+  return null;
+}
+
+function setLayoutParamsBaseFields(object, params) {
+  const setBaseField = (name, value) => {
+    for (const key of object.$fields.keys()) {
+      if (key.endsWith('->' + name + ':I')) { object.$fields.set(key, value | 0); return; }
+    }
+    object.$fields.set('Landroid/view/ViewGroup$LayoutParams;->' + name + ':I', value | 0);
+  };
+  setBaseField('width', params.width | 0);
+  setBaseField('height', params.height | 0);
+  const hasMargins = params.leftMargin !== undefined || params.topMargin !== undefined
+    || params.rightMargin !== undefined || params.bottomMargin !== undefined || params.gravity !== undefined;
+  if (hasMargins) {
+    const setIfPresent = (name, type, value) => {
+      for (const key of object.$fields.keys()) {
+        if (key.endsWith('->' + name + ':' + type)) object.$fields.set(key, value);
+      }
+    };
+    if (params.leftMargin !== undefined) setIfPresent('leftMargin', 'I', params.leftMargin | 0);
+    if (params.topMargin !== undefined) setIfPresent('topMargin', 'I', params.topMargin | 0);
+    if (params.rightMargin !== undefined) setIfPresent('rightMargin', 'I', params.rightMargin | 0);
+    if (params.bottomMargin !== undefined) setIfPresent('bottomMargin', 'I', params.bottomMargin | 0);
+    if (typeof params.gravity === 'number') setIfPresent('gravity', 'I', params.gravity | 0);
+  }
+}
+
+function buildLayoutParamsWithAttributes(vm, descriptor, contextObject, attrSet) {
+  const runtimeClass = vm.registry.resolve(descriptor);
+  const dexClass = runtimeClass?.dexClass;
+  if (!dexClass || typeof dexClass.findDeclaredMethod !== 'function') return null;
+  const ctor = dexClass.findDeclaredMethod('<init>', '(Landroid/content/Context;Landroid/util/AttributeSet;)V');
+  if (!ctor) return null;
+  try {
+    const object = vm.instantiate(descriptor, [contextObject, attrSet]);
+    return object?.$fields ? object : null;
+  } catch {
+    return null;
+  }
+}
+
+function generateLayoutParamsFromParent(vm, parent, attrSet) {
+  if (!vm || !parent?.$descriptor || !attrSet) return null;
+  const method = findDexMethod(
+    vm,
+    parent.$descriptor,
+    'generateLayoutParams',
+    '(Landroid/util/AttributeSet;)Landroid/view/ViewGroup$LayoutParams;'
+  );
+  if (!method) return null;
+  try {
+    const parentObject = parent.$javaObject || viewObject(vm, parent);
+    const object = vm.executeMethod(method, parentObject, [attrSet]);
+    return object?.$fields ? object : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildLayoutParamsViaDex(vm, descriptor, params, attrSet = null, contextObject = null) {
+  try {
+    const runtimeClass = vm.registry.resolve(descriptor);
+    if (!runtimeClass?.dexClass) return null;
+    let object = null;
+    if (attrSet && contextObject) {
+      object = buildLayoutParamsWithAttributes(vm, descriptor, contextObject, attrSet);
+    }
+    if (!object) {
+      try {
+        object = vm.instantiate(descriptor, [params.width | 0, params.height | 0]);
+      } catch {
+        object = null;
+      }
+    }
+    if (!object || !object.$fields) {
+      try {
+        object = vm.instantiate(descriptor, []);
+      } catch {
+        object = null;
+      }
+    }
+    if (!object || !object.$fields) return null;
+    setLayoutParamsBaseFields(object, params);
+    return object;
+  } catch {
+    return null;
+  }
+}
+
+export function createChildLayoutParams(vm, parent, child, attrSet, contextObject, fallbackParams) {
+  if (!vm || !parent || !attrSet) return null;
+  const generated = generateLayoutParamsFromParent(vm, parent, attrSet);
+  if (generated) {
+    setLayoutParamsBaseFields(generated, fallbackParams);
+    return generated;
+  }
+  const descriptor = layoutParamsDescriptorFor(child, vm, parent);
+  if (!descriptor) return null;
+  return buildLayoutParamsViaDex(vm, descriptor, fallbackParams, attrSet, contextObject);
+}
+
+export function coerceLayoutParams(params) {
+  if (!params || typeof params !== 'object') return params;
+  if (!params.$fields) {
+    return params;
+  }
+  const out = { ...(params.$layoutParams || {}) };
+  const axes = ['width', 'height', 'x', 'y', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight', 'startMargin', 'endMargin', 'column', 'span', 'margins'];
+  for (const [key, value] of params.$fields) {
+    for (const axis of axes) {
+      if (key.endsWith(`->${axis}:I`) && typeof value === 'number') out[axis] = value;
+      if (key.endsWith(`->${axis}:F`) && typeof value === 'number') out[axis] = value;
+    }
+  }
+  if (params.$dexClass?.descriptor?.endsWith('MarginsLayoutParams$LayoutParams;')) {
+    if (out.width === undefined) out.width = -2;
+    if (out.height === undefined) out.height = -2;
+  }
+  if (out.width === undefined) out.width = -2;
+  if (out.height === undefined) out.height = -2;
+  return out;
+}
 
 export class LayoutInflater {
   constructor(context) {
@@ -92,31 +285,70 @@ export class LayoutInflater {
       for (const childNode of node.children) {
         if (childNode.type !== 'element') continue;
         const child = this.inflateNode(childNode, root);
-        if (child) root.addView(child);
+        if (child) this.mountChild(root, child, childNode);
       }
       return root;
     }
     const view = this.inflateNode(node, root);
-    if (root && attachToRoot && root instanceof ViewGroup) root.addView(view);
+    if (root && attachToRoot && root instanceof ViewGroup) this.mountChild(root, view, node);
     return view;
   }
 
-  inflateNode(node, parent) {
+  inflateNode(node, parent, inheritedTheme = null) {
     if (!node || node.type !== 'element') return null;
-    if (node.name === 'include') return this.inflateInclude(node, parent);
-    const view = this.createView(node);
-    this.applyAttributes(view, node);
-    if (view instanceof ViewGroup || typeof view.addView === 'function') {
-      for (const childNode of node.children) {
-        if (childNode.type !== 'element') continue;
-        const child = this.inflateNode(childNode, view);
-        if (child) view.addView(child);
+    if (node.name === 'include') return this.inflateInclude(node, parent, inheritedTheme);
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    const ownTheme = applyViewThemeOverlay(vm, node);
+    const theme = ownTheme || inheritedTheme;
+    try {
+      const view = this.createView(node);
+      if (theme?.attributes) view.$themeAttributes = theme.attributes;
+      this.applyAttributes(view, node);
+      if (view instanceof ViewGroup || typeof view.addView === 'function') {
+        for (const childNode of node.children) {
+          if (childNode.type !== 'element') continue;
+          const child = this.inflateNode(childNode, view, theme);
+          if (child) this.mountChild(view, child, childNode);
+        }
       }
+      return view;
+    } finally {
+      if (ownTheme) ownTheme.restore();
     }
-    return view;
   }
 
-  inflateInclude(node, parent) {
+  mountChild(parent, child, node) {
+    this.applyParentLayoutParams(child, node, parent);
+    parent.addView(child);
+  }
+
+  applyParentLayoutParams(child, node, parent) {
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    if (!vm || !parent || !child || !node) return;
+    try {
+      const attrSet = this.buildAttributeSet(node);
+      if (!attrSet) return;
+      const fallbackParams = child.layoutParams || { width: -2, height: -2 };
+      const object = createChildLayoutParams(
+        vm,
+        parent,
+        child,
+        attrSet,
+        vm.contextObject || this.context,
+        fallbackParams
+      );
+      if (!object) return;
+      object.$layoutParams = { ...fallbackParams };
+      child.$layoutParamsObject = object;
+      child.$layoutParamsAttrSet = attrSet;
+      const coerced = coerceLayoutParams(object);
+      if (coerced) child.layoutParams = coerced;
+    } catch {
+      // 保留 applyAttributes 生成的通用宽高参数
+    }
+  }
+
+  inflateInclude(node, parent, inheritedTheme = null) {
     const layoutAttr = (node.attrs || []).find((a) => a.resId === 0x010100f2 || a.name === 'layout');
     const resId = layoutAttr
       ? (typeof layoutAttr.value === 'object' && layoutAttr.value?.reference !== undefined
@@ -128,11 +360,11 @@ export class LayoutInflater {
     const root = xml.root.children.find((c) => c.type === 'element');
     if (!root) return null;
     if (root.name === 'merge') {
-      const children = root.children.filter((c) => c.type === 'element').map((c) => this.inflateNode(c, parent));
+      const children = root.children.filter((c) => c.type === 'element').map((c) => this.inflateNode(c, parent, inheritedTheme));
       this.applyAttributes(children[0], node);
       return children[0] || null;
     }
-    const view = this.inflateNode(root, parent);
+    const view = this.inflateNode(root, parent, inheritedTheme);
     this.applyAttributes(view, node);
     return view;
   }
@@ -141,7 +373,7 @@ export class LayoutInflater {
     const tag = node.name;
     if (globalThis.__DBG_CV && /DrawerLayout|AppBarLayout|CoordinatorLayout|Toolbar|TabLayout/.test(tag)) console.error('CV tag=' + tag);
     const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
-    if (fullName === 'androidx.appcompat.widget.ViewStubCompat' || fullName === 'android.view.ViewStub') {
+    if (fullName === 'android.view.ViewStub') {
       const stub = new ViewStub(this.context);
       stub.$descriptor = `L${fullName.replace(/\./g, '/')};`;
       const vm = this.context?.vm || this.context?.$vm || this.vm || null;
@@ -158,7 +390,6 @@ export class LayoutInflater {
       return fallback;
     }
     const view = new ctor(this.context);
-    if (fullName.startsWith('androidx.') || fullName.startsWith('com.google.')) view.$descriptor = `L${fullName.replace(/\./g, '/')};`;
     this.runDexConstructor(view, node);
     return view;
   }
@@ -175,6 +406,7 @@ export class LayoutInflater {
       'Landroid/widget/AbsoluteLayout;': AbsoluteLayout,
       'Landroid/widget/TableLayout;': TableLayout,
       'Landroid/widget/TableRow;': TableRow,
+      'Landroid/widget/GridLayout;': GridLayout,
       'Landroid/widget/Toolbar;': Toolbar,
       'Landroid/widget/ScrollView;': ScrollView,
       'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
@@ -184,11 +416,6 @@ export class LayoutInflater {
       'Landroid/widget/ImageView;': ImageView,
       'Landroid/widget/ProgressBar;': ProgressBar,
       'Landroid/webkit/WebView;': WebView,
-      'Landroidx/drawerlayout/widget/DrawerLayout;': DrawerLayout,
-      'Landroidx/coordinatorlayout/widget/CoordinatorLayout;': CoordinatorLayout,
-      'Landroidx/appcompat/widget/Toolbar;': Toolbar,
-      'Landroidx/appcompat/widget/ActionBarContainer;': ActionBarContainer,
-      'Landroidx/appcompat/widget/ActionBarOverlayLayout;': ActionBarOverlayLayout,
     };
     let desc = `L${fullName.replace(/\./g, '/')};`;
     const visited = new Set();
@@ -295,6 +522,18 @@ export class LayoutInflater {
     const layoutGravityAttr = get(ATTR_IDS.layout_gravity);
     if (layoutGravityAttr) lp.gravity = Number(layoutGravityAttr.value) | 0;
 
+    for (const [name, key] of [
+      ['layout_column', 'column'],
+      ['layout_row', 'row'],
+      ['layout_columnSpan', 'columnSpan'],
+      ['layout_rowSpan', 'rowSpan'],
+      ['layout_columnWeight', 'columnWeight'],
+      ['layout_rowWeight', 'rowWeight'],
+    ]) {
+      const attr = getByName(name);
+      if (attr) lp[key] = Number(attr.value) || 0;
+    }
+
     const marginAttrs = [
       ['layout_margin', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin'],
       ['layout_marginLeft', 'leftMargin'],
@@ -362,12 +601,21 @@ export class LayoutInflater {
 
     const backgroundAttr = get(ATTR_IDS.background);
     if (backgroundAttr) {
-      const resolved = resources.resolve(backgroundAttr.value?.reference ?? backgroundAttr.value);
+      let resolved = resolveAttrValue(backgroundAttr, resources);
+      if (typeof resolved === 'number' && resolved > 0 && resolved < 0x01000000) {
+        const reference = (backgroundAttr.value && typeof backgroundAttr.value === 'object'
+          ? backgroundAttr.value.reference
+          : resolved) >>> 0;
+        resolved = resources.resolve(reference);
+      }
       if (typeof resolved === 'number') {
         view.background = { type: 'color', color: resolved >>> 0 };
       } else if (typeof resolved === 'string' && resolved.endsWith('.xml')) {
-        const drawable = resources.getDrawable(backgroundAttr.value.reference);
-        view.background = drawable;
+        const reference = (backgroundAttr.value && typeof backgroundAttr.value === 'object'
+          ? backgroundAttr.value.reference
+          : backgroundAttr.data) >>> 0;
+        const drawable = resources.getDrawable(reference);
+        if (drawable) view.background = drawable;
       } else if (typeof resolved === 'string') {
         const color = parseColorString(resolved);
         if (color !== null) view.background = { type: 'color', color };
@@ -388,30 +636,6 @@ export class LayoutInflater {
 
     const enabledAttr = get(ATTR_IDS.enabled);
     if (enabledAttr) view.enabled = Boolean(enabledAttr.value);
-
-    if (view instanceof TabLayoutHost) {
-      const toColor = (attr) => {
-        if (!attr) return null;
-        const value = resolveAttrValue(attr, resources);
-        if (typeof value === 'number') return value >>> 0;
-        if (typeof value === 'string') return parseColorString(value);
-        return null;
-      };
-      const tabBg = getByName('tabBackground');
-      if (tabBg) view.$tabBackground = toColor(tabBg);
-      const indicator = getByName('tabIndicatorColor');
-      if (indicator) view.$tabIndicatorColor = toColor(indicator);
-      const selected = getByName('tabSelectedTextColor');
-      if (selected) view.$tabSelectedTextColor = toColor(selected);
-      const unselected = getByName('tabTextColor');
-      if (unselected) view.$tabTextColor = toColor(unselected);
-      const tabMode = getByName('tabMode');
-      if (tabMode) view.$tabMode = Number(tabMode.value) | 0;
-      const tabGravity = getByName('tabGravity');
-      if (tabGravity) view.$tabGravity = Number(tabGravity.value) | 0;
-      const indicatorHeight = getByName('tabIndicatorHeight');
-      if (indicatorHeight) view.$tabIndicatorHeight = resolveDimensionAttr(indicatorHeight, resources, density);
-    }
 
     if (view instanceof LinearLayout) {
       const orientationAttr = get(ATTR_IDS.orientation);
@@ -511,6 +735,82 @@ function toLayoutSize(attr, resources, density) {
     return attr.data | 0;
   }
   return -2;
+}
+
+const VIEW_THEME_ATTR_KEYS = new Map([
+  [0x01010030, 'colorForeground'],
+  [0x01010031, 'colorBackground'],
+  [0x01010036, 'textColorPrimary'],
+  [0x01010037, 'textColorSecondary'],
+  [0x01010038, 'textColorTertiary'],
+  [0x01010039, 'textColorPrimaryInverse'],
+  [0x0101003a, 'textColorSecondaryInverse'],
+  [0x01010095, 'textSize'],
+  [0x01010098, 'textColor'],
+  [0x01010099, 'textColorHighlight'],
+  [0x0101009a, 'textColorHint'],
+  [0x0101009b, 'textColorLink'],
+]);
+
+function viewThemeStyleId(node, resources) {
+  if (!node?.attrs || !resources?.table) return 0;
+  const attr = node.attrs.find((a) => (a.resId >>> 0) === ATTR_IDS.theme || a.name === 'theme');
+  if (!attr) return 0;
+  const value = attr.value;
+  if (value && typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
+  if (typeof value === 'number') return value >>> 0;
+  if (typeof value === 'string') {
+    const match = /(?:0x([0-9a-fA-F]+)|(\d+))$/.exec(value);
+    if (match) return (match[1] ? parseInt(match[1], 16) : parseInt(match[2], 10)) >>> 0;
+  }
+  return (attr.data >>> 0) || 0;
+}
+
+function applyViewThemeOverlay(vm, node) {
+  const table = vm?.resources?.table;
+  if (!vm || !table) return null;
+  const styleId = viewThemeStyleId(node, vm.resources);
+  if (!styleId) return null;
+  const store = vm.themeAttributes || (vm.themeAttributes = {});
+  const saved = { ...store };
+  const savedRefs = store.$attrReferences ? { ...store.$attrReferences } : null;
+  const seen = new Set();
+  const apply = (id) => {
+    id = id >>> 0;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const entry = table.getEntry(id);
+    if (!entry) return;
+    const parent = entry.bag && typeof entry.bag.parent === 'number' ? entry.bag.parent >>> 0 : 0;
+    if (parent) apply(parent);
+    const attributes = table.getStyleAttributes(id);
+    if (!attributes || !attributes.size) return;
+    for (const [attrId, rawValue] of attributes) {
+      const key = table.getEntry(attrId)?.key || VIEW_THEME_ATTR_KEYS.get(attrId >>> 0);
+      if (!key) continue;
+      let value = rawValue;
+      if (value && typeof value === 'object' && 'reference' in value) {
+        store.$attrReferences ||= {};
+        store.$attrReferences[key] = value.reference >>> 0;
+        const resolved = table.resolve(value.reference);
+        value = resolved === null || resolved === undefined ? value.reference : resolved;
+      }
+      store[key] = value;
+    }
+  };
+  apply(styleId);
+  const attributes = { ...store, $attrReferences: store.$attrReferences ? { ...store.$attrReferences } : undefined };
+  return {
+    attributes,
+    restore: () => {
+      for (const key of Object.keys(store)) {
+        if (!(key in saved)) delete store[key];
+      }
+      Object.assign(store, saved);
+      if (savedRefs) store.$attrReferences = savedRefs;
+      else delete store.$attrReferences;
+    },
+  };
 }
 
 function resolveAttrValue(attr, resources) {

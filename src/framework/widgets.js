@@ -26,6 +26,94 @@ function vectorIntrinsicSize(drawable) {
   return { width, height };
 }
 
+const FRAMEWORK_TEXT_COLOR_KEYS = new Map([
+  [0x01010036, 'textColorPrimary'],
+  [0x01010037, 'textColorSecondary'],
+  [0x01010038, 'textColorTertiary'],
+  [0x01010039, 'textColorPrimaryInverse'],
+  [0x0101003a, 'textColorSecondaryInverse'],
+  [0x01010099, 'textColorHighlight'],
+  [0x0101009a, 'textColorHint'],
+  [0x0101009b, 'textColorLink'],
+]);
+
+function resolveFrameworkTextColor(view, color) {
+  const value = color >>> 0;
+  if (value < 0x01010000 || value >= 0x02000000) return value;
+  const key = FRAMEWORK_TEXT_COLOR_KEYS.get(value);
+  const vm = view?.$vm || view?.vm;
+  const store = vm?.themeAttributes;
+  if (!key || !store) return value;
+  const refId = store.$attrReferences?.[key];
+  const list = refId ? vm.resources?.getColorStateList?.(refId) : null;
+  const resolved = typeof list?.color === 'number' ? list.color : store[key];
+  return typeof resolved === 'number' ? resolved >>> 0 : value;
+}
+
+const VIEW_STATE_IDS = {
+  selected: 0x010100a1,
+  pressed: 0x010100a7,
+  focused: 0x0101009c,
+  enabled: 0x0101009e,
+  hovered: 0x01010367,
+  activated: 0x010102fe,
+  checked: 0x010100a0,
+};
+
+function viewStateSet(view) {
+  const set = [];
+  if (!view) return set;
+  if (view.selected) set.push(VIEW_STATE_IDS.selected);
+  if (view.pressed) set.push(VIEW_STATE_IDS.pressed);
+  if (view.focused) set.push(VIEW_STATE_IDS.focused);
+  if (view.hovered) set.push(VIEW_STATE_IDS.hovered);
+  if (view.activated) set.push(VIEW_STATE_IDS.activated);
+  if (view.checked) set.push(VIEW_STATE_IDS.checked);
+  set.push(VIEW_STATE_IDS.enabled);
+  return set;
+}
+
+function unwrapStateArray(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.$data)) return value.$data;
+  if (Array.isArray(value?.data)) return value.data;
+  return null;
+}
+
+export function resolveStateListColor(list, stateSet = []) {
+  if (!list) return undefined;
+  const source = list.$peer || list;
+  const states = unwrapStateArray(source.states ?? source.$fields?.get?.('states'));
+  const colors = unwrapStateArray(source.colors ?? source.$fields?.get?.('colors'));
+  if (!Array.isArray(states) || !Array.isArray(colors) || !states.length) {
+    const fallback = source.color ?? source.defaultColor;
+    return typeof fallback === 'number' ? fallback >>> 0 : undefined;
+  }
+  const requested = stateSet.map((s) => Math.abs(s | 0));
+  let bestIndex = -1;
+  let bestLen = -1;
+  for (let i = 0; i < states.length; i++) {
+    const spec = unwrapStateArray(states[i]) || [];
+    let matches = true;
+    for (const entry of spec) {
+      const state = entry | 0;
+      if (state === 0) continue;
+      const key = Math.abs(state);
+      if ((state > 0) !== requested.includes(key)) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches && spec.length > bestLen) {
+      bestLen = spec.length;
+      bestIndex = i;
+    }
+  }
+  if (bestIndex < 0) bestIndex = states.length - 1;
+  const color = colors[bestIndex];
+  return typeof color === 'number' ? color >>> 0 : undefined;
+}
+
 export class TextView extends View {
   constructor(context = null) {
     super(context);
@@ -272,8 +360,13 @@ export class TextView extends View {
     }
     if (!display && this.hintText) {
       paint.color = this.hintColor;
+    } else if (this.$textColorStateList) {
+      const stateColor = resolveStateListColor(this.$textColorStateList, viewStateSet(this));
+      paint.color = typeof stateColor === 'number'
+        ? stateColor
+        : (this.enabled ? resolveFrameworkTextColor(this, this.textColor) : 0x61000000);
     } else {
-      paint.color = this.enabled ? this.textColor : 0x61000000;
+      paint.color = this.enabled ? resolveFrameworkTextColor(this, this.textColor) : 0x61000000;
     }
     const lineHeight = this.textSize * 1.35 * this.lineSpacingMultiplier + this.lineSpacingExtra;
     const totalTextHeight = this.lines.length * lineHeight;
@@ -487,9 +580,22 @@ export class ImageView extends View {
     return this.drawable;
   }
 
+  drawableIntrinsicSize() {
+    const drawable = this.drawable;
+    if (!drawable || typeof drawable !== 'object' || drawable.type || !drawable.$peer) return null;
+    const vm = this.$vm || this.vm;
+    if (!vm?.invokeByName) return null;
+    try {
+      const width = Number(vm.invokeByName('getIntrinsicWidth', '()I', drawable, []));
+      const height = Number(vm.invokeByName('getIntrinsicHeight', '()I', drawable, []));
+      if (width > 0 && height > 0) return { width, height };
+    } catch (_) {}
+    return null;
+  }
+
   onMeasure(widthSpec, heightSpec) {
     const bitmap = this.drawable?.bitmap;
-    const intrinsic = bitmap ? null : vectorIntrinsicSize(this.drawable);
+    const intrinsic = bitmap ? null : (vectorIntrinsicSize(this.drawable) || this.drawableIntrinsicSize());
     const desiredWidth = (bitmap?.width || intrinsic?.width || 0) + this.paddingLeft + this.paddingRight;
     const desiredHeight = (bitmap?.height || intrinsic?.height || 0) + this.paddingTop + this.paddingBottom;
     let width = desiredWidth;
@@ -504,6 +610,16 @@ export class ImageView extends View {
   onDraw(canvas) {
     const drawable = this.drawable;
     if (!drawable) return;
+    if (typeof drawable === 'object' && drawable.$peer && !drawable.type) {
+      const vm = this.$vm || this.vm;
+      if (vm?.invokeByName) {
+        try {
+          vm.invokeByName('setBounds', '(IIII)V', drawable, [0, 0, this.getWidth(), this.getHeight()]);
+          vm.invokeByName('draw', '(Landroid/graphics/Canvas;)V', drawable, [this.canvasObject(canvas)]);
+        } catch (_) {}
+      }
+      return;
+    }
     if (drawable.type === 'color') {
       canvas.context.save();
       canvas.context.fillStyle = cssColor(drawable.color);

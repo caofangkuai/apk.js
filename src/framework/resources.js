@@ -15,6 +15,19 @@ const ANDROID_FRAMEWORK_COLORS = new Map([
   [0x0106007b, 0xff333333], [0x0106007c, 0xff222222], [0x0106007d, 0xff111111],
 ]);
 
+function resolveAndroidColor(value) {
+  let v = value;
+  if (v && typeof v === 'object') v = v.reference ?? v.value ?? v;
+  if (typeof v !== 'number') return null;
+  v = v >>> 0;
+  const mapped = ANDROID_FRAMEWORK_COLORS.get(v);
+  if (mapped !== undefined) return mapped >>> 0;
+  if (v >= 0x01000000 && v < 0x02000000) return null;
+  if ((v >>> 24) === 0xff) return v;
+  if (v <= 0xffffff) return (0xff000000 | v) >>> 0;
+  return null;
+}
+
 const STATE_ATTR_IDS = {
   state_selected: 0x010100a1,
   state_pressed: 0x010100a7,
@@ -141,6 +154,20 @@ export class Resources {
     return value;
   }
 
+  resolveThemedAttr(resId) {
+    if (typeof resId !== 'number') return undefined;
+    const entry = this.table?.getEntry?.(resId >>> 0);
+    if (!entry || entry.typeName !== 'attr') return undefined;
+    const store = this.vm?.themeAttributes;
+    if (!store) return undefined;
+    let value = store[entry.key];
+    if (value === undefined) {
+      const ref = store.$attrReferences?.[entry.key];
+      if (ref !== undefined) value = this.resolve(ref >>> 0);
+    }
+    return value;
+  }
+
   getString(resId, ...args) {
     const value = this.resolve(resId);
     let text = value === null || value === undefined ? '' : String(value);
@@ -157,7 +184,9 @@ export class Resources {
   }
 
   getColor(resId) {
-    const value = this.resolve(resId);
+    const value = typeof resId === 'number' && this.table?.getEntry?.(resId >>> 0)?.typeName === 'attr'
+      ? this.resolveThemedAttr(resId)
+      : this.resolve(resId);
     if (typeof value === 'number') return value >>> 0;
     if (typeof value === 'string') {
       const parsed = parseColorString(value);
@@ -192,8 +221,27 @@ export class Resources {
     return xml;
   }
 
+  resolveVectorTint(root) {
+    const attr = (root?.attrs || []).find((a) => a && (a.name === 'tint' || a.namespaceName === 'tint'));
+    if (!attr) return undefined;
+    let ref = attr.value;
+    if (ref && typeof ref === 'object') ref = ref.reference ?? ref.value ?? ref;
+    if (typeof ref !== 'number') return resolveAndroidColor(ref) ?? 0xff000000;
+    const key = this.table?.getEntry?.(ref >>> 0)?.key;
+    const themed = key ? this.vm?.themeAttributes?.[key] : undefined;
+    const resolved = this.resolve(ref);
+    const color = resolveAndroidColor(themed) ?? resolveAndroidColor(resolved) ?? resolveAndroidColor(ref);
+    if (color !== null) return color;
+    return key === 'colorControlNormal' ? 0xff000000 : undefined;
+  }
+
   getDrawable(resId) {
-    const value = this.resolve(resId);
+    let value;
+    if (typeof resId === 'number' && this.table?.getEntry?.(resId >>> 0)?.typeName === 'attr') {
+      value = this.resolveThemedAttr(resId);
+    } else {
+      value = this.resolve(resId);
+    }
     if (typeof value === 'number') return { color: value >>> 0, type: 'color' };
     if (typeof value !== 'string') return null;
     const path = value;
@@ -205,11 +253,8 @@ export class Resources {
         return { type: 'shape', xml: root };
       }
       if (root?.name === 'vector') {
-        return {
-          type: 'xml',
-          xml: root,
-          $descriptor: 'Landroidx/vectordrawable/graphics/drawable/VectorDrawableCompat;',
-        };
+        const tint = this.resolveVectorTint(root);
+        return { type: 'xml', xml: root, tint, $descriptor: 'Landroid/graphics/drawable/VectorDrawable;' };
       }
       return { type: 'xml', xml: root };
     }
@@ -256,7 +301,9 @@ export class Resources {
   }
 
   getColorStateList(resId) {
-    const value = this.resolve(resId >>> 0);
+    const value = this.table?.getEntry?.(resId >>> 0)?.typeName === 'attr'
+      ? (this.resolveThemedAttr(resId) ?? this.resolve(resId >>> 0))
+      : this.resolve(resId >>> 0);
     if (typeof value === 'number') {
       const color = value >>> 0;
       return { states: [[]], colors: [color], color };

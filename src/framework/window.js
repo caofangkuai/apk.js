@@ -256,11 +256,13 @@ export class SurfaceScreen {
   findViewAt(point, view = this.decorView) {
     if (!view) return null;
     if (view.visibility !== undefined && view.visibility !== 0) return null;
+    const scrollX = view.scrollX | 0;
+    const scrollY = view.scrollY | 0;
     if (Array.isArray(view.children)) {
       for (let i = view.children.length - 1; i >= 0; i--) {
         const child = view.children[i];
-        const x = point.x - (child.left || 0) - (child.translationX || 0);
-        const y = point.y - (child.top || 0) - (child.translationY || 0);
+        const x = point.x + scrollX - (child.left || 0) - (child.translationX || 0);
+        const y = point.y + scrollY - (child.top || 0) - (child.translationY || 0);
         const w = child.getWidth ? child.getWidth() : child.width || 0;
         const h = child.getHeight ? child.getHeight() : child.height || 0;
         if (x >= 0 && y >= 0 && x < w && y < h) {
@@ -270,8 +272,8 @@ export class SurfaceScreen {
     }
     if (view.child) {
       const child = view.child;
-      const x = point.x - (child.left || 0);
-      const y = point.y - (child.top || 0);
+      const x = point.x + scrollX - (child.left || 0) - (child.translationX || 0);
+      const y = point.y + scrollY - (child.top || 0) - (child.translationY || 0);
       const w = child.getWidth ? child.getWidth() : child.width || 0;
       const h = child.getHeight ? child.getHeight() : child.height || 0;
       if (x >= 0 && y >= 0 && x < w && y < h) {
@@ -533,6 +535,22 @@ export class SurfaceScreen {
           ctx.moveTo(x1, y1);
           ctx.lineTo(x2, y2);
           ctx.stroke();
+          ctx.restore();
+        },
+        drawPath: (commands, paint) => {
+          if (!commands || !commands.length) return;
+          ctx.save();
+          applyPaintRaw(ctx, paint);
+          ctx.beginPath();
+          let cx = 0, cy = 0, sx = 0, sy = 0;
+          for (const cmd of commands) {
+            if (cmd.type === 'moveTo') { cx = sx = cmd.x; cy = sy = cmd.y; ctx.moveTo(cx, cy); }
+            else if (cmd.type === 'lineTo') { cx = cmd.x; cy = cmd.y; ctx.lineTo(cx, cy); }
+            else if (cmd.type === 'rLineTo') { cx += cmd.x; cy += cmd.y; ctx.lineTo(cx, cy); }
+            else if (cmd.type === 'close') { ctx.closePath(); cx = sx; cy = sy; }
+          }
+          if (paint?.style === 'stroke') ctx.stroke();
+          else { ctx.fill(); if (paint?.style === 'fillAndStroke') ctx.stroke(); }
           ctx.restore();
         },
         drawText: (text, x, y, paint) => {

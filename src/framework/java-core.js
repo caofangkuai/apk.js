@@ -1048,6 +1048,7 @@ export const JAVA_CORE_CLASSES = {
     staticFields: new Map([
       ['TRUE:Ljava/lang/Boolean;', { lazy: (vm) => vm.wrapPeer({ value: true, constructor: { $descriptor: 'Ljava/lang/Boolean;' } }) }],
       ['FALSE:Ljava/lang/Boolean;', { lazy: (vm) => vm.wrapPeer({ value: false, constructor: { $descriptor: 'Ljava/lang/Boolean;' } }) }],
+      ['TYPE:Ljava/lang/Class;', { lazy: (vm) => vm.getClassObject('Z') }],
     ]),
   }),
   'Ljava/lang/Float;': floatDef('Ljava/lang/Float;', 'F'),
@@ -1059,6 +1060,9 @@ export const JAVA_CORE_CLASSES = {
       'isLetter(C)Z': (_self, [value]) => /[a-zA-Z]/.test(String.fromCharCode(toInt(value))),
       'toString(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value)),
     },
+    staticFields: new Map([
+      ['TYPE:Ljava/lang/Class;', { lazy: (vm) => vm.getClassObject('C') }],
+    ]),
   }),
 
   'Ljava/lang/System;': nativeDef('Ljava/lang/System;', {
@@ -1091,7 +1095,12 @@ export const JAVA_CORE_CLASSES = {
         const from = toInt(srcPos);
         const to = toInt(dstPos);
         const count = toInt(length);
-        for (let i = 0; i < count; i++) dst.$data[to + i] = src.$data[from + i];
+        const same = src === dst || src.$data === dst.$data;
+        if (same && to > from && to < from + count) {
+          for (let i = count - 1; i >= 0; i--) dst.$data[to + i] = src.$data[from + i];
+        } else {
+          for (let i = 0; i < count; i++) dst.$data[to + i] = src.$data[from + i];
+        }
       },
     },
     staticFields: new Map([
@@ -1143,6 +1152,7 @@ export const JAVA_CORE_CLASSES = {
       'cos(D)D': (_self, [v]) => Math.cos(Number(v)),
       'tan(D)D': (_self, [v]) => Math.tan(Number(v)),
       'log(D)D': (_self, [v]) => Math.log(Number(v)),
+      'log10(D)D': (_self, [v]) => Math.log10(Number(v)),
       'exp(D)D': (_self, [v]) => Math.exp(Number(v)),
       'toRadians(D)D': (_self, [v]) => (Number(v) * Math.PI) / 180,
     },
@@ -2245,6 +2255,121 @@ JAVA_CORE_CLASSES['Ljava/util/Locale;'] = nativeDef('Ljava/util/Locale;', {
   staticFields: new Map([['US:Ljava/util/Locale;', null], ['ENGLISH:Ljava/util/Locale;', null], ['ROOT:Ljava/util/Locale;', null]]),
 });
 
+function decimalFormatOptions(pattern) {
+  const text = String(pattern ?? '#.##');
+  const dot = text.indexOf('.');
+  let maxFractionDigits = 0;
+  let minFractionDigits = 0;
+  if (dot >= 0) {
+    for (let index = dot + 1; index < text.length; index++) {
+      const ch = text[index];
+      if (ch !== '0' && ch !== '#') break;
+      maxFractionDigits++;
+      if (ch === '0') minFractionDigits++;
+    }
+  }
+  return {
+    pattern: text,
+    maxFractionDigits,
+    minFractionDigits,
+    grouping: text.includes(','),
+  };
+}
+
+function groupDecimalDigits(text) {
+  const negative = text.startsWith('-');
+  const body = negative ? text.slice(1) : text;
+  const [integer, fraction] = body.split('.');
+  let grouped = '';
+  for (let index = 0; index < integer.length; index++) {
+    if (index > 0 && (integer.length - index) % 3 === 0) grouped += ',';
+    grouped += integer[index];
+  }
+  return (negative ? '-' : '') + grouped + (fraction !== undefined ? '.' + fraction : '');
+}
+
+function formatDecimalNumber(value, options) {
+  const number = Number(value);
+  if (Number.isNaN(number)) return 'NaN';
+  if (number === Infinity) return '\u221e';
+  if (number === -Infinity) return '-\u221e';
+  const normalized = Object.is(number, -0) ? 0 : number;
+  const fixed = normalized.toFixed(options.maxFractionDigits);
+  let [integer, fraction] = fixed.split('.');
+  if (fraction !== undefined) {
+    while (fraction.length > options.minFractionDigits && fraction.endsWith('0')) {
+      fraction = fraction.slice(0, -1);
+    }
+  }
+  const body = integer + (fraction ? '.' + fraction : '');
+  return options.grouping ? groupDecimalDigits(body) : body;
+}
+
+JAVA_CORE_CLASSES['Ljava/text/DecimalFormatSymbols;'] = nativeDef('Ljava/text/DecimalFormatSymbols;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.decimalSeparator = '.';
+    this.groupingSeparator = ',';
+    this.zeroDigit = '0';
+  }, { decimalSeparator: '.', groupingSeparator: ',', zeroDigit: '0' }),
+  methods: {
+    '<init>()V': () => undefined,
+    '<init>(Ljava/util/Locale;)V': () => undefined,
+    'getDecimalSeparator()C': (self) => (self.decimalSeparator || '.').charCodeAt(0),
+    'getGroupingSeparator()C': (self) => (self.groupingSeparator || ',').charCodeAt(0),
+    'getZeroDigit()C': (self) => (self.zeroDigit || '0').charCodeAt(0),
+    'setDecimalSeparator(C)V': (self, [value]) => { self.decimalSeparator = String.fromCharCode(toInt(value)); },
+    'setGroupingSeparator(C)V': (self, [value]) => { self.groupingSeparator = String.fromCharCode(toInt(value)); },
+    'setZeroDigit(C)V': (self, [value]) => { self.zeroDigit = String.fromCharCode(toInt(value)); },
+  },
+  staticMethods: {
+    'getInstance()Ljava/text/DecimalFormatSymbols;': (_self, _args, vm) =>
+      vm.allocateRawObject('Ljava/text/DecimalFormatSymbols;'),
+    'getInstance(Ljava/util/Locale;)Ljava/text/DecimalFormatSymbols;': (_self, _args, vm) =>
+      vm.allocateRawObject('Ljava/text/DecimalFormatSymbols;'),
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/text/DecimalFormat;'] = nativeDef('Ljava/text/DecimalFormat;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.options = decimalFormatOptions('#.##');
+    this.symbols = null;
+  }, { options: null, symbols: null }),
+  methods: {
+    '<init>()V': (self) => { self.options = decimalFormatOptions('#.##'); },
+    '<init>(Ljava/lang/String;)V': (self, [pattern]) => {
+      self.options = decimalFormatOptions(jsString(pattern));
+    },
+    '<init>(Ljava/lang/String;Ljava/text/DecimalFormatSymbols;)V': (self, [pattern, symbols]) => {
+      self.options = decimalFormatOptions(jsString(pattern));
+      self.symbols = symbols;
+    },
+    'format(D)Ljava/lang/String;': (self, [value]) => formatDecimalNumber(Number(value), self.options),
+    'format(J)Ljava/lang/String;': (self, [value]) => formatDecimalNumber(Number(value), self.options),
+    'format(Ljava/lang/Object;)Ljava/lang/String;': (self, [value]) => {
+      const number = typeof value === 'object' && value !== null ? value.value : value;
+      return formatDecimalNumber(Number(number), self.options);
+    },
+    'applyPattern(Ljava/lang/String;)V': (self, [pattern]) => {
+      self.options = decimalFormatOptions(jsString(pattern));
+    },
+    'setMaximumFractionDigits(I)V': (self, [value]) => {
+      self.options.maxFractionDigits = Math.max(0, toInt(value));
+    },
+    'setMinimumFractionDigits(I)V': (self, [value]) => {
+      self.options.minFractionDigits = Math.max(0, toInt(value));
+    },
+    'setGroupingUsed(Z)V': (self, [value]) => {
+      self.options.grouping = !!value;
+    },
+    'setDecimalSeparatorAlwaysShown(Z)V': () => undefined,
+    'setRoundingMode(Ljava/math/RoundingMode;)V': () => undefined,
+    'getDecimalFormatSymbols()Ljava/text/DecimalFormatSymbols;': (self, _args, vm) =>
+      self.symbols ?? vm.allocateRawObject('Ljava/text/DecimalFormatSymbols;'),
+  },
+});
+
 JAVA_CORE_CLASSES['Ljava/lang/ThreadLocal;'] = nativeDef('Ljava/lang/ThreadLocal;', {
   super: 'Ljava/lang/Object;',
   ctor: peerClass(function () {
@@ -2363,7 +2488,6 @@ JAVA_CORE_CLASSES['Landroid/graphics/drawable/Drawable;'] = nativeDef('Landroid/
       }
     },
     'getBounds()Landroid/graphics/Rect;': (self, _args, vm) => {
-      if (globalThis.GB_DBG) console.error('GETBOUNDS self=', !!self, 'keys=', self && Object.keys(self).slice(0,8).join(','));
       if (!self) return null;
       if (self.boundsObject) return self.boundsObject;
       const rect = vm?.allocateRawObject ? vm.allocateRawObject('Landroid/graphics/Rect;') : null;
@@ -3510,7 +3634,6 @@ JAVA_CORE_CLASSES['Landroid/content/res/ColorStateList;'] = nativeDef('Landroid/
   }, { states: [], colors: [] }),
   methods: {
     '<init>([[I[I)V': (self, [states, colors]) => {
-      if (globalThis.__CSLDBG) console.error('CSL_INIT colors=' + JSON.stringify(colors?.$data));
       self.states = states?.$data || states || [];
       self.colors = colors?.$data || colors || [];
     },
@@ -3535,8 +3658,7 @@ JAVA_CORE_CLASSES['Landroid/content/res/ColorStateList;'] = nativeDef('Landroid/
         }
         if (matches && spec.length > bestLen) { bestLen = spec.length; bestIndex = i; }
       }
-      if (bestIndex >= 0 && colors[bestIndex] !== undefined) { if (globalThis.__GCFS) console.error('GCFS_RET idx=' + bestIndex + ' v=' + colors[bestIndex]); return colors[bestIndex] | 0; }
-      if (globalThis.__GCFS) console.error('GCFS_MISS states=' + JSON.stringify(states.length) + ' req=' + JSON.stringify(requested) + ' fallback=' + fallback);
+      if (bestIndex >= 0 && colors[bestIndex] !== undefined) return colors[bestIndex] | 0;
       return fallback | 0;
     },
     'isStateful()Z': (self) => (self.states || []).some((s) => (s?.$data || s || []).length > 0),
@@ -3979,6 +4101,7 @@ function integerDef(descriptor, bits) {
       ['MIN_VALUE:I', -0x80000000],
       ['MAX_VALUE:J', 0x7fffffffffffffffn],
       ['MIN_VALUE:J', -0x8000000000000000n],
+      ['TYPE:Ljava/lang/Class;', { lazy: (vm) => vm.getClassObject(isLong ? 'J' : 'I') }],
     ]),
   });
 }
@@ -4007,8 +4130,10 @@ function floatDef(descriptor, type) {
       'valueOf(D)Ljava/lang/Double;': (_self, [value], vm) => vm.wrapPeer({ value: Number(value) }),
       'toString(F)Ljava/lang/String;': (_self, [value]) => String(Number(value)),
       'toString(D)Ljava/lang/String;': (_self, [value]) => String(Number(value)),
+      'isNaN(D)Z': (_self, [value]) => (Number.isNaN(Number(value)) ? 1 : 0),
+      'isInfinite(D)Z': (_self, [value]) => (Number.isFinite(Number(value)) ? 0 : 1),
     },
-    staticFields: new Map([['MAX_VALUE:F', 3.4028235e38], ['MIN_VALUE:F', 1.4e-45]]),
+    staticFields: new Map([['MAX_VALUE:F', 3.4028235e38], ['MIN_VALUE:F', 1.4e-45], ['TYPE:Ljava/lang/Class;', { lazy: (vm) => vm.getClassObject(type) }]]),
   });
 }
 
@@ -4221,6 +4346,83 @@ const VIRTUAL_FS = {
     return [...names];
   },
 };
+
+const STORAGE_CAPACITY_FALLBACK = {
+  internalTotalBytes: 64 * 1024 * 1024 * 1024,
+  internalFreeBytes: 32 * 1024 * 1024 * 1024,
+  externalTotalBytes: 32 * 1024 * 1024 * 1024,
+  externalFreeBytes: 16 * 1024 * 1024 * 1024,
+};
+
+const STORAGE_BLOCK_SIZE = 4096;
+
+function isExternalStoragePath(path) {
+  const normalized = VIRTUAL_FS.normalize(path || '/');
+  if (normalized.startsWith('/mnt/media_rw/') || normalized.startsWith('/mnt/extsd')) return true;
+  const match = /^\/storage\/([^/]+)/.exec(normalized);
+  if (!match) return false;
+  const name = match[1];
+  return name !== 'emulated' && name !== 'self' && name !== 'sdcard0';
+}
+
+function storageCapacityForPath(path) {
+  const external = isExternalStoragePath(path);
+  return external
+    ? {
+      totalBytes: STORAGE_CAPACITY_FALLBACK.externalTotalBytes,
+      availableBytes: STORAGE_CAPACITY_FALLBACK.externalFreeBytes,
+    }
+    : {
+      totalBytes: STORAGE_CAPACITY_FALLBACK.internalTotalBytes,
+      availableBytes: STORAGE_CAPACITY_FALLBACK.internalFreeBytes,
+    };
+}
+
+function storageVolumePaths() {
+  const paths = ['/storage/emulated/0', '/storage/sdcard0'];
+  for (const dir of VIRTUAL_FS.dirs) {
+    const match = /^\/storage\/([^/]+)$/.exec(dir);
+    if (!match) continue;
+    const name = match[1];
+    if (name === 'emulated' || name === 'self') continue;
+    if (!paths.includes(dir)) paths.push(dir);
+  }
+  return paths;
+}
+
+function filePathOf(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value.path === 'string') return value.path;
+  if (typeof value.$peer?.path === 'string') return value.$peer.path;
+  return jsString(value);
+}
+
+function makeStorageVolume(vm, path, options = {}) {
+  const normalized = VIRTUAL_FS.normalize(path || '/storage/emulated/0');
+  const external = isExternalStoragePath(normalized);
+  const object = vm.allocateRawObject('Landroid/os/storage/StorageVolume;');
+  object.$peer = {
+    path: normalized,
+    uuid: options.uuid ?? (external ? '1234-5678' : 'emulated'),
+    state: options.state ?? 'mounted',
+    primary: options.primary ?? !external,
+    removable: options.removable ?? external,
+    emulated: options.emulated ?? !external,
+    description: options.description ?? (external ? 'SD card' : 'Internal shared storage'),
+  };
+  return object;
+}
+
+function volumeForStoragePath(vm, path, options = {}) {
+  const normalized = VIRTUAL_FS.normalize(path || '/storage/emulated/0');
+  const external = isExternalStoragePath(normalized);
+  return makeStorageVolume(vm, normalized, {
+    primary: options.primary ?? !external,
+    removable: options.removable ?? external,
+    emulated: options.emulated ?? !external,
+  });
+}
 
 const sodiumSwapTotalKb = 2097148;
 
@@ -4617,6 +4819,9 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     'isFile()Z': (self) => VIRTUAL_FS.isFile(self.path),
     'isDirectory()Z': (self) => { if (globalThis.__DBG_FLAG && String(self.path).includes('wsa881x')) console.error('ISDIR ' + self.path); return VIRTUAL_FS.isDirectory(self.path); },
     'length()J': (self) => VIRTUAL_FS.length(self.path),
+    'getTotalSpace()J': (self) => BigInt(storageCapacityForPath(self.path).totalBytes),
+    'getFreeSpace()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
+    'getUsableSpace()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
     'mkdir()Z': (self) => VIRTUAL_FS.mkdirs(self.path),
     'mkdirs()Z': (self) => VIRTUAL_FS.mkdirs(self.path),
     'delete()Z': (self) => {
@@ -4667,6 +4872,140 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     ['separator:Ljava/lang/String;', '/'],
     ['pathSeparator:Ljava/lang/String;', ':'],
   ]),
+});
+
+JAVA_CORE_CLASSES['Landroid/os/storage/StorageManager;'] = nativeDef('Landroid/os/storage/StorageManager;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm) {
+    this.vm = vm;
+  }, { vm: null }),
+  methods: {
+    'getVolumePaths()[Ljava/lang/String;': (_self, _args, vm) => {
+      const paths = storageVolumePaths();
+      const array = vm.newArray('[Ljava/lang/String;', paths.length, null);
+      paths.forEach((path, index) => { array.$data[index] = path; });
+      return array;
+    },
+    'getVolumeList()[Landroid/os/storage/StorageVolume;': (_self, _args, vm) => {
+      const paths = storageVolumePaths();
+      const array = vm.newArray('[Landroid/os/storage/StorageVolume;', paths.length, null);
+      paths.forEach((path, index) => {
+        array.$data[index] = volumeForStoragePath(vm, path, { primary: index === 0 });
+      });
+      return array;
+    },
+    'getStorageVolumes()Ljava/util/List;': (_self, _args, vm) => {
+      const volumes = storageVolumePaths().map((path, index) =>
+        volumeForStoragePath(vm, path, { primary: index === 0 }));
+      return makeList(vm, volumes);
+    },
+    'getPrimaryStorageVolume()Landroid/os/storage/StorageVolume;': (_self, _args, vm) =>
+      volumeForStoragePath(vm, '/storage/emulated/0', { primary: true }),
+    'getStorageVolume(Ljava/io/File;)Landroid/os/storage/StorageVolume;': (_self, [file], vm) => {
+      const target = VIRTUAL_FS.normalize(filePathOf(file) || '/');
+      const match = storageVolumePaths()
+        .filter((path) => target === path || target.startsWith(path + '/'))
+        .sort((left, right) => right.length - left.length)[0];
+      if (match) return volumeForStoragePath(vm, match, { primary: match === '/storage/emulated/0' });
+      if (target === '/data' || target.startsWith('/data/')) {
+        return volumeForStoragePath(vm, '/storage/emulated/0', { primary: true });
+      }
+      return null;
+    },
+    'getVolumeState(Ljava/lang/String;)Ljava/lang/String;': () => 'mounted',
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/os/storage/StorageVolume;'] = nativeDef('Landroid/os/storage/StorageVolume;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'getPath()Ljava/lang/String;': (self) => self.path ?? '',
+    'getPathFile()Ljava/io/File;': (self, _args, vm) => wrapFilePath(vm, self.path ?? ''),
+    'getUuid()Ljava/lang/String;': (self) => self.uuid ?? null,
+    'getState()Ljava/lang/String;': (self) => self.state ?? 'mounted',
+    'getDescription()Ljava/lang/String;': (self) => self.description ?? '',
+    'getDescription(Landroid/content/Context;)Ljava/lang/String;': (self) => self.description ?? '',
+    'isPrimary()Z': (self) => (self.primary ? 1 : 0),
+    'isRemovable()Z': (self) => (self.removable ? 1 : 0),
+    'isEmulated()Z': (self) => (self.emulated ? 1 : 0),
+    'getTotalBytes()J': (self) => BigInt(storageCapacityForPath(self.path).totalBytes),
+    'getAvailableBytes()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
+    'toString()Ljava/lang/String;': (self) => `StorageVolume:${self.path ?? ''}`,
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/os/Environment;'] = nativeDef('Landroid/os/Environment;', {
+  super: 'Ljava/lang/Object;',
+  staticMethods: {
+    'getExternalStorageDirectory()Ljava/io/File;': (_self, _args, vm) =>
+      wrapFilePath(vm, '/storage/emulated/0'),
+    'getExternalStoragePublicDirectory(Ljava/lang/String;)Ljava/io/File;': (_self, [type], vm) =>
+      wrapFilePath(vm, joinPaths('/storage/emulated/0', jsString(type))),
+    'getDataDirectory()Ljava/io/File;': (_self, _args, vm) => wrapFilePath(vm, '/data'),
+    'getRootDirectory()Ljava/io/File;': (_self, _args, vm) => wrapFilePath(vm, '/system'),
+    'getDownloadCacheDirectory()Ljava/io/File;': (_self, _args, vm) => wrapFilePath(vm, '/cache'),
+    'getExternalStorageState()Ljava/lang/String;': () => 'mounted',
+    'getExternalStorageState(Ljava/io/File;)Ljava/lang/String;': () => 'mounted',
+    'getStorageState(Ljava/io/File;)Ljava/lang/String;': () => 'mounted',
+    'isExternalStorageEmulated()Z': () => 1,
+    'isExternalStorageEmulated(Ljava/io/File;)Z': () => 1,
+    'isExternalStorageRemovable()Z': () => 0,
+    'isExternalStorageRemovable(Ljava/io/File;)Z': () => 0,
+  },
+  staticFields: new Map([
+    ['MEDIA_MOUNTED:Ljava/lang/String;', 'mounted'],
+    ['MEDIA_UNMOUNTED:Ljava/lang/String;', 'unmounted'],
+    ['MEDIA_REMOVED:Ljava/lang/String;', 'removed'],
+    ['MEDIA_BAD_REMOVAL:Ljava/lang/String;', 'bad_removal'],
+    ['MEDIA_SHARED:Ljava/lang/String;', 'shared'],
+    ['MEDIA_CHECKING:Ljava/lang/String;', 'checking'],
+    ['MEDIA_UNMOUNTABLE:Ljava/lang/String;', 'unmountable'],
+    ['MEDIA_EJECTING:Ljava/lang/String;', 'ejecting'],
+    ['DIRECTORY_MUSIC:Ljava/lang/String;', '/storage/emulated/0/Music'],
+    ['DIRECTORY_PODCASTS:Ljava/lang/String;', '/storage/emulated/0/Podcasts'],
+    ['DIRECTORY_RINGTONES:Ljava/lang/String;', '/storage/emulated/0/Ringtones'],
+    ['DIRECTORY_ALARMS:Ljava/lang/String;', '/storage/emulated/0/Alarms'],
+    ['DIRECTORY_NOTIFICATIONS:Ljava/lang/String;', '/storage/emulated/0/Notifications'],
+    ['DIRECTORY_PICTURES:Ljava/lang/String;', '/storage/emulated/0/Pictures'],
+    ['DIRECTORY_MOVIES:Ljava/lang/String;', '/storage/emulated/0/Movies'],
+    ['DIRECTORY_DOWNLOADS:Ljava/lang/String;', '/storage/emulated/0/Download'],
+    ['DIRECTORY_DCIM:Ljava/lang/String;', '/storage/emulated/0/DCIM'],
+    ['DIRECTORY_DOCUMENTS:Ljava/lang/String;', '/storage/emulated/0/Documents'],
+    ['DIRECTORY_SCREENSHOTS:Ljava/lang/String;', '/storage/emulated/0/Screenshots'],
+    ['DIRECTORY_AUDIOBOOKS:Ljava/lang/String;', '/storage/emulated/0/Audiobooks'],
+  ]),
+});
+
+JAVA_CORE_CLASSES['Landroid/os/StatFs;'] = nativeDef('Landroid/os/StatFs;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.path = '/data';
+  }, { path: '/data' }),
+  methods: {
+    '<init>(Ljava/lang/String;)V': (self, [path]) => {
+      self.path = jsString(path) || '/data';
+    },
+    '<init>(Ljava/io/File;)V': (self, [file]) => {
+      self.path = filePathOf(file) || '/data';
+    },
+    'restat(Ljava/lang/String;)V': (self, [path]) => {
+      self.path = jsString(path) || self.path;
+    },
+    'restat(Ljava/io/File;)V': (self, [file]) => {
+      self.path = filePathOf(file) || self.path;
+    },
+    'getBlockSize()I': () => STORAGE_BLOCK_SIZE,
+    'getBlockSizeLong()J': () => BigInt(STORAGE_BLOCK_SIZE),
+    'getBlockCount()I': (self) => Math.floor(storageCapacityForPath(self.path).totalBytes / STORAGE_BLOCK_SIZE),
+    'getBlockCountLong()J': (self) => BigInt(Math.floor(storageCapacityForPath(self.path).totalBytes / STORAGE_BLOCK_SIZE)),
+    'getFreeBlocks()I': (self) => Math.floor(storageCapacityForPath(self.path).availableBytes / STORAGE_BLOCK_SIZE),
+    'getFreeBlocksLong()J': (self) => BigInt(Math.floor(storageCapacityForPath(self.path).availableBytes / STORAGE_BLOCK_SIZE)),
+    'getAvailableBlocks()I': (self) => Math.floor(storageCapacityForPath(self.path).availableBytes / STORAGE_BLOCK_SIZE),
+    'getAvailableBlocksLong()J': (self) => BigInt(Math.floor(storageCapacityForPath(self.path).availableBytes / STORAGE_BLOCK_SIZE)),
+    'getFreeBytes()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
+    'getAvailableBytes()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
+    'getTotalBytes()J': (self) => BigInt(storageCapacityForPath(self.path).totalBytes),
+  },
 });
 
 JAVA_CORE_CLASSES['Ljava/io/FileInputStream;'] = nativeDef('Ljava/io/FileInputStream;', {

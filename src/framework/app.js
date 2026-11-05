@@ -22,13 +22,13 @@ export class ActivityHost {
     const context = contextFacade(this.vm);
     this.decorView = new DecorView(context, this.screen);
     this.decorView.$scheduleLayout = () => {
-      if (this._inLayout || measureDepth > 0) return;
       this._pendingRelayout = true;
+      if (this._inLayout || measureDepth > 0) return;
+      if (this._relayoutScheduled) return;
       this._relayoutScheduled = true;
       const run = () => {
         this._relayoutScheduled = false;
         if (!this._pendingRelayout) return;
-        this._pendingRelayout = false;
         this.relayout();
       };
       if (typeof queueMicrotask === 'function') queueMicrotask(run);
