@@ -14,6 +14,13 @@ Run Android APKs in the browser with plain JavaScript. apk.js parses `classes.de
 
 > **一切开始，尽在 apk.js** — Everything starts with apk.js.
 
+<p align="center">
+  <img src="screenshots/menu.png" width="320" alt="Overflow menu rendered by apk.js">
+  <img src="screenshots/drawer.png" width="320" alt="Navigation drawer rendered by apk.js">
+</p>
+
+<p align="center"><em>DeviceInfoHW running in apk.js — overflow menu and navigation drawer.</em></p>
+
 ## Features
 
 - **Pure frontend.** Unpacking, parsing, execution and rendering all happen inside the browser. There is no backend.

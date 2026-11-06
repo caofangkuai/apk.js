@@ -14,6 +14,13 @@
 
 > **一切开始，尽在 apk.js**
 
+<p align="center">
+  <img src="screenshots/menu.png" width="320" alt="apk.js 渲染的溢出菜单">
+  <img src="screenshots/drawer.png" width="320" alt="apk.js 渲染的抽屉导航">
+</p>
+
+<p align="center"><em>DeviceInfoHW 在 apk.js 中运行——溢出菜单与抽屉导航。</em></p>
+
 ## 特性
 
 - **纯前端。** 解压、解析、执行、渲染都在浏览器内完成，没有后端服务。
