@@ -305,6 +305,7 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/RelativeLayout;': RelativeLayout,
   'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
   'Landroid/widget/TextView;': TextView,
+  'Landroid/widget/CheckedTextView;': TextView,
   'Landroid/widget/Button;': Button,
   'Landroid/widget/EditText;': EditText,
   'Landroid/widget/ImageView;': ImageView,
@@ -574,6 +575,38 @@ function viewPeerConstructor(descriptor, superDescriptor = null) {
       this.view = object.$view;
     }
   };
+}
+
+function adoptLayoutParams(vm, self, params) {
+  const object = self && self.object;
+  if (!vm || !object || typeof vm.invokeByName !== 'function') return params;
+  try {
+    if (!params) {
+      return vm.invokeByName(
+        'generateDefaultLayoutParams',
+        '()Landroid/view/ViewGroup$LayoutParams;',
+        object,
+        []
+      ) || params;
+    }
+    const valid = vm.invokeByName(
+      'checkLayoutParams',
+      '(Landroid/view/ViewGroup$LayoutParams;)Z',
+      object,
+      [params]
+    );
+    if (!valid) {
+      return vm.invokeByName(
+        'generateLayoutParams',
+        '(Landroid/view/ViewGroup$LayoutParams;)Landroid/view/ViewGroup$LayoutParams;',
+        object,
+        [params]
+      ) || params;
+    }
+  } catch {
+    return params;
+  }
+  return params;
 }
 
 export function nativeClass(descriptor, options) {
@@ -2339,18 +2372,43 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;)V': (self, [view]) => {
           const child = view?.$view || view;
           if (globalThis.__DBG_AV) console.error('AV1 parent=', self?.descriptor || (self?.view && (self.view.$descriptor || self.view.constructor?.name)), 'child=', child && (child.$descriptor || child.constructor?.name));
-          if (child && self.view) self.view.addView(child);
+          if (child && self.view) {
+            const existing = child.$layoutParamsObject;
+            if (existing && existing.$fields) {
+              child.layoutParams = coerceLayoutParams(existing);
+            } else {
+              const lp = adoptLayoutParams(self.vm, self, null);
+              if (lp) {
+                child.layoutParams = coerceLayoutParams(lp);
+                if (lp.$fields) child.$layoutParamsObject = lp;
+              }
+            }
+            self.view.addView(child);
+          }
         },
         'addView(Landroid/view/View;I)V': (self, [view, index]) => {
           const child = view?.$view || view;
-          if (child && self.view) self.view.addView(child, index | 0);
+          if (child && self.view) {
+            const existing = child.$layoutParamsObject;
+            if (existing && existing.$fields) {
+              child.layoutParams = coerceLayoutParams(existing);
+            } else {
+              const lp = adoptLayoutParams(self.vm, self, null);
+              if (lp) {
+                child.layoutParams = coerceLayoutParams(lp);
+                if (lp.$fields) child.$layoutParamsObject = lp;
+              }
+            }
+            self.view.addView(child, index | 0);
+          }
         },
         'addView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) {
-              child.layoutParams = coerceLayoutParams(params);
-              if (params.$fields) child.$layoutParamsObject = params;
+            const lp = adoptLayoutParams(self.vm, self, params);
+            if (lp) {
+              child.layoutParams = coerceLayoutParams(lp);
+              if (lp.$fields) child.$layoutParamsObject = lp;
             }
             self.view.addView(child);
           }
@@ -2365,9 +2423,10 @@ function buildFrameworkDefinitions(vm) {
         'addView(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;)V': (self, [view, index, params]) => {
           const child = view?.$view || view;
           if (child && self.view) {
-            if (params) {
-              child.layoutParams = coerceLayoutParams(params);
-              if (params.$fields) child.$layoutParamsObject = params;
+            const lp = adoptLayoutParams(self.vm, self, params);
+            if (lp) {
+              child.layoutParams = coerceLayoutParams(lp);
+              if (lp.$fields) child.$layoutParamsObject = lp;
             }
             self.view.addView(child, index | 0);
           }
@@ -2376,9 +2435,10 @@ function buildFrameworkDefinitions(vm) {
           if (globalThis.DBG_AVIL) console.error('AVIL self.view=', !!self?.view, 'child=', !!view, 'idx=', index);
           const child = view?.$view || view;
           if (!child || !self.view) return false;
-          if (params && typeof params === 'object' && !params.$peer) {
-            child.layoutParams = params;
-            if (params.$fields) child.$layoutParamsObject = params;
+          const lp = adoptLayoutParams(self.vm, self, params);
+          if (lp && typeof lp === 'object' && !lp.$peer) {
+            child.layoutParams = lp;
+            if (lp.$fields) child.$layoutParamsObject = lp;
           }
           self.view.addView(child, index | 0);
           return true;
@@ -2386,7 +2446,11 @@ function buildFrameworkDefinitions(vm) {
         'addViewInLayout(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;Z)Z': (self, [view, index, params]) => {
           const child = view?.$view || view;
           if (!child || !self.view) return false;
-          if (params && typeof params === 'object' && !params.$peer) child.layoutParams = params;
+          const lp = adoptLayoutParams(self.vm, self, params);
+          if (lp && typeof lp === 'object' && !lp.$peer) {
+            child.layoutParams = lp;
+            if (lp.$fields) child.$layoutParamsObject = lp;
+          }
           self.view.addView(child, index | 0);
           return true;
         },
@@ -2955,7 +3019,7 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/TextView;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText(jsString(text)); },
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText?.(jsString(text)); },
         'setText(I)V': (self, [resId]) => self.view?.setText(self.vm.resources.getString(resId >>> 0)),
         'setTextAppearance(Landroid/content/Context;I)V': (self, _args, _vm, resId) => applyTextAppearance(self, _args[1]),
         'setTextAppearance(I)V': (self, [resId]) => applyTextAppearance(self, resId),
@@ -2993,7 +3057,7 @@ function buildFrameworkDefinitions(vm) {
         'append(Ljava/lang/CharSequence;)V': (self, [text]) => self.view?.append(jsString(text)),
         'setSingleLine()V': (self) => self.view?.setSingleLine(true),
         'setSingleLine(Z)V': (self, [value]) => self.view?.setSingleLine(!!value),
-        'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines(Number(lines)),
+        'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines?.(Number(lines)),
         'setAllCaps(Z)V': (self, [value]) => self.view?.setTextAllCaps(!!value),
         'getTextSize()F': (self) => self.view?.getTextSize() ?? 0,
         'getCurrentTextColor()I': (self) => self.view?.getCurrentTextColor() ?? 0,
@@ -3221,7 +3285,7 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Button;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText(jsString(text)); },
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText?.(jsString(text)); },
       },
     })
   );
@@ -6121,9 +6185,12 @@ function viewMethods() {
       if (!view) { if (process.env.DBG_LP) console.error('GLP-NOVIEW self=', self && (self.constructor?.name||'obj'), 'selfDesc=', self?.descriptor, 'objDesc=', self?.object?.$dexClass?.descriptor, 'keys=', self&&Object.keys(self).join(',')); return null; }
       const descriptor = layoutParamsDescriptorFor(view, vm);
       const existing = view.$layoutParamsObject;
-      if (existing && (vm.registry.classNameOf(existing) === descriptor || vm.registry.instanceOf(existing, descriptor))) {
-        if (process.env.DBG_LP) console.error('GLP-existing parentDesc=', view.parent?.$descriptor, 'desc=', descriptor, 'view=', view.constructor?.name);
-        return existing;
+      if (existing && existing.$fields) {
+        try {
+          if (vm.registry.instanceOf(existing, 'Landroid/view/ViewGroup$LayoutParams;')) return existing;
+        } catch {
+          // 继续走下方重建逻辑
+        }
       }
       const params = view.layoutParams || { width: -2, height: -2 };
       let object = buildLayoutParamsViaDex(

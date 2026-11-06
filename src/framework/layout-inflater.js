@@ -180,7 +180,7 @@ function buildLayoutParamsWithAttributes(vm, descriptor, contextObject, attrSet)
   if (!ctor) return null;
   try {
     const object = vm.instantiate(descriptor, [contextObject, attrSet]);
-    return object?.$fields ? object : null;
+    return object?.$fields?.size ? object : null;
   } catch {
     return null;
   }
@@ -198,7 +198,7 @@ function generateLayoutParamsFromParent(vm, parent, attrSet) {
   try {
     const parentObject = parent.$javaObject || viewObject(vm, parent);
     const object = vm.executeMethod(method, parentObject, [attrSet]);
-    return object?.$fields ? object : null;
+    return object?.$fields?.size ? object : null;
   } catch {
     return null;
   }
@@ -219,14 +219,14 @@ export function buildLayoutParamsViaDex(vm, descriptor, params, attrSet = null, 
         object = null;
       }
     }
-    if (!object || !object.$fields) {
+    if (!object || !object.$fields?.size) {
       try {
         object = vm.instantiate(descriptor, []);
       } catch {
         object = null;
       }
     }
-    if (!object || !object.$fields) return null;
+    if (!object || !object.$fields?.size) return null;
     setLayoutParamsBaseFields(object, params);
     return object;
   } catch {
@@ -397,7 +397,7 @@ export class LayoutInflater {
     const tag = node.name;
     if (globalThis.__DBG_CV && /DrawerLayout|AppBarLayout|CoordinatorLayout|Toolbar|TabLayout/.test(tag)) console.error('CV tag=' + tag);
     const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
-    if (fullName === 'android.view.ViewStub') {
+    if (fullName === 'android.view.ViewStub' || fullName === 'android.widget.ViewStub') {
       const stub = new ViewStub(this.context);
       stub.$descriptor = `L${fullName.replace(/\./g, '/')};`;
       const vm = this.context?.vm || this.context?.$vm || this.vm || null;
@@ -436,6 +436,7 @@ export class LayoutInflater {
       'Landroid/widget/HorizontalScrollView;': HorizontalScrollView,
       'Landroid/widget/ListView;': ListView,
       'Landroid/widget/TextView;': TextView,
+      'Landroid/widget/CheckedTextView;': TextView,
       'Landroid/widget/Button;': Button,
       'Landroid/widget/EditText;': EditText,
       'Landroid/widget/ImageView;': ImageView,
@@ -912,6 +913,9 @@ function resolvedString(attr, resources) {
 
 export function createViewFromTag(context, tag) {
   const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
+  if (fullName === 'android.widget.ViewStub' || fullName === 'android.view.ViewStub') {
+    return new ViewStub(context);
+  }
   const ctor = RESOLVED_CLASSES[fullName] || VIEW_CLASSES[tag];
   return ctor ? new ctor(context) : new View(context);
 }

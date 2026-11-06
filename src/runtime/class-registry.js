@@ -320,6 +320,35 @@ export class ClassRegistry {
     const targetClass = this.resolve(descriptor);
     if (!targetClass) return false;
     if (!this.isAssignable(descriptor, 'Landroid/view/ViewGroup$LayoutParams;')) return false;
+    let width = -2;
+    let height = -2;
+    try {
+      for (const [key, fieldValue] of value.$fields) {
+        if (key.endsWith('->width:I') && typeof fieldValue === 'number') width = fieldValue | 0;
+        if (key.endsWith('->height:I') && typeof fieldValue === 'number') height = fieldValue | 0;
+      }
+    } catch {
+      width = -2;
+      height = -2;
+    }
+    try {
+      const converted = this.vm.instantiate(descriptor, [width, height]);
+      if (converted?.$fields?.size) {
+        const previous = value.$fields;
+        for (const [key, fieldValue] of previous) {
+          if (!converted.$fields.has(key)) continue;
+          if (fieldValue === null || fieldValue === undefined || fieldValue === 0 || fieldValue === false || fieldValue === '') continue;
+          converted.$fields.set(key, fieldValue);
+        }
+        value.$fields = converted.$fields;
+        value.$dexClass = converted.$dexClass;
+        value.$nativeClass = descriptor;
+        value.$runtimeClass = targetClass;
+        return true;
+      }
+    } catch {
+      // 回退到仅改写类型，保持原有宽松转换行为
+    }
     value.$nativeClass = descriptor;
     value.$runtimeClass = targetClass;
     return true;

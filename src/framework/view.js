@@ -28,6 +28,17 @@ export function isGone(view) {
   return GONE_VALUES.has(view?.visibility);
 }
 
+function effectiveLayoutParams(child) {
+  const base = child?.layoutParams || { width: -2, height: -2 };
+  const overlay = child?.$layoutParamsObject?.$layoutParams;
+  if (!overlay) return base;
+  const merged = { ...base };
+  for (const key of ['width', 'height', 'leftMargin', 'topMargin', 'rightMargin', 'bottomMargin', 'gravity', 'weight']) {
+    if (overlay[key] !== undefined) merged[key] = overlay[key];
+  }
+  return merged;
+}
+
 export const MOTION_EVENT_DESCRIPTOR = 'Landroid/view/MotionEvent;';
 
 const MOTION_ACTION_CODES = { down: 0, up: 1, move: 2, cancel: 3 };
@@ -1607,7 +1618,7 @@ export class ViewGroup extends View {
   measureChildren(widthSpec, heightSpec) {
     for (const child of this.children) {
       if (child.visibility === VISIBILITY.GONE) continue;
-      const params = child.layoutParams || { width: -2, height: -2 };
+      const params = effectiveLayoutParams(child);
       const childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, params.width);
       const childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, params.height);
       child.measure(childWidthSpec, childHeightSpec);
@@ -1616,7 +1627,7 @@ export class ViewGroup extends View {
 
   measureChildWithMargins(child, widthSpec, widthUsed, heightSpec, heightUsed) {
     if (!child || child.visibility === VISIBILITY.GONE) return;
-    const params = child.layoutParams || { width: -2, height: -2 };
+    const params = effectiveLayoutParams(child);
     const ml = params.leftMargin || 0;
     const mr = params.rightMargin || 0;
     const mt = params.topMargin || 0;

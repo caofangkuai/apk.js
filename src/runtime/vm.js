@@ -228,8 +228,14 @@ export class JavaVM {
     if (peerAccessor && typeof peerAccessor.get === 'function') return object.$peer[field.name];
     const directKey = this.fieldKey(field.classDesc, field.name, field.type);
     const ownerKey = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
-    const key = ownerKey;
-    const hasStored = object.$fields.has(key);
+    let key = ownerKey;
+    let hasStored = object.$fields.has(key);
+    if (!hasStored) {
+      const suffix = `->${field.name}:${field.type}`;
+      for (const candidate of object.$fields.keys()) {
+        if (candidate.endsWith(suffix)) { key = candidate; hasStored = true; break; }
+      }
+    }
     const stored = hasStored ? object.$fields.get(key) : undefined;
     if (hasStored) return stored === undefined ? defaultValueFor(field.type) : stored;
     const lp = object.$layoutParams;
@@ -273,7 +279,13 @@ export class JavaVM {
       return;
     }
     const directKey = this.fieldKey(field.classDesc, field.name, field.type);
-    const key = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
+    let key = object.$fields.has(directKey) ? directKey : this.fieldKey(this.resolveFieldOwner(object, field), field.name, field.type);
+    if (!object.$fields.has(key)) {
+      const suffix = `->${field.name}:${field.type}`;
+      for (const candidate of object.$fields.keys()) {
+        if (candidate.endsWith(suffix)) { key = candidate; break; }
+      }
+    }
     object.$fields.set(key, value);
     const lp = object.$layoutParams;
     if (lp && (field.name === 'width' || field.name === 'height' || /Margin$/.test(field.name)) && typeof value === 'number') {
