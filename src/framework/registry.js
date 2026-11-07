@@ -1,5 +1,5 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
-import { numberToFloatBits, toInt } from '../runtime/values.js';
+import { floatBitsToNumber, numberToFloatBits, toInt } from '../runtime/values.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
 import { JAVA_CORE_CLASSES, deviceCapabilities, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
 import {
@@ -706,6 +706,28 @@ function packageOfClassName(className) {
   if (!className) return null;
   const index = className.lastIndexOf('.');
   return index < 0 ? null : className.slice(0, index);
+}
+
+function rectFNumber(bits) {
+  return floatBitsToNumber(Number(bits) | 0);
+}
+
+function rectFBits(value) {
+  return numberToFloatBits(Number(value) || 0);
+}
+
+function readRectF(vm, rect) {
+  const stored = !!(rect && (rect.$peer || rect.$fields));
+  const read = (name) => {
+    let raw;
+    if (typeof vm?.getField === 'function') {
+      raw = vm.getField(rect, { classDesc: 'Landroid/graphics/RectF;', name, type: 'F' });
+    } else {
+      raw = rect?.$peer?.[name] ?? rect?.[name];
+    }
+    return stored ? floatBitsToNumber(Number(raw) | 0) : Number(raw) || 0;
+  };
+  return [read('left'), read('top'), read('right'), read('bottom')];
 }
 
 function toIntValue(vm, fieldPeer, args) {
@@ -4339,9 +4361,12 @@ function buildFrameworkDefinitions(vm) {
         'getStrokeWidth()F': (self) => self.paint.getStrokeWidth(),
         'setAlpha(I)V': (self, [alpha]) => self.paint.setAlpha(alpha),
         'getAlpha()I': (self) => self.paint.getAlpha(),
-        'setStrokeJoin(Landroid/graphics/Paint$Join;)V': (self, [join]) => self.paint.setStrokeJoin(join),
-        'setStrokeCap(Landroid/graphics/Paint$Cap;)V': (self, [cap]) => self.paint.setStrokeCap(cap),
-        'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) => self.paint.setStyle(style),
+        'setStrokeJoin(Landroid/graphics/Paint$Join;)V': (self, [join]) =>
+          self.paint.setStrokeJoin(join?.$peer?.ordinal ?? join),
+        'setStrokeCap(Landroid/graphics/Paint$Cap;)V': (self, [cap]) =>
+          self.paint.setStrokeCap(cap?.$peer?.ordinal ?? cap),
+        'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) =>
+          self.paint.setStyle(style?.$peer?.ordinal ?? style),
         'measureText(Ljava/lang/String;)F': (self, [text]) => self.paint.measureText(jsString(text)),
         'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self) => self.paint.getFontMetrics(),
         'getFontMetricsInt()Landroid/graphics/Paint$FontMetricsInt;': (self, _args, vm) => {
@@ -4418,37 +4443,82 @@ function buildFrameworkDefinitions(vm) {
           const paintPeer = paint?.$peer || paint;
           self.canvas?.drawPath(pathPeer?.commands || [], paintPeer?.paint ?? paintPeer);
         },
+        'drawRoundRect(Landroid/graphics/RectF;FFLandroid/graphics/Paint;)V': (self, [rect, rx, ry, paint], vm) => {
+          if (!rect) return;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.drawRoundRect(l, t, r, b, rx, ry, paint?.paint ?? paint?.$peer?.paint ?? paint);
+        },
+        'drawRect(Landroid/graphics/RectF;Landroid/graphics/Paint;)V': (self, [rect, paint], vm) => {
+          if (!rect) return;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.drawRect(l, t, r, b, paint?.paint ?? paint?.$peer?.paint ?? paint);
+        },
       },
     })
   );
 
+  const PAINT_ENUM_SINGLETON = (descriptor, cacheKey) => (vm, name, ordinal) => {
+    if (!vm[cacheKey]) vm[cacheKey] = new Map();
+    const existing = vm[cacheKey].get(name);
+    if (existing) return existing;
+    const object = vm.allocateRawObject(descriptor);
+    object.$peer = { name, ordinal };
+    vm[cacheKey].set(name, object);
+    return object;
+  };
+  const PAINT_STYLES = [['FILL', 0], ['STROKE', 1], ['FILL_AND_STROKE', 2]];
+  const PAINT_JOINS = [['MITER', 0], ['ROUND', 1], ['BEVEL', 2]];
+  const PAINT_CAPS = [['BUTT', 0], ['ROUND', 1], ['SQUARE', 2]];
+  const paintStyleSingleton = PAINT_ENUM_SINGLETON('Landroid/graphics/Paint$Style;', '__paintStyles');
+  const paintJoinSingleton = PAINT_ENUM_SINGLETON('Landroid/graphics/Paint$Join;', '__paintJoins');
+  const paintCapSingleton = PAINT_ENUM_SINGLETON('Landroid/graphics/Paint$Cap;', '__paintCaps');
+  const paintEnumStaticFields = (descriptor, entries, singleton) =>
+    new Map(
+      entries.map(([name, ordinal]) => [
+        `${name}:${descriptor}`,
+        { lazy: (vm) => singleton(vm, name, ordinal) },
+      ])
+    );
+  const paintEnumStaticMethods = (descriptor, entries, singleton) => ({
+    [`values()[${descriptor}`]: (_self, _args, vm) => {
+      const array = vm.newArray(descriptor, entries.length);
+      entries.forEach(([name, ordinal], index) => {
+        array.$data[index] = singleton(vm, name, ordinal);
+      });
+      return array;
+    },
+    [`valueOf(Ljava/lang/String;)${descriptor}`]: (_self, [name], vm) => {
+      const entry = entries.find(([entryName]) => entryName === String(name));
+      return entry ? singleton(vm, entry[0], entry[1]) : null;
+    },
+  });
   defs.push(
     nativeDef('Landroid/graphics/Paint$Style;', {
       super: 'Ljava/lang/Object;',
-      staticFields: new Map([
-        ['FILL:I', 0], ['STROKE:I', 1], ['FILL_AND_STROKE:I', 2],
-        ['FILL:Landroid/graphics/Paint$Style;', 0],
-        ['STROKE:Landroid/graphics/Paint$Style;', 1],
-        ['FILL_AND_STROKE:Landroid/graphics/Paint$Style;', 2],
-      ]),
+      staticFields: paintEnumStaticFields('Landroid/graphics/Paint$Style;', PAINT_STYLES, paintStyleSingleton),
+      staticMethods: paintEnumStaticMethods('Landroid/graphics/Paint$Style;', PAINT_STYLES, paintStyleSingleton),
+      methods: {
+        'name()Ljava/lang/String;': (self) => self.name,
+        'ordinal()I': (self) => self.ordinal,
+      },
     }),
     nativeDef('Landroid/graphics/Paint$Join;', {
       super: 'Ljava/lang/Object;',
-      staticFields: new Map([
-        ['MITER:I', 0], ['ROUND:I', 1], ['BEVEL:I', 2],
-        ['MITER:Landroid/graphics/Paint$Join;', 0],
-        ['ROUND:Landroid/graphics/Paint$Join;', 1],
-        ['BEVEL:Landroid/graphics/Paint$Join;', 2],
-      ]),
+      staticFields: paintEnumStaticFields('Landroid/graphics/Paint$Join;', PAINT_JOINS, paintJoinSingleton),
+      staticMethods: paintEnumStaticMethods('Landroid/graphics/Paint$Join;', PAINT_JOINS, paintJoinSingleton),
+      methods: {
+        'name()Ljava/lang/String;': (self) => self.name,
+        'ordinal()I': (self) => self.ordinal,
+      },
     }),
     nativeDef('Landroid/graphics/Paint$Cap;', {
       super: 'Ljava/lang/Object;',
-      staticFields: new Map([
-        ['BUTT:I', 0], ['ROUND:I', 1], ['SQUARE:I', 2],
-        ['BUTT:Landroid/graphics/Paint$Cap;', 0],
-        ['ROUND:Landroid/graphics/Paint$Cap;', 1],
-        ['SQUARE:Landroid/graphics/Paint$Cap;', 2],
-      ]),
+      staticFields: paintEnumStaticFields('Landroid/graphics/Paint$Cap;', PAINT_CAPS, paintCapSingleton),
+      staticMethods: paintEnumStaticMethods('Landroid/graphics/Paint$Cap;', PAINT_CAPS, paintCapSingleton),
+      methods: {
+        'name()Ljava/lang/String;': (self) => self.name,
+        'ordinal()I': (self) => self.ordinal,
+      },
     })
   );
 
@@ -4466,6 +4536,174 @@ function buildFrameworkDefinitions(vm) {
         'moveTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'moveTo', x: Number(x) || 0, y: Number(y) || 0 }); },
         'lineTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'lineTo', x: Number(x) || 0, y: Number(y) || 0 }); },
         'rLineTo(FF)V': (self, [x, y]) => { self.commands.push({ type: 'rLineTo', x: Number(x) || 0, y: Number(y) || 0 }); },
+        'rMoveTo(FF)V': (self, [dx, dy]) => { self.commands.push({ type: 'rMoveTo', dx: Number(dx) || 0, dy: Number(dy) || 0 }); },
+        'quadTo(FFFF)V': (self, [x1, y1, x2, y2]) => { self.commands.push({ type: 'quadTo', x1: Number(x1) || 0, y1: Number(y1) || 0, x2: Number(x2) || 0, y2: Number(y2) || 0 }); },
+        'rQuadTo(FFFF)V': (self, [dx1, dy1, dx2, dy2]) => { self.commands.push({ type: 'rQuadTo', dx1: Number(dx1) || 0, dy1: Number(dy1) || 0, dx2: Number(dx2) || 0, dy2: Number(dy2) || 0 }); },
+        'cubicTo(FFFFFF)V': (self, [x1, y1, x2, y2, x3, y3]) => { self.commands.push({ type: 'cubicTo', x1: Number(x1) || 0, y1: Number(y1) || 0, x2: Number(x2) || 0, y2: Number(y2) || 0, x3: Number(x3) || 0, y3: Number(y3) || 0 }); },
+        'rCubicTo(FFFFFF)V': (self, [dx1, dy1, dx2, dy2, dx3, dy3]) => { self.commands.push({ type: 'rCubicTo', dx1: Number(dx1) || 0, dy1: Number(dy1) || 0, dx2: Number(dx2) || 0, dy2: Number(dy2) || 0, dx3: Number(dx3) || 0, dy3: Number(dy3) || 0 }); },
+        'arcTo(Landroid/graphics/RectF;FFZ)V': (self, [rect, startAngle, sweepAngle, forceMoveTo]) => {
+          const peer = rect?.$peer || rect;
+          const num = (v) => floatBitsToNumber(Number(v) | 0);
+          self.commands.push({
+            type: 'arcTo',
+            left: num(peer?.left),
+            top: num(peer?.top),
+            right: num(peer?.right),
+            bottom: num(peer?.bottom),
+            startAngle: Number(startAngle) || 0,
+            sweepAngle: Number(sweepAngle) || 0,
+            forceMoveTo: !!forceMoveTo,
+          });
+        },
+        'addRect(Landroid/graphics/RectF;Landroid/graphics/Path$Direction;)V': (self, [rect]) => {
+          const peer = rect?.$peer || rect;
+          const num = (v) => floatBitsToNumber(Number(v) | 0);
+          const left = num(peer?.left);
+          const top = num(peer?.top);
+          const right = num(peer?.right);
+          const bottom = num(peer?.bottom);
+          self.commands.push(
+            { type: 'moveTo', x: left, y: top },
+            { type: 'lineTo', x: right, y: top },
+            { type: 'lineTo', x: right, y: bottom },
+            { type: 'lineTo', x: left, y: bottom },
+            { type: 'close' }
+          );
+        },
+        'addPath(Landroid/graphics/Path;Landroid/graphics/Matrix;)V': (self, [other]) => {
+          const peer = other?.$peer || other;
+          self.commands.push(...(peer?.commands || []));
+        },
+        'setFillType(Landroid/graphics/Path$FillType;)V': (self, [fillType]) => { self.fillType = fillType; },
+        'computeBounds(Landroid/graphics/RectF;Z)V': (self, [rect]) => {
+          if (!rect) return;
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          const add = (x, y) => {
+            const px = Number(x) || 0;
+            const py = Number(y) || 0;
+            if (px < minX) minX = px;
+            if (px > maxX) maxX = px;
+            if (py < minY) minY = py;
+            if (py > maxY) maxY = py;
+          };
+          for (const cmd of self.commands || []) {
+            if (!cmd) continue;
+            if (cmd.type === 'moveTo' || cmd.type === 'lineTo') add(cmd.x, cmd.y);
+            else if (cmd.type === 'quadTo') { add(cmd.x1, cmd.y1); add(cmd.x2, cmd.y2); }
+            else if (cmd.type === 'cubicTo') { add(cmd.x1, cmd.y1); add(cmd.x2, cmd.y2); add(cmd.x3, cmd.y3); }
+            else if (cmd.type === 'arcTo') { add(cmd.left, cmd.top); add(cmd.right, cmd.bottom); }
+          }
+          if (!Number.isFinite(minX)) { minX = 0; minY = 0; maxX = 0; maxY = 0; }
+          const write = (name, value) => {
+            const peer = rect.$peer;
+            const bits = numberToFloatBits(value);
+            if (peer && typeof peer === 'object') peer[name] = bits;
+            if (rect.$fields && typeof rect.$fields.set === 'function') {
+              rect.$fields.set('Landroid/graphics/RectF;->' + name + ':F', bits);
+            } else if (!peer) {
+              rect[name] = bits;
+            }
+          };
+          write('left', minX);
+          write('top', minY);
+          write('right', maxX);
+          write('bottom', maxY);
+        },
+        'isEmpty()Z': (self) => (self.commands || []).length === 0,
+        'isConvex()Z': () => true,
+        'offset(FF)V': (self, [dx, dy]) => {
+          const ox = Number(dx) || 0;
+          const oy = Number(dy) || 0;
+          for (const cmd of self.commands || []) {
+            if (!cmd) continue;
+            if (cmd.type === 'moveTo' || cmd.type === 'lineTo') {
+              cmd.x = (Number(cmd.x) || 0) + ox;
+              cmd.y = (Number(cmd.y) || 0) + oy;
+            } else if (cmd.type === 'quadTo') {
+              cmd.x1 = (Number(cmd.x1) || 0) + ox;
+              cmd.y1 = (Number(cmd.y1) || 0) + oy;
+              cmd.x2 = (Number(cmd.x2) || 0) + ox;
+              cmd.y2 = (Number(cmd.y2) || 0) + oy;
+            } else if (cmd.type === 'cubicTo') {
+              cmd.x1 = (Number(cmd.x1) || 0) + ox;
+              cmd.y1 = (Number(cmd.y1) || 0) + oy;
+              cmd.x2 = (Number(cmd.x2) || 0) + ox;
+              cmd.y2 = (Number(cmd.y2) || 0) + oy;
+              cmd.x3 = (Number(cmd.x3) || 0) + ox;
+              cmd.y3 = (Number(cmd.y3) || 0) + oy;
+            } else if (cmd.type === 'arcTo') {
+              cmd.left = (Number(cmd.left) || 0) + ox;
+              cmd.right = (Number(cmd.right) || 0) + ox;
+              cmd.top = (Number(cmd.top) || 0) + oy;
+              cmd.bottom = (Number(cmd.bottom) || 0) + oy;
+            }
+          }
+        },
+        'transform(Landroid/graphics/Matrix;)V': (self, [matrix]) => {
+          const peer = matrix?.$peer || matrix;
+          let a = null;
+          let b = 0;
+          let c = 0;
+          let d = 0;
+          let e = 0;
+          let f = 0;
+          const values = peer?.m?.values || peer?.values;
+          if (Array.isArray(values) && values.length >= 6) {
+            a = Number(values[0]) || 0;
+            b = Number(values[1]) || 0;
+            c = Number(values[2]) || 0;
+            d = Number(values[3]) || 0;
+            e = Number(values[4]) || 0;
+            f = Number(values[5]) || 0;
+          } else if (peer && typeof peer.a === 'number' && typeof peer.b === 'number' && typeof peer.c === 'number' && typeof peer.d === 'number' && typeof peer.e === 'number' && typeof peer.f === 'number') {
+            a = peer.a;
+            b = peer.b;
+            c = peer.c;
+            d = peer.d;
+            e = peer.e;
+            f = peer.f;
+          }
+          if (a === null) return;
+          const map = (x, y) => {
+            const px = Number(x) || 0;
+            const py = Number(y) || 0;
+            return [a * px + c * py + e, b * px + d * py + f];
+          };
+          const mapPair = (cmd, xKey, yKey) => {
+            const [x, y] = map(cmd[xKey], cmd[yKey]);
+            cmd[xKey] = x;
+            cmd[yKey] = y;
+          };
+          for (const cmd of self.commands || []) {
+            if (!cmd) continue;
+            if (cmd.type === 'moveTo' || cmd.type === 'lineTo') {
+              mapPair(cmd, 'x', 'y');
+            } else if (cmd.type === 'quadTo') {
+              mapPair(cmd, 'x1', 'y1');
+              mapPair(cmd, 'x2', 'y2');
+            } else if (cmd.type === 'cubicTo') {
+              mapPair(cmd, 'x1', 'y1');
+              mapPair(cmd, 'x2', 'y2');
+              mapPair(cmd, 'x3', 'y3');
+            } else if (cmd.type === 'arcTo') {
+              const [left, top] = map(cmd.left, cmd.top);
+              const [right, bottom] = map(cmd.right, cmd.bottom);
+              cmd.left = Math.min(left, right);
+              cmd.top = Math.min(top, bottom);
+              cmd.right = Math.max(left, right);
+              cmd.bottom = Math.max(top, bottom);
+            }
+          }
+        },
+        'op(Landroid/graphics/Path;Landroid/graphics/Path;Landroid/graphics/Path$Op;)Z': (self, [other1, other2]) => {
+          const first = (other1?.$peer || other1)?.commands || [];
+          const second = (other2?.$peer || other2)?.commands || [];
+          self.commands = [...first, ...second];
+          return true;
+        },
         'close()V': (self) => { self.commands.push({ type: 'close' }); },
       },
     })
@@ -5790,7 +6028,142 @@ function coreGraphicDefs() {
       },
     }),
     nativeDef('Landroid/graphics/Point;', { super: 'Ljava/lang/Object;' }),
-    nativeDef('Landroid/graphics/RectF;', { super: 'Ljava/lang/Object;' }),
+    nativeDef('Landroid/graphics/RectF;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class RectFPeer {
+        constructor() {
+          this.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          for (const name of ['left', 'top', 'right', 'bottom']) {
+            Object.defineProperty(this, name, {
+              configurable: true,
+              enumerable: true,
+              get: () => this.f[name],
+              set: (value) => { this.f[name] = value | 0; },
+            });
+          }
+        }
+      },
+      methods: {
+        '<init>()V': (self) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.f.left = self.f.top = self.f.right = self.f.bottom = 0;
+        },
+        '<init>(FFFF)V': (self, [l, t, r, b]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.left = rectFBits(l);
+          self.top = rectFBits(t);
+          self.right = rectFBits(r);
+          self.bottom = rectFBits(b);
+        },
+        '<init>(Landroid/graphics/RectF;)V': (self, [other]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          const src = other?.$peer || other;
+          self.left = Number(src?.left) | 0;
+          self.top = Number(src?.top) | 0;
+          self.right = Number(src?.right) | 0;
+          self.bottom = Number(src?.bottom) | 0;
+        },
+        '<init>(Landroid/graphics/Rect;)V': (self, [other]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.left = rectFBits(rectField(other, 'left'));
+          self.top = rectFBits(rectField(other, 'top'));
+          self.right = rectFBits(rectField(other, 'right'));
+          self.bottom = rectFBits(rectField(other, 'bottom'));
+        },
+        'setEmpty()V': (self) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.f.left = self.f.top = self.f.right = self.f.bottom = 0;
+        },
+        'set(FFFF)V': (self, [l, t, r, b]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.left = rectFBits(l);
+          self.top = rectFBits(t);
+          self.right = rectFBits(r);
+          self.bottom = rectFBits(b);
+        },
+        'set(Landroid/graphics/RectF;)V': (self, [other]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          const src = other?.$peer || other;
+          self.left = Number(src?.left) | 0;
+          self.top = Number(src?.top) | 0;
+          self.right = Number(src?.right) | 0;
+          self.bottom = Number(src?.bottom) | 0;
+        },
+        'set(Landroid/graphics/Rect;)V': (self, [other]) => {
+          if (!self.f) self.f = { left: 0, top: 0, right: 0, bottom: 0 };
+          self.left = rectFBits(rectField(other, 'left'));
+          self.top = rectFBits(rectField(other, 'top'));
+          self.right = rectFBits(rectField(other, 'right'));
+          self.bottom = rectFBits(rectField(other, 'bottom'));
+        },
+        'width()F': (self) => rectFNumber(self.right) - rectFNumber(self.left),
+        'height()F': (self) => rectFNumber(self.bottom) - rectFNumber(self.top),
+        'centerX()F': (self) => (rectFNumber(self.left) + rectFNumber(self.right)) / 2,
+        'centerY()F': (self) => (rectFNumber(self.top) + rectFNumber(self.bottom)) / 2,
+        'isEmpty()Z': (self) => rectFNumber(self.left) >= rectFNumber(self.right) || rectFNumber(self.top) >= rectFNumber(self.bottom),
+        'inset(FF)V': (self, [dx, dy]) => {
+          const x = Number(dx) || 0;
+          const y = Number(dy) || 0;
+          const l = rectFNumber(self.left);
+          const t = rectFNumber(self.top);
+          const r = rectFNumber(self.right);
+          const b = rectFNumber(self.bottom);
+          self.left = rectFBits(l + x);
+          self.top = rectFBits(t + y);
+          self.right = rectFBits(r - x);
+          self.bottom = rectFBits(b - y);
+        },
+        'inset(FFFF)V': (self, [dl, dt, dr, db]) => {
+          self.left = rectFBits(rectFNumber(self.left) + (Number(dl) || 0));
+          self.top = rectFBits(rectFNumber(self.top) + (Number(dt) || 0));
+          self.right = rectFBits(rectFNumber(self.right) - (Number(dr) || 0));
+          self.bottom = rectFBits(rectFNumber(self.bottom) - (Number(db) || 0));
+        },
+        'offset(FF)V': (self, [dx, dy]) => {
+          const x = Number(dx) || 0;
+          const y = Number(dy) || 0;
+          self.left = rectFBits(rectFNumber(self.left) + x);
+          self.top = rectFBits(rectFNumber(self.top) + y);
+          self.right = rectFBits(rectFNumber(self.right) + x);
+          self.bottom = rectFBits(rectFNumber(self.bottom) + y);
+        },
+        'offsetTo(FF)V': (self, [x, y]) => {
+          const w = rectFNumber(self.right) - rectFNumber(self.left);
+          const h = rectFNumber(self.bottom) - rectFNumber(self.top);
+          self.left = rectFBits(x);
+          self.top = rectFBits(y);
+          self.right = rectFBits((Number(x) || 0) + w);
+          self.bottom = rectFBits((Number(y) || 0) + h);
+        },
+        'contains(FF)Z': (self, [x, y]) => {
+          const px = Number(x) || 0;
+          const py = Number(y) || 0;
+          return px >= rectFNumber(self.left) && px < rectFNumber(self.right) && py >= rectFNumber(self.top) && py < rectFNumber(self.bottom);
+        },
+        'contains(Landroid/graphics/RectF;)Z': (self, [other]) => {
+          const src = other?.$peer || other;
+          return rectFNumber(src?.left) >= rectFNumber(self.left)
+            && rectFNumber(src?.top) >= rectFNumber(self.top)
+            && rectFNumber(src?.right) <= rectFNumber(self.right)
+            && rectFNumber(src?.bottom) <= rectFNumber(self.bottom);
+        },
+        'round(Landroid/graphics/Rect;)V': (self, [out]) => {
+          const w = (v) => Math.round(rectFNumber(v));
+          setRectField(out, 'left', w(self.left));
+          setRectField(out, 'top', w(self.top));
+          setRectField(out, 'right', w(self.right));
+          setRectField(out, 'bottom', w(self.bottom));
+        },
+        'roundOut(Landroid/graphics/Rect;)V': (self, [out]) => {
+          const w = (v) => Math.ceil(rectFNumber(v));
+          setRectField(out, 'left', w(self.left));
+          setRectField(out, 'top', w(self.top));
+          setRectField(out, 'right', w(self.right));
+          setRectField(out, 'bottom', w(self.bottom));
+        },
+        'toString()Ljava/lang/String;': (self) => `RectF(${rectFNumber(self.left)}, ${rectFNumber(self.top)}, ${rectFNumber(self.right)}, ${rectFNumber(self.bottom)})`,
+      },
+    }),
     nativeDef('Landroid/graphics/drawable/shapes/Shape;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -6611,6 +6984,15 @@ export function loadThemeFromStyleId(vm, styleId) {
     }
   };
   apply(styleId);
+  if (store.colorSurface === undefined) {
+    store.colorSurface = typeof store.colorBackground === 'number' ? store.colorBackground : 0xffffffff;
+  }
+  if (store.colorOnSurface === undefined) {
+    store.colorOnSurface = typeof store.textColorPrimary === 'number' ? store.textColorPrimary : 0xff000000;
+  }
+  if (store.colorOnBackground === undefined) store.colorOnBackground = store.colorOnSurface;
+  if (store.colorOnPrimary === undefined) store.colorOnPrimary = 0xffffffff;
+  if (store.colorOnSecondary === undefined) store.colorOnSecondary = 0xffffffff;
   return changed;
 }
 
@@ -6627,6 +7009,57 @@ function resolveThemeStyleId(vm, defStyleAttr) {
     if (typeof value.reference === 'number') return value.reference >>> 0;
   }
   return 0;
+}
+
+const FRAMEWORK_COLOR_ATTR_KEYS = new Map([
+  [0x01010054, 'windowBackground'],
+]);
+
+function frameworkColorAttrKey(id) {
+  const value = id >>> 0;
+  return value >= 0x01000000 && value < 0x02000000 ? FRAMEWORK_COLOR_ATTR_KEYS.get(value) || null : null;
+}
+
+function resolveThemeColorForKey(vm, key) {
+  if (!key) return undefined;
+  const store = themeStore(vm);
+  if (Object.prototype.hasOwnProperty.call(store, key)) {
+    const value = store[key];
+    if (typeof value === 'number') return value >>> 0;
+    if (value && typeof value === 'object' && typeof value.reference === 'number') {
+      const resolved = vm.resources?.resolve?.(value.reference >>> 0);
+      if (typeof resolved === 'number') return resolved >>> 0;
+    }
+  }
+  const refId = store.$attrReferences?.[key];
+  if (typeof refId === 'number') {
+    const resolved = vm.resources?.resolve?.(refId >>> 0);
+    if (typeof resolved === 'number') return resolved >>> 0;
+  }
+  if (/background/i.test(key)) {
+    const fallback = store.colorBackground ?? store.colorSurface ?? 0xffffffff;
+    if (typeof fallback === 'number') return fallback >>> 0;
+  }
+  if (/text/i.test(key)) {
+    const fallback = store.textColorPrimary ?? 0xff000000;
+    if (typeof fallback === 'number') return fallback >>> 0;
+  }
+  return undefined;
+}
+
+function themedStyledValue(vm, raw) {
+  let id = 0;
+  if (typeof raw === 'number') id = raw >>> 0;
+  else if (raw && typeof raw === 'object' && typeof raw.reference === 'number') id = raw.reference >>> 0;
+  if (!id) return raw;
+  const table = vm.resources?.table;
+  const entry = table?.getEntry?.(id);
+  if (entry && entry.typeName !== 'attr') return raw;
+  const key = entry?.key || frameworkColorAttrKey(id);
+  if (!key) return raw;
+  const resolved = resolveThemeColorForKey(vm, key);
+  if (resolved !== undefined) return resolved;
+  return raw;
 }
 
 function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyleAttr = 0) {
@@ -6647,13 +7080,13 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
       continue;
     }
     if (styleAttributes && styleAttributes.has(id)) {
-      const raw = styleAttributes.get(id);
+      const raw = themedStyledValue(vm, styleAttributes.get(id));
       result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
       present.add(id);
       continue;
     }
     if (defStyleAttributes && defStyleAttributes.has(id)) {
-      const raw = defStyleAttributes.get(id);
+      const raw = themedStyledValue(vm, defStyleAttributes.get(id));
       result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
       present.add(id);
       continue;
@@ -6688,6 +7121,19 @@ function lookupStyleAttributeId(table, styleAttributes, key) {
     if (entry?.key === key) return attrId >>> 0;
   }
   return 0;
+}
+
+function wrapColorDrawable(vm, color) {
+  const value = color >>> 0;
+  if (!vm?.allocateRawObject) return { color: value, type: 'color' };
+  const object = vm.allocateRawObject('Landroid/graphics/drawable/ColorDrawable;');
+  const peer = vm.registry?.getPeer
+    ? vm.registry.getPeer(object, 'Landroid/graphics/drawable/ColorDrawable;')
+    : (object.$peer || null);
+  if (peer && typeof peer === 'object') peer.color = value;
+  else object.$peer = { color: value };
+  object.color = value;
+  return object;
 }
 
 function makeTypedArrayPeer(vm, values, present = null) {
@@ -6754,7 +7200,10 @@ function makeTypedArrayPeer(vm, values, present = null) {
     getResourceId: (index, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
-      if (typeof value === 'number') return value >>> 0;
+      if (typeof value === 'number') {
+        const id = value >>> 0;
+        return id >= 0x80000000 ? fallback : id;
+      }
       if (value && typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
       return fallback;
     },
@@ -6801,7 +7250,24 @@ function makeTypedArrayPeer(vm, values, present = null) {
       let resId = 0;
       if (typeof value === 'number') resId = value >>> 0;
       else if (value && typeof value === 'object' && value.reference !== undefined) resId = value.reference >>> 0;
-      return resId ? vm.resources.getDrawable(resId) : null;
+      if (!resId) return null;
+      const table = vm.resources?.table;
+      const entry = table?.getEntry?.(resId);
+      if (!entry) {
+        const frameworkKey = frameworkColorAttrKey(resId);
+        if (frameworkKey) {
+          const themed = resolveThemeColorForKey(vm, frameworkKey);
+          if (themed !== undefined) return wrapColorDrawable(vm, themed);
+        }
+        return resId >= 0x80000000 ? wrapColorDrawable(vm, resId) : null;
+      }
+      if (entry.typeName === 'attr') {
+        const themed = vm.resources?.resolveThemedAttr?.(resId);
+        if (typeof themed === 'number') return wrapColorDrawable(vm, themed);
+      }
+      const drawable = vm.resources.getDrawable(resId);
+      if (drawable && drawable.type === 'color') return wrapColorDrawable(vm, drawable.color);
+      return drawable;
     },
     getString: (index) => {
       if (!isPresent(index)) return null;

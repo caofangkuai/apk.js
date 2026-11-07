@@ -48,12 +48,64 @@ export function createCanvasAdapter(ctx, screen) {
       ctx.save();
       applyPaintRaw(ctx, paint);
       ctx.beginPath();
-      let cx = 0, cy = 0, sx = 0, sy = 0;
+      let cx = 0, cy = 0, sx = 0, sy = 0, hasPoint = false;
       for (const cmd of commands) {
-        if (cmd.type === 'moveTo') { cx = sx = cmd.x; cy = sy = cmd.y; ctx.moveTo(cx, cy); }
-        else if (cmd.type === 'lineTo') { cx = cmd.x; cy = cmd.y; ctx.lineTo(cx, cy); }
-        else if (cmd.type === 'rLineTo') { cx += cmd.x; cy += cmd.y; ctx.lineTo(cx, cy); }
-        else if (cmd.type === 'close') { ctx.closePath(); cx = sx; cy = sy; }
+        const type = cmd.type;
+        if (type === 'moveTo') {
+          cx = Number(cmd.x) || 0; cy = Number(cmd.y) || 0;
+          sx = cx; sy = cy; hasPoint = true;
+          ctx.moveTo(cx, cy);
+        } else if (type === 'lineTo') {
+          cx = Number(cmd.x) || 0; cy = Number(cmd.y) || 0;
+          hasPoint = true;
+          ctx.lineTo(cx, cy);
+        } else if (type === 'rLineTo') {
+          cx += Number(cmd.dx) || 0; cy += Number(cmd.dy) || 0;
+          hasPoint = true;
+          ctx.lineTo(cx, cy);
+        } else if (type === 'rMoveTo') {
+          cx += Number(cmd.dx) || 0; cy += Number(cmd.dy) || 0;
+          sx = cx; sy = cy; hasPoint = true;
+          ctx.moveTo(cx, cy);
+        } else if (type === 'quadTo') {
+          const x1 = Number(cmd.x1) || 0, y1 = Number(cmd.y1) || 0;
+          cx = Number(cmd.x2) || 0; cy = Number(cmd.y2) || 0;
+          hasPoint = true;
+          ctx.quadraticCurveTo(x1, y1, cx, cy);
+        } else if (type === 'rQuadTo') {
+          const x1 = cx + (Number(cmd.dx1) || 0), y1 = cy + (Number(cmd.dy1) || 0);
+          cx += Number(cmd.dx2) || 0; cy += Number(cmd.dy2) || 0;
+          hasPoint = true;
+          ctx.quadraticCurveTo(x1, y1, cx, cy);
+        } else if (type === 'cubicTo') {
+          const x1 = Number(cmd.x1) || 0, y1 = Number(cmd.y1) || 0;
+          const x2 = Number(cmd.x2) || 0, y2 = Number(cmd.y2) || 0;
+          cx = Number(cmd.x3) || 0; cy = Number(cmd.y3) || 0;
+          hasPoint = true;
+          ctx.bezierCurveTo(x1, y1, x2, y2, cx, cy);
+        } else if (type === 'rCubicTo') {
+          const x1 = cx + (Number(cmd.dx1) || 0), y1 = cy + (Number(cmd.dy1) || 0);
+          const x2 = cx + (Number(cmd.dx2) || 0), y2 = cy + (Number(cmd.dy2) || 0);
+          cx += Number(cmd.dx3) || 0; cy += Number(cmd.dy3) || 0;
+          hasPoint = true;
+          ctx.bezierCurveTo(x1, y1, x2, y2, cx, cy);
+        } else if (type === 'arcTo') {
+          const left = Number(cmd.left) || 0, top = Number(cmd.top) || 0;
+          const right = Number(cmd.right) || 0, bottom = Number(cmd.bottom) || 0;
+          const acx = (left + right) / 2, acy = (top + bottom) / 2;
+          const rx = (right - left) / 2, ry = (bottom - top) / 2;
+          const start = ((Number(cmd.startAngle) || 0) * Math.PI) / 180;
+          const end = start + ((Number(cmd.sweepAngle) || 0) * Math.PI) / 180;
+          const startX = acx + rx * Math.cos(start), startY = acy + ry * Math.sin(start);
+          if (cmd.forceMoveTo || !hasPoint) ctx.moveTo(startX, startY);
+          else ctx.lineTo(startX, startY);
+          if (typeof ctx.ellipse === 'function') ctx.ellipse(acx, acy, Math.abs(rx), Math.abs(ry), 0, start, end, end < start);
+          else ctx.arc(acx, acy, Math.abs(rx), start, end, end < start);
+          cx = acx + rx * Math.cos(end); cy = acy + ry * Math.sin(end);
+          hasPoint = true;
+        } else if (type === 'close') {
+          ctx.closePath(); cx = sx; cy = sy;
+        }
       }
       if (paint?.style === 'stroke') ctx.stroke();
       else { ctx.fill(); if (paint?.style === 'fillAndStroke') ctx.stroke(); }

@@ -3664,6 +3664,23 @@ JAVA_CORE_CLASSES['Landroid/content/res/ColorStateList;'] = nativeDef('Landroid/
     'isStateful()Z': (self) => (self.states || []).some((s) => (s?.$data || s || []).length > 0),
     'withAlpha(I)Landroid/content/res/ColorStateList;': (self) => self,
   },
+  staticMethods: {
+    'valueOf(I)Landroid/content/res/ColorStateList;': (self, [color], vm) => {
+      const value = toInt(color) >>> 0;
+      const existing = vm?._colorStateListCache?.get?.(value);
+      if (existing) return existing;
+      const object = vm.allocateRawObject('Landroid/content/res/ColorStateList;');
+      const peer = vm.registry.getPeer(object, 'Landroid/content/res/ColorStateList;');
+      if (peer) {
+        peer.states = [[]];
+        peer.colors = [value];
+      }
+      object.color = value;
+      if (!vm._colorStateListCache) vm._colorStateListCache = new Map();
+      vm._colorStateListCache.set(value, object);
+      return object;
+    },
+  },
 });
 
 JAVA_CORE_CLASSES['Landroid/util/SparseArray;'] = nativeDef('Landroid/util/SparseArray;', {

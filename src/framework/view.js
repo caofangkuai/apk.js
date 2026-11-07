@@ -1312,6 +1312,7 @@ export class View {
   drawBackground(canvas) {
     const bg = this.background;
     if (!bg) return;
+    if (this.drawDexBackground(canvas, bg)) return;
     if (bg.type === 'color') {
       const color = this.backgroundTint !== null ? this.backgroundTint : bg.color;
       canvas.context.save();
@@ -1353,6 +1354,59 @@ export class View {
       if (peerDrawable.color !== undefined || peerDrawable.cornerRadii || peerDrawable.cornerRadius) {
         drawPeerDrawable(canvas, peerDrawable, this);
       }
+    }
+  }
+
+  drawDexBackground(canvas, bg) {
+    const vm = bg?.$vm || this.vm || this.$vm;
+    if (!vm || typeof vm.findVirtual !== 'function') return false;
+    const descriptor = bg.$descriptor || bg.$dexClass?.descriptor || bg.$runtimeClass?.descriptor;
+    if (!descriptor || this.$drawingDexBackground) return false;
+    let drawRes = null;
+    try {
+      drawRes = vm.findVirtual(descriptor, 'draw', '(Landroid/graphics/Canvas;)V');
+    } catch (_) {
+      return false;
+    }
+    if (!drawRes || drawRes.kind !== 'dex') return false;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    if (width <= 0 || height <= 0) return false;
+    this.$drawingDexBackground = true;
+    try {
+      let boundsRes = null;
+      try {
+        boundsRes = vm.findVirtual(descriptor, 'setBounds', '(IIII)V');
+      } catch (_) {
+        boundsRes = null;
+      }
+      if (boundsRes && boundsRes.kind) {
+        const boundsProto = boundsRes.method?.proto || {
+          descriptor: '(IIII)V',
+          parameters: ['I', 'I', 'I', 'I'],
+          returnType: 'V',
+        };
+        vm.invoke(
+          { classDesc: descriptor, name: 'setBounds', proto: boundsProto },
+          bg,
+          [0, 0, width, height],
+          'virtual',
+        );
+      } else if (typeof vm.registry?.getPeer === 'function') {
+        const peer = vm.registry.getPeer(bg);
+        if (peer && typeof peer === 'object') peer.bounds = { left: 0, top: 0, right: width, bottom: height };
+      }
+      vm.invoke(
+        { classDesc: descriptor, name: 'draw', proto: drawRes.method.proto },
+        bg,
+        [this.canvasObject(canvas)],
+        'virtual',
+      );
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      this.$drawingDexBackground = false;
     }
   }
 
