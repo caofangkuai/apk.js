@@ -1717,6 +1717,37 @@ export class View {
     }
     if (this.$jsTouchIntercepted) {
       const interceptedHandled = this.onTouchEvent(motionEvent);
+      if (action === 'down') {
+        const hit = this.findTouchTarget(hostEvent.x, hostEvent.y);
+        this.$interceptFallbackChild = null;
+        this.$interceptFallbackOffset = null;
+        this.$interceptFallbackStart = { x: hostEvent.x, y: hostEvent.y };
+        let target = hit?.view || null;
+        let lx = hit?.x ?? 0;
+        let ly = hit?.y ?? 0;
+        while (target && target !== this) {
+          const handled = target.dispatchTouchEvent({ ...event, x: lx, y: ly, rawX: lx, rawY: ly });
+          if (handled) {
+            this.$interceptFallbackChild = target;
+            this.$interceptFallbackOffset = { x: hostEvent.x - lx, y: hostEvent.y - ly };
+            break;
+          }
+          lx += target.left + (target.translationX || 0);
+          ly += target.top + (target.translationY || 0);
+          target = target.parent;
+        }
+      } else if (this.$interceptFallbackChild) {
+        const start = this.$interceptFallbackStart || { x: hostEvent.x, y: hostEvent.y };
+        const moved = Math.hypot(hostEvent.x - start.x, hostEvent.y - start.y) > 20;
+        const offset = this.$interceptFallbackOffset || { x: 0, y: 0 };
+        if (moved) {
+          this.$interceptFallbackChild.dispatchTouchEvent({ ...event, action: 'cancel', x: hostEvent.x - offset.x, y: hostEvent.y - offset.y, rawX: hostEvent.x - offset.x, rawY: hostEvent.y - offset.y });
+          this.$interceptFallbackChild = null;
+        } else {
+          this.$interceptFallbackChild.dispatchTouchEvent({ ...event, x: hostEvent.x - offset.x, y: hostEvent.y - offset.y, rawX: hostEvent.x - offset.x, rawY: hostEvent.y - offset.y });
+          if (action === 'up' || action === 'cancel') this.$interceptFallbackChild = null;
+        }
+      }
       if (interceptedHandled) {
         if (action === 'up' || action === 'cancel') this.$jsTouchIntercepted = false;
         return true;
@@ -1738,6 +1769,24 @@ export class View {
     }
     if (this.onTouchEvent(motionEvent)) return true;
     return false;
+  }
+
+  findTouchTarget(x, y) {
+    for (let i = (this.children?.length || 0) - 1; i >= 0; i--) {
+      const child = this.children[i];
+      if (!child || child.visibility !== VISIBILITY.VISIBLE) continue;
+      const left = child.left + (child.translationX || 0);
+      const top = child.top + (child.translationY || 0);
+      if (x >= left && x < left + child.getWidth() && y >= top && y < top + child.getHeight()) {
+        const inner = child.findTouchTarget ? child.findTouchTarget(x - left, y - top) : null;
+        return inner || { view: child, x: x - left, y: y - top };
+      }
+    }
+    return null;
+  }
+
+  findTouchChild(x, y) {
+    return this.findTouchTarget(x, y)?.view || null;
   }
 
   onTouchEvent(event) {

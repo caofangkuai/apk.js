@@ -6710,6 +6710,7 @@ function viewMethods() {
     'isEnabled()Z': (self) => self.view?.isEnabled() ?? true,
     'setClickable(Z)V': (self, [clickable]) => self.view?.setClickable(!!clickable),
     'setOnClickListener(Landroid/view/View$OnClickListener;)V': (self, [listener], vm) => {
+
       if (!self.view) return;
       self.view.setOnClickListener(
         listener
