@@ -57,10 +57,25 @@ export class FrameLayout extends ViewGroup {
     maxHeight += this.paddingTop + this.paddingBottom;
     maxWidth = Math.max(maxWidth, this.minWidth);
     maxHeight = Math.max(maxHeight, this.minHeight);
-    this.setMeasuredDimension(
-      resolveSizeSafe(maxWidth, widthSpec),
-      resolveSizeSafe(maxHeight, heightSpec)
-    );
+    const finalWidth = resolveSizeSafe(maxWidth, widthSpec);
+    const finalHeight = resolveSizeSafe(maxHeight, heightSpec);
+    for (let i = 0; i < count; i++) {
+      const child = this.children[i];
+      if (isGone(child) && !this.measureAllChildren) continue;
+      const lp = child.layoutParams || this.generateDefaultLayoutParams();
+      const marginsH = (lp.leftMargin || 0) + (lp.rightMargin || 0);
+      const marginsV = (lp.topMargin || 0) + (lp.bottomMargin || 0);
+      const needW = lp.width === -1;
+      const needH = lp.height === -1;
+      if (!needW && !needH) continue;
+      const targetW = Math.max(0, finalWidth - this.paddingLeft - this.paddingRight - marginsH);
+      const targetH = Math.max(0, finalHeight - this.paddingTop - this.paddingBottom - marginsV);
+      child.measure(
+        MeasureSpec.makeMeasureSpec(needW ? targetW : child.getMeasuredWidth(), needW ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST),
+        MeasureSpec.makeMeasureSpec(needH ? targetH : child.getMeasuredHeight(), needH ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST)
+      );
+    }
+    this.setMeasuredDimension(finalWidth, finalHeight);
   }
 
   onLayout(changed, left, top, right, bottom) {
@@ -240,9 +255,7 @@ export class LinearLayout extends ViewGroup {
     maxWidth += this.paddingLeft + this.paddingRight;
 
     const heightSize = MeasureSpec.getSize(heightSpec);
-    const remaining = heightMode === MeasureSpec.EXACTLY || heightMode === MeasureSpec.AT_MOST
-      ? heightSize - totalHeight
-      : 0;
+    const remaining = heightMode === MeasureSpec.EXACTLY ? heightSize - totalHeight : 0;
     let remainingExcess = remaining;
     let remainingWeightSum = this.weightSum > 0 ? this.weightSum : totalWeight;
 
@@ -311,9 +324,7 @@ export class LinearLayout extends ViewGroup {
     maxHeight += this.paddingTop + this.paddingBottom;
 
     const widthSize = MeasureSpec.getSize(widthSpec);
-    const remaining = widthMode === MeasureSpec.EXACTLY || widthMode === MeasureSpec.AT_MOST
-      ? widthSize - totalWidth
-      : 0;
+    const remaining = widthMode === MeasureSpec.EXACTLY ? widthSize - totalWidth : 0;
     let remainingExcess = remaining;
     let remainingWeightSum = this.weightSum > 0 ? this.weightSum : totalWeight;
 
@@ -341,9 +352,19 @@ export class LinearLayout extends ViewGroup {
       }
     }
 
-    this.totalLength = totalWidth;
+    const finalWidth = resolveSizeSafe(totalWidth, widthSpec);
+    const finalHeight = resolveSizeSafe(maxHeight, heightSpec);
+    if (heightMode !== MeasureSpec.UNSPECIFIED) {
+      const innerHeight = Math.max(0, (heightMode === MeasureSpec.EXACTLY ? MeasureSpec.getSize(heightSpec) : finalHeight) - this.paddingTop - this.paddingBottom);
+      for (const entry of measured) {
+        if (!entry || entry.lp.height !== -1) continue;
+        const targetHeight = Math.max(0, innerHeight - entry.marginsV);
+        entry.child.measure(MeasureSpec.makeMeasureSpec(entry.child.getMeasuredWidth(), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(targetHeight, MeasureSpec.EXACTLY));
+      }
+    }
+    this.totalLength = finalWidth;
     maxHeight = Math.max(maxHeight, this.minHeight);
-    totalWidth = Math.max(totalWidth, this.minWidth);
+    totalWidth = Math.max(finalWidth, this.minWidth);
     this.setMeasuredDimension(resolveSizeSafe(totalWidth, widthSpec), resolveSizeSafe(maxHeight, heightSpec));
   }
 
@@ -397,6 +418,19 @@ export class LinearLayout extends ViewGroup {
     const height = bottom - top;
     let childLeft = this.paddingLeft;
     const count = this.children.length;
+    let maxAscent = -1;
+    let maxDescent = -1;
+    const baselineAligned = this.baselineAligned !== false;
+    if (baselineAligned) {
+      for (let i = 0; i < count; i++) {
+        const child = this.children[i];
+        if (isGone(child)) continue;
+        const baseline = typeof child.getBaseline === 'function' ? child.getBaseline() : -1;
+        if (baseline < 0) continue;
+        maxAscent = Math.max(maxAscent, baseline);
+        maxDescent = Math.max(maxDescent, child.getMeasuredHeight() - baseline);
+      }
+    }
     for (let i = 0; i < count; i++) {
       const child = this.children[i];
       if (isGone(child)) continue;
@@ -405,7 +439,10 @@ export class LinearLayout extends ViewGroup {
       const childHeight = child.getMeasuredHeight();
       let childTop = this.paddingTop + (lp.topMargin || 0);
       const gravity = resolveGravity(this.gravity, lp.gravity);
-      if ((gravity & 0x70) === 0x10) {
+      const baseline = baselineAligned && maxAscent >= 0 && typeof child.getBaseline === 'function' ? child.getBaseline() : -1;
+      if (baseline >= 0 && (gravity & 0x70) !== 0x10 && (gravity & 0x70) !== 0x50) {
+        childTop = this.paddingTop + (maxAscent - baseline) + (lp.topMargin || 0);
+      } else if ((gravity & 0x70) === 0x10) {
         childTop = this.paddingTop + Math.floor((height - this.paddingTop - this.paddingBottom - childHeight) / 2) + (lp.topMargin || 0) - (lp.bottomMargin || 0);
       } else if ((gravity & 0x70) === 0x50) {
         childTop = height - this.paddingBottom - childHeight - (lp.bottomMargin || 0);
@@ -1196,23 +1233,27 @@ export class ListView extends ViewGroup {
 
   ensureItems() {
     const count = this.adapterCount();
-    if (count === this.$itemCount && this.$items.length === count) return;
+    const version = this.adapter?.$dirty | 0;
+    if (count === this.$itemCount && this.$items.length === count && version === (this.$adapterVersion | 0)) return;
+    const previous = this.$items || [];
     this.$items = [];
     this.children = [];
     this.$itemCount = count;
+    this.$adapterVersion = version;
     const vm = this.$vm || this.vm;
     if (!vm || !this.adapter) return;
     const parent = this.$javaObject || null;
     for (let i = 0; i < count; i += 1) {
       let item = null;
+      const convertView = previous[i]?.$javaObject || null;
       try {
         const object = vm.invokeByName(
           'getView',
           '(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;',
           this.adapter,
-          [i, null, parent],
+          [i, convertView, parent],
         );
-        item = object?.$view || null;
+        item = object?.$view || object?.$peer?.view || previous[i] || null;
       } catch {
         item = null;
       }
@@ -1221,6 +1262,24 @@ export class ListView extends ViewGroup {
       this.$items.push(item);
       this.children.push(item);
     }
+  }
+
+  firstVisiblePosition() {
+    const scrollY = this.scrollY | 0;
+    for (let i = 0; i < this.$items.length; i += 1) {
+      const item = this.$items[i];
+      if (item.bottom > scrollY) return i;
+    }
+    return 0;
+  }
+
+  lastVisiblePosition() {
+    const bottom = (this.scrollY | 0) + this.getHeight();
+    for (let i = this.$items.length - 1; i >= 0; i -= 1) {
+      const item = this.$items[i];
+      if (item.top < bottom) return i;
+    }
+    return Math.max(0, this.$items.length - 1);
   }
 
   onMeasure(widthSpec, heightSpec) {

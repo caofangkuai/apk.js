@@ -55,16 +55,13 @@ export class DexInterpreter {
     this.currentMethod = method;
     let pc = 0;
     let _lastPc = -1, _samePc = 0;
-    const _pcs = [];
     for (;;) {
       if (pc >= insns.length) return undefined;
-      if (DBG.npe && method.name === 'h' && method.classDesc === 'Lf7/a;') { _pcs.push(pc); if (_pcs.length > 64) { const s = _pcs.join(','); const half = s.slice(0, Math.floor(s.length/2)); if (s.slice(half.length+1) === half) console.error('PC-CYCLE', s); _pcs.length = 0; } }
       if (pc === _lastPc) { if (++_samePc > 20000) { console.error('PC-STUCK at', method.classDesc + '.' + method.name, 'pc', pc, 'op=0x' + (insns[pc]&0xff).toString(16), 'regs', registers.map((r,i)=>'v'+i+'='+(r===null?'n':typeof r==='object'?'obj':r)).join(',')); throw new Error('PC-STUCK'); } } else { _lastPc = pc; _samePc = 0; }
       const unit = insns[pc];
       const op = unit & 0xff;
       this.stats.instructions++;
       this.vm.currentPc = pc;
-      if (DBG.npe && method.classDesc === 'Lpc/a;' && (method.name === '<clinit>' || method.name === 'g')) console.error('EXEC', method.name, 'pc=' + pc, 'op=0x' + op.toString(16), method.name==='g' ? 'v0='+registers[0]+' v1='+(registers[1]===null?'null':typeof registers[1]) : '');
       if (this.trace) this.trace(pc, op, method, registers);
 
 
@@ -248,8 +245,6 @@ export class DexInterpreter {
                 console.error('ARRAY-LEN', method.classDesc + '.' + method.name, 'pc=', pc, 'reg', vB, 'stack=', (this.vm.methodStack||[]).slice(-8).join(' <- '));
                 console.error('  INSN0..4:', [0,1,2,3,4].map(i=>'0x'+((insns[i]||0)>>>0).toString(16)).join(' '), 'regs', registers.map((r,i)=>'v'+i+'='+(r===null?'n':typeof r)).join(','));
                 console.error('   stack:', (this.vm.methodStack||[]).slice(-10).join(' <- '));
-                const _rc = this.vm.registry.resolve('Lpc/a;');
-                for (const [k,v] of _rc.staticValues) console.error('   a.' + k, '=>', v === null ? 'null' : (v === undefined ? 'undef' : (v?.$data ? 'array['+v.$data.length+']' : this.vm.registry.classNameOf(v))));
               }
               this.vm.throwException('Ljava/lang/NullPointerException;', 'array-length 遇到空引用');
             }
@@ -312,7 +307,6 @@ export class DexInterpreter {
           case 0x27: {
             const value = registers[unit >>> 8];
             if (value === null) this.vm.throwException('Ljava/lang/NullPointerException;', 'throw 空引用');
-            if (process.env.DBG_THROW) { const c = this.vm?.registry?.classNameOf(value); if (c && /IllegalState/.test(c)) console.error('ISE-THROW-SITE', method.classDesc, method.name, 'pc=' + pc, 'msg=' + value?.$exceptionMessage, 'peermsg=' + (value && value.$peer && value.$peer.message), 'objkeys=' + (value && typeof value==='object' ? Object.keys(value).join(',') : typeof value)); }
             throw new VMRuntimeSignal(value);
           }
           case 0x28: {
@@ -421,8 +415,6 @@ export class DexInterpreter {
             const vC = (insns[pc + 1] >> 8) & 0xff;
             const array = registers[vB];
             const index = toInt(registers[vC]);
-            if (process.env.DBG_INV && (this.vm.methodStack||[]).slice(-1)[0] === 'kotlin.jvm.internal.h.i') console.error('HI-AGET idx=' + index + ' arrlen=' + (array && array.$data ? array.$data.length : 'NULL') + ' className=' + (array && array.$data && array.$data[index] ? array.$data[index].$peer && array.$data[index].$peer.className : '(none)'));
-            if (process.env.DBG_INV && (this.vm.methodStack||[]).slice(-1)[0] === 'h0.b.b') console.error('AGET this.f=' + JSON.stringify((registers[0] && registers[0].fields && registers[0].fields[0x1ea9]) || Object.keys(registers[0]||{})) + ' arr=' + (array===null?'NULL':String(array.$type)) + ' idx=' + index + ' regs=' + JSON.stringify(Object.keys(registers[0]||{})));
             this.checkArrayBounds(array, index, 'aget');
             registers[vA] = array.$data[index];
             pc += 2;
@@ -461,11 +453,6 @@ export class DexInterpreter {
           }
           case 0x67: case 0x68: case 0x69: case 0x6a: case 0x6b: case 0x6c: case 0x6d: {
             const vA = unit >>> 8;
-            if (DBG.npe && method.name === '<clinit>' && method.classDesc === 'Lpc/a;') {
-              const _f = method.dex.fields[insns[pc + 1]];
-              const _v = registers[vA];
-              console.error('SPUT pc=' + pc, 'field=' + (typeof _f.name === 'string' ? _f.name : method.dex.strings[_f.name]), 'vA=v' + vA, 'val=' + (_v === null ? 'null' : _v === undefined ? 'undef' : (Array.isArray(_v) || _v?.$data ? 'array[' + (_v.$data?.length ?? _v.length) + ']' : typeof _v)));
-            }
             this.vm.setStaticField(method.dex.fields[insns[pc + 1]], registers[vA]);
             pc += 2;
             break;
@@ -647,7 +634,7 @@ export class DexInterpreter {
   }
 
   checkArrayBounds(array, index, op) {
-    if (!isJavaArray(array)) { if (process.env.DBG_INV) console.error('AGET-BAD op=' + op + ' type=' + (array === null ? 'NULL' : typeof array) + ' dex=' + (array && array.$dexClass && array.$dexClass.descriptor) + ' stack=' + (this.vm.methodStack||[]).slice(-6).join(' <- ')); this.vm.throwException('Ljava/lang/NullPointerException;', `${op} 遇到空数组`); }
+    if (!isJavaArray(array)) { this.vm.throwException('Ljava/lang/NullPointerException;', `${op} 遇到空数组`); }
     if (index < 0 || index >= array.$data.length) {
       this.vm.throwException('Ljava/lang/ArrayIndexOutOfBoundsException;', `index ${index}, length ${array.$data.length}`);
     }

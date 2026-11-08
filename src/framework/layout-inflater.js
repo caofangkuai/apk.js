@@ -259,10 +259,6 @@ export function coerceLayoutParams(params) {
       if (key.endsWith(`->${axis}:F`) && typeof value === 'number') out[axis] = value;
     }
   }
-  if (params.$dexClass?.descriptor?.endsWith('MarginsLayoutParams$LayoutParams;')) {
-    if (out.width === undefined) out.width = -2;
-    if (out.height === undefined) out.height = -2;
-  }
   if (out.width === undefined) out.width = -2;
   if (out.height === undefined) out.height = -2;
   return out;
@@ -395,7 +391,6 @@ export class LayoutInflater {
 
   createView(node) {
     const tag = node.name;
-    if (globalThis.__DBG_CV && /DrawerLayout|AppBarLayout|CoordinatorLayout|Toolbar|TabLayout/.test(tag)) console.error('CV tag=' + tag);
     const fullName = tag.includes('.') ? tag : `android.widget.${tag}`;
     if (fullName === 'android.view.ViewStub' || fullName === 'android.widget.ViewStub') {
       const stub = new ViewStub(this.context);
@@ -724,7 +719,9 @@ export class LayoutInflater {
         if (typeof styleId === 'object' && styleId.reference !== undefined) styleId = styleId.reference;
         const key = typeof styleId === 'number' ? resources.table?.getEntry?.(styleId >>> 0)?.key : null;
         const styleName = String(styleAttr.value);
-        if ((key && /horizontal/i.test(key)) || /horizontal/i.test(styleName)) {
+        const horizontalStyle = /(?:^|\.)ProgressBar\.Horizontal$/.test(key || '')
+          || /(?:^|\.)ProgressBar\.Horizontal$/.test(styleName);
+        if (horizontalStyle) {
           view.setStyleHorizontal?.(true);
         }
       }

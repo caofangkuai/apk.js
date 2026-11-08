@@ -168,7 +168,7 @@ export class EmulatorEngine {
       width: this.options.width || canvas.clientWidth || 360,
       height: this.options.height || canvas.clientHeight || 640,
       dpr: this.options.dpr,
-      style: this.options.style || 'material',
+      style: this.options.style || 'default',
     });
     if (this.vm) this.vm.screen = this.screen;
     return this.screen;

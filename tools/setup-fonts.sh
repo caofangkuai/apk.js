@@ -9,7 +9,11 @@ URL="https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/N
 
 if [ ! -f "$FONT_FILE" ]; then
   mkdir -p "$FONT_DIR"
-  curl -L --fail --retry 2 -o "$FONT_FILE" "$URL"
+  if ! curl -L --fail --retry 2 -o "$FONT_FILE" "$URL"; then
+    echo "GitHub 下载失败，改用 jsDelivr 镜像…" >&2
+    curl -L --fail --retry 2 -o "$FONT_FILE" \
+      "https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+  fi
 fi
 
 if [ ! -f /etc/fonts/fonts.conf ]; then

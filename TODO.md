@@ -18,8 +18,8 @@
 
 ### Framework
 
-- [ ] TabLayout 选中 indicator 与 MaterialShapeDrawable 三段渐变阴影
-- [ ] `NinePatch` 解码、`AnimatedVectorDrawable` 属性动画
+- [ ] MaterialShapeDrawable 三段渐变阴影
+- [ ] `AnimatedVectorDrawable` 属性动画
 - [ ] `ListView` 回收与局部布局，RecyclerView 回归样例
 - [ ] elevation overlay 与深色主题
 - [ ] `PopupWindow`、`AlertDialog` 的布局与绘制
@@ -49,6 +49,15 @@
 
 ## 已完成
 
+- [x] DEX 覆写 `draw(Canvas)` 支持与 View canvas 解包
+- [x] Paint Shader / LinearGradient / RadialGradient / SweepGradient host
+- [x] NinePatch `npTc` 解析与九宫格绘制
+- [x] 资源 Drawable intrinsic 尺寸与 colorFilter 着色
+- [x] 删除混淆类 host（Lf/a/*、Lk7/t;）与三方 LayoutParams 特判
+- [x] 清理类名/混淆名调试探针与 process.env 直读，删除死调试开关
+- [x] VIRTUAL_FS 硬件指纹改为 navigator 推导
+- [x] 修复 mask/id、ProgressBar 横向、主题颜色等启发式质量风险
+- [x] 新增 `npm run check:refs` 并接入 test:all 与 CI
 - [x] CJK 字体安装脚本 `tools/setup-fonts.sh`
 - [x] EGL10/GLES/GLSurfaceView host 与 Thread 子类 `start()`，DeviceInfoHW 可启动
 - [x] 资源 Drawable 包装成 Java Drawable，修复 TabLayout `getBounds()` NPE

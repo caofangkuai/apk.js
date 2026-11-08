@@ -107,6 +107,38 @@ export class JavaVM {
     return object;
   }
 
+  getSystemServiceByClass(clazz) {
+    const descriptor = clazz?.$descriptor || clazz?.$peer?.$descriptor || '';
+    const map = {
+      'Landroid/os/BatteryManager;': 'battery',
+      'Landroid/hardware/usb/UsbManager;': 'usb',
+      'Landroid/view/LayoutInflater;': 'layout_inflater',
+      'Landroid/view/WindowManager;': 'window',
+      'Landroid/view/inputmethod/InputMethodManager;': 'input_method',
+      'Landroid/app/NotificationManager;': 'notification',
+      'Landroid/content/ClipboardManager;': 'clipboard',
+      'Landroid/app/ActivityManager;': 'activity',
+      'Landroid/net/ConnectivityManager;': 'connectivity',
+      'Landroid/net/wifi/WifiManager;': 'wifi',
+      'Landroid/media/AudioManager;': 'audio',
+      'Landroid/os/Vibrator;': 'vibrator',
+      'Landroid/os/PowerManager;': 'power',
+      'Landroid/app/KeyguardManager;': 'keyguard',
+      'Landroid/telephony/TelephonyManager;': 'telephony',
+      'Landroid/view/accessibility/AccessibilityManager;': 'accessibility',
+      'Landroid/app/DownloadManager;': 'download',
+      'Landroid/app/UiModeManager;': 'uimode',
+      'Landroid/hardware/display/DisplayManager;': 'display',
+      'Landroid/hardware/SensorManager;': 'sensor',
+      'Landroid/location/LocationManager;': 'location',
+      'Landroid/hardware/camera2/CameraManager;': 'camera',
+      'Landroid/bluetooth/BluetoothManager;': 'bluetooth',
+      'Landroid/os/storage/StorageManager;': 'storage',
+    };
+    const name = map[descriptor];
+    return name ? this.getSystemService(name) : null;
+  }
+
   getSystemService(name) {
     const key = String(name ?? '');
     if (!this.$systemServices) this.$systemServices = new Map();
@@ -135,6 +167,8 @@ export class JavaVM {
       'camera': 'Landroid/hardware/camera2/CameraManager;',
       'bluetooth': 'Landroid/bluetooth/BluetoothManager;',
       'storage': 'Landroid/os/storage/StorageManager;',
+      'battery': 'Landroid/os/BatteryManager;',
+      'usb': 'Landroid/hardware/usb/UsbManager;',
     };
     const descriptor = descriptorByService[key];
     if (!descriptor) {
@@ -208,11 +242,9 @@ export class JavaVM {
   }
 
   getField(object, field) {
-    if (globalThis.__GFDBG && field && field.name === 'm' && /RecyclerView/.test(String(field.classDesc))) console.error('GFDBG name=' + field.name + ' type=' + field.type + ' cd=' + field.classDesc + ' keys=' + (object && object.$fields ? object.$fields.size : 'x'));
     if (object === null || object === undefined) {
       if (DBG.npe && field.name === 'layoutInDisplayCutoutMode') console.error('IPUT-NULL obj=' + (obj === undefined ? 'undef' : obj === null ? 'null' : '?') + ' from ' + (this.methodStack||[]).slice(-5).join(' <- '));
       if (DBG.npe) console.error('NPE_GETFIELD', field.name, 'owner=' + field.classDesc, 'pc=' + (this.currentPc>>>0).toString(16), 'cur=' + (this.interpreter?.currentMethod ? this.interpreter.currentMethod.classDesc + '.' + this.interpreter.currentMethod.name + (this.interpreter.currentMethod.proto?.descriptor||'') : '?'), (this.methodStack||[]).slice(-6).join(' <- '));
-      if (globalThis.__CFM && field.name === 'b') console.error('NPEB owner=' + field.classDesc + ' type=' + field.type + ' pc=' + (this.currentPc>>>0) + ' cur=' + (this.interpreter?.currentMethod ? this.interpreter.currentMethod.classDesc + '.' + this.interpreter.currentMethod.name + (this.interpreter.currentMethod.proto ? this.interpreter.currentMethod.proto.descriptor : '') : '?'));
       this.throwException('Ljava/lang/NullPointerException;', `读取字段 ${field.name} 时对象为空`);
     }
     if (!isJavaObject(object)) {
@@ -344,7 +376,6 @@ export class JavaVM {
     const rc = this.registry.resolve(field.classDesc);
     this.ensureClassInitialized(rc);
     if (isObjectType(field.type) && typeof value === 'number') value = null;
-    if (this.debugCast && field.classDesc === 'Lpc/a;') console.error('SETSTATIC', field.name, '=>', value === null ? 'null' : (value?.$data ? 'array['+value.$data.length+']' : typeof value), '| stack:', (this.methodStack||[]).slice(-6).join(' <- '));
     rc.staticValues.set(`${field.name}:${field.type}`, value);
   }
 
@@ -552,7 +583,6 @@ export class JavaVM {
   }
 
   resolveMethod(classDescriptor, name, proto, { isStatic = false } = {}) {
-    if (globalThis.__TB && /Toolbar/.test(classDescriptor) && (name === 'setTitle' || name === 'o' || name === 'setSubtitle')) console.error('TBSET ' + classDescriptor + '.' + name + proto);
     const rc = this.registry.resolve(classDescriptor);
     if (!rc) return null;
     if (rc.dexClass) {
@@ -621,9 +651,6 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
-    if (globalThis.__DBG_ARG && ref.name === 'a' && ref.proto && ref.proto.descriptor === '(I)Landroid/view/View;' && String(ref.classDesc).indexOf('appcompat/app') >= 0) {
-      console.error('INV_DELEGATE from=' + (this.methodStack||[]).slice(-2,-1).join('') + ' refCls=' + ref.classDesc + ' argc=' + (args ? args.length : -1));
-    }
     if (globalThis.__DBG_FR && ref.name === 'a' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0 && ref.proto.descriptor.indexOf('ViewGroup') >= 0) {
       console.error('INV_OCV ref=' + ref.classDesc + ' sig=' + ref.proto.descriptor + ' mode=' + mode + ' recv=' + (receiver === null ? 'null' : 'obj'));
     }
@@ -635,7 +662,6 @@ export class JavaVM {
     if (this.invocationCount > 8_000_000) {
       throw new Error('执行指令超限，疑似死循环');
     }
-    if (globalThis.__DBG_MS && ref.name === 'onMeasure' && /TabLayout/.test(ref.classDesc || '')) console.error('INV_OM mode=' + mode + ' ref=' + ref.classDesc + ' cur=' + (currentMethod?.classDesc));
     let resolution = null;
     switch (mode) {
       case 'static':
@@ -645,7 +671,6 @@ export class JavaVM {
         const rc = currentMethod ? this.registry.resolve(currentMethod.classDesc) : null;
         const superDescriptor = rc?.superDescriptor;
         resolution = superDescriptor ? this.findVirtual(superDescriptor, ref.name, ref.proto.descriptor) : null;
-        if (globalThis.__DBG_MS && /TabLayout/.test(currentMethod?.classDesc || '')) console.error('SUPER_RES ' + ref.name + ' cur=' + currentMethod?.classDesc + ' super=' + superDescriptor + ' -> ' + (resolution ? resolution.kind + ':' + (resolution.method?.classDesc || resolution.def?.descriptor) : 'NULL'));
         break;
       }
       case 'direct':
@@ -682,11 +707,6 @@ export class JavaVM {
       this.log('warn', 'vm', `未绑定方法，返回默认值: ${signature}`);
       if (DBG.missing && this.onMissingMethod) this.onMissingMethod(signature, ref, mode, receiver);
       return defaultValueFor(ref.proto.returnType);
-    }
-    if (DBG.gd && ref.name === 'getDrawable' && String(ref.classDesc).includes('ResourceManagerInternal')) {
-      const r = resolution.kind === 'dex' ? this.executeMethod(resolution.method, mode === 'static' ? null : receiver, args) : this.invokeNative(resolution, receiver, args, ref, mode);
-      console.log('GD', ref.proto.descriptor, '->', r === null ? 'NULL' : (r?.$descriptor || typeof r));
-      return r;
     }
     if (debugFlag('DBG_GLP') && ref.name === 'getLayoutParams') { console.error('INV-GLP recvDesc=', this.registry.classNameOf(receiver), 'resKind=', resolution.kind, 'def=', resolution.def?.descriptor, 'methodClass=', resolution.method?.classDesc); }
     if (resolution.kind === 'dex') {

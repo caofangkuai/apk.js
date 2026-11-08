@@ -315,7 +315,7 @@ export class ClassRegistry {
 
   coerceLayoutParams(value, actual, descriptor) {
     if (!value || typeof value !== 'object') return false;
-    if (!actual || !actual.includes('LayoutParams;')) return false;
+    if (!actual || !actual.endsWith('LayoutParams;')) return false;
     if (!descriptor || descriptor.length < 3) return false;
     const targetClass = this.resolve(descriptor);
     if (!targetClass) return false;

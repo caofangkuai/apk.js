@@ -1104,10 +1104,41 @@ export class View {
   measure(widthSpec, heightSpec) {
     measureDepth++;
     try {
-      if (this.measureWithDex(widthSpec, heightSpec)) return;
+      if (this.measureWithDex(widthSpec, heightSpec)) {
+        this.applyMinimumMeasuredSize(widthSpec, heightSpec);
+        return;
+      }
       this.onMeasure(widthSpec, heightSpec);
+      this.applyMinimumMeasuredSize(widthSpec, heightSpec);
     } finally {
       measureDepth--;
+    }
+  }
+
+  applyMinimumMeasuredSize(widthSpec, heightSpec) {
+    const minWidth = Number(this.minWidth) || 0;
+    const minHeight = Number(this.minHeight) || 0;
+    if (minWidth <= 0 && minHeight <= 0) return;
+    const widthMode = widthSpec & 0xc0000000;
+    const heightMode = heightSpec & 0xc0000000;
+    const widthSize = widthSpec & 0x3fffffff;
+    const heightSize = heightSpec & 0x3fffffff;
+    let width = this.measuredWidth;
+    let height = this.measuredHeight;
+    if (minWidth > width) width = widthMode === 0x80000000 ? Math.min(minWidth, widthSize) : (widthMode === 0 ? minWidth : width);
+    if (minHeight > height) height = heightMode === 0x80000000 ? Math.min(minHeight, heightSize) : (heightMode === 0 ? minHeight : height);
+    if (width !== this.measuredWidth || height !== this.measuredHeight) {
+      this.setMeasuredDimension(width, height);
+      for (const child of this.children || []) {
+        const lp = child.layoutParams;
+        if (!lp || lp.height !== -1) continue;
+        const margins = (lp.topMargin || 0) + (lp.bottomMargin || 0);
+        const target = Math.max(0, height - this.paddingTop - this.paddingBottom - margins);
+        child.measure(
+          MeasureSpec.makeMeasureSpec(child.getMeasuredWidth(), MeasureSpec.EXACTLY),
+          MeasureSpec.makeMeasureSpec(target, MeasureSpec.EXACTLY),
+        );
+      }
     }
   }
 
@@ -1127,10 +1158,6 @@ export class View {
 
     if (!resolved || resolved.kind !== 'dex') return false;
     const ref = resolved.method;
-    if (globalThis.__MS4 && /recyclerview/.test(descriptor)) {
-      const sm=(x)=>['U','E','A'][(x>>>30)&3]+':'+(x&0x3fffffff);
-      console.error('MSPEC ' + descriptor + ' w=' + sm(widthSpec) + ' h=' + sm(heightSpec) + ' lpH=' + (this.layoutParams&&this.layoutParams.height));
-    }
     this.$jsMeasureHandled = true;
     try {
       vm.invoke(
@@ -1172,7 +1199,6 @@ export class View {
   }
 
   setMeasuredDimension(width, height) {
-    if (globalThis.__DBG_ARG && /ContentFrameLayout|FitWindows|CoordinatorLayout/.test(this.$descriptor||'')) console.error('SMD', this.$descriptor, 'w=' + width, 'h=' + height);
     const MEASURED_SIZE_MASK = 0x00ffffff;
     this.measuredWidth = width & MEASURED_SIZE_MASK;
     this.measuredHeight = height & MEASURED_SIZE_MASK;
@@ -1257,22 +1283,77 @@ export class View {
     }
   }
 
+  dexDrawOverride() {
+    const vm = this.vm || this.$vm;
+    const descriptor = this.$descriptor;
+    if (!vm || !descriptor || typeof vm.findVirtual !== 'function') return null;
+    try {
+      const resolved = vm.findVirtual(descriptor, 'draw', '(Landroid/graphics/Canvas;)V');
+      return resolved && resolved.kind === 'dex' ? resolved : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   draw(canvas) {
     if (this.visibility !== VISIBILITY.VISIBLE) return;
     this.computeScrollWithDex();
+    if (this.$dexDrawActive) {
+      // 来自 DEX 覆写 draw() 的 super 调用：画布已经定位到本 View，直接走宿主管线。
+      this.$dexDrawSawSuper = true;
+      this.drawElevation(canvas);
+      this.drawBackground(canvas);
+      if (!this.drawWithDex(canvas)) {
+        this.onDraw(canvas);
+        this.dispatchDraw(canvas);
+      }
+      this.drawForeground(canvas);
+      return;
+    }
     const offsetX = this.left;
     const offsetY = this.top;
     canvas.save();
     canvas.translate(offsetX + this.translationX, offsetY + this.translationY);
     const alpha = this.alpha;
     if (alpha < 1) canvas.context.globalAlpha = alpha;
-    this.drawElevation(canvas);
-    this.drawBackground(canvas);
-    if (!this.drawWithDex(canvas)) {
-      this.onDraw(canvas);
-      this.dispatchDraw(canvas);
+
+    const handlePipeline = () => {
+      this.drawElevation(canvas);
+      this.drawBackground(canvas);
+      if (!this.drawWithDex(canvas)) {
+        this.onDraw(canvas);
+        this.dispatchDraw(canvas);
+      }
+      this.drawForeground(canvas);
+    };
+
+    if (this.$dexDrawActive) {
+      this.$dexDrawSawSuper = true;
+      handlePipeline();
+    } else {
+      const dexDraw = this.dexDrawOverride();
+      if (dexDraw) {
+        const vm = this.vm || this.$vm;
+        this.$dexDrawActive = true;
+        this.$dexDrawSawSuper = false;
+        try {
+          vm.invoke(
+            { classDesc: this.$descriptor, name: 'draw', proto: dexDraw.method.proto },
+            this.$javaObject,
+            [this.canvasObject(canvas)],
+            'virtual',
+          );
+        } catch (_) {
+          // 绘制失败时仍保留宿主管线
+        } finally {
+          this.$dexDrawActive = false;
+        }
+        if (!this.$dexDrawSawSuper) handlePipeline();
+      } else {
+        handlePipeline();
+      }
     }
-    this.drawForeground(canvas);
+
     if (alpha < 1) canvas.context.globalAlpha = 1;
     canvas.restore();
   }
@@ -1291,24 +1372,57 @@ export class View {
     if (!outline || outline.empty) return;
     if (outline.alpha <= 0) return;
     const ctx = canvas.context;
-    const left = outline.left;
-    const top = outline.top;
-    const right = outline.right;
-    const bottom = outline.bottom;
     const radius = outline.radius || 0;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.19)';
-    ctx.shadowBlur = Math.max(1, elevation * 2);
-    ctx.shadowOffsetY = Math.max(0, elevation * 0.3);
-    ctx.fillStyle = 'rgba(0,0,0,0.01)';
-    roundedRectPath(ctx, left, top, right - left, bottom - top, radius);
-    ctx.fill();
-    ctx.shadowColor = 'rgba(0,0,0,0.039)';
-    ctx.shadowBlur = Math.max(1, elevation * 3);
-    ctx.shadowOffsetY = 0;
-    roundedRectPath(ctx, left, top, right - left, bottom - top, radius);
-    ctx.fill();
-    ctx.restore();
+    const spotBlur = Math.max(1, elevation * 1.5);
+    const ambientBlur = Math.max(1, elevation * 0.5);
+    const spotOffsetY = Math.max(0, elevation * 0.3);
+    const pad = Math.ceil(spotBlur + spotOffsetY + 2);
+    const surfaceWidth = width + pad * 2;
+    const surfaceHeight = height + pad * 2;
+    let offscreen = null;
+    try {
+      const Ctor = ctx.canvas?.constructor;
+      if (typeof document !== 'undefined' && document.createElement) {
+        const element = document.createElement('canvas');
+        element.width = surfaceWidth;
+        element.height = surfaceHeight;
+        offscreen = element.getContext('2d');
+      } else if (Ctor) {
+        const element = new Ctor(surfaceWidth, surfaceHeight);
+        offscreen = element.getContext('2d');
+      }
+    } catch (_) {
+      offscreen = null;
+    }
+    const drawPass = (target, alpha, blur, offsetY) => {
+      target.save();
+      target.beginPath();
+      roundedRectPath(target, pad + outline.left, pad + outline.top, outline.right - outline.left, outline.bottom - outline.top, radius);
+      target.shadowColor = 'rgba(0,0,0,' + alpha + ')';
+      target.shadowBlur = blur;
+      target.shadowOffsetY = offsetY;
+      target.fillStyle = '#000';
+      target.fill();
+      target.restore();
+    };
+    if (!offscreen) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-over';
+      drawPass(ctx, 0.039, ambientBlur, 0);
+      drawPass(ctx, 0.19, spotBlur, spotOffsetY);
+      ctx.restore();
+      return;
+    }
+    drawPass(offscreen, 0.039, ambientBlur, 0);
+    drawPass(offscreen, 0.19, spotBlur, spotOffsetY);
+    offscreen.save();
+    offscreen.globalCompositeOperation = 'destination-out';
+    offscreen.beginPath();
+    roundedRectPath(offscreen, pad + outline.left, pad + outline.top, outline.right - outline.left, outline.bottom - outline.top, radius);
+    offscreen.fillStyle = '#000';
+    offscreen.fill();
+    offscreen.restore();
+    ctx.drawImage(offscreen.canvas, -pad, -pad);
   }
 
   computeOutline() {
@@ -1602,9 +1716,12 @@ export class View {
       if (intercepted === true) this.$jsTouchIntercepted = true;
     }
     if (this.$jsTouchIntercepted) {
-      this.onTouchEvent(motionEvent);
+      const interceptedHandled = this.onTouchEvent(motionEvent);
+      if (interceptedHandled) {
+        if (action === 'up' || action === 'cancel') this.$jsTouchIntercepted = false;
+        return true;
+      }
       if (action === 'up' || action === 'cancel') this.$jsTouchIntercepted = false;
-      return true;
     }
     for (let i = this.children.length - 1; i >= 0; i--) {
       const child = this.children[i];

@@ -272,7 +272,6 @@ export class DexFile {
 
   addMethod(dexClass, methodIdx, flags, codeOff) {
     const ref = this.methods[methodIdx];
-    if (DBG.codeOff && ref.name === 'checkVectorDrawableSetup') console.log('CODEOFF', ref.classDesc, codeOff >>> 0);
     const isNative = (flags & 0x0100) !== 0;
     const code = !isNative && codeOff ? this.parseCode(this, codeOff) : null;
     const method = new DexMethod(dexClass.descriptor, ref.name, ref.proto, flags, code, this);

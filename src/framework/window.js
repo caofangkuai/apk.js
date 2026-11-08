@@ -1,6 +1,6 @@
 import { ViewGroup, VISIBILITY, MeasureSpec, getChildMeasureSpec, resolveSize } from './view.js';
 import { FrameLayout } from './layouts.js';
-import { applyColorFilter, cssColor, Paint, drawVectorRaw } from './graphics.js';
+import { applyColorFilter, cssColor, Paint, drawVectorRaw, paintGradient } from './graphics.js';
 
 export function createCanvasAdapter(ctx, screen) {
   return {
@@ -375,7 +375,7 @@ export class SurfaceScreen {
     this.dirty = false;
     this.frameRequested = false;
     this.touchHandler = null;
-    this.style = options.style || 'material';
+    this.style = options.style || 'default';
     this.onDraw = options.onDraw || null;
     this.resize(options.width || 360, options.height || 720);
     this.bindInput();
@@ -725,8 +725,9 @@ function drawRoundRectRaw(ctx, l, t, r, b, rx, ry, paint) {
 function applyPaintRaw(ctx, paint) {
   const p = paint || new Paint();
   const paintColor = applyColorFilter(p.color, p.colorFilter);
-  ctx.fillStyle = cssColor(paintColor);
-  ctx.strokeStyle = cssColor(paintColor);
+  const gradient = paintGradient(ctx, p);
+  ctx.fillStyle = gradient || cssColor(paintColor);
+  ctx.strokeStyle = gradient || cssColor(paintColor);
   ctx.lineWidth = p.strokeWidth || 1;
   ctx.font = `${p.fontWeight || 'normal'} ${p.textSize}px ${p.typeface || 'Noto Sans CJK SC'}`;
   ctx.textAlign = p.textAlign || 'left';

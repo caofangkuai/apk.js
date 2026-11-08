@@ -248,6 +248,15 @@ function drawableFromAttr(vm, value) {
   }
 }
 
+function isMaskItemId(value) {
+  if (value === null || value === undefined) return false;
+  let resolved = value;
+  if (typeof resolved === 'object') resolved = resolved.reference ?? resolved.value ?? resolved;
+  if (typeof resolved === 'number') return (resolved >>> 0) === 0x0102000a;
+  const text = String(resolved);
+  return text === 'mask' || text === '@android:id/mask' || text.endsWith('/mask');
+}
+
 function elementChildren(node) {
   return (node?.children || []).filter((child) => child && child.type === 'element');
 }
@@ -327,6 +336,10 @@ function tintColorOf(peer, options) {
   if (peer?.tintList) tint = colorStateListColor(peer.tintList, stateSet);
   if (tint === null && peer && peer.tint !== null && peer.tint !== undefined) {
     tint = typeof peer.tint === 'number' ? peer.tint >>> 0 : colorStateListColor(peer.tint, stateSet);
+  }
+  if (tint === null && peer?.colorFilter) {
+    const filter = peer.colorFilter.$peer || peer.colorFilter;
+    if (typeof filter.color === 'number') tint = filter.color >>> 0;
   }
   if (tint === null && options.tint !== null && options.tint !== undefined) {
     tint = colorStateListColor(options.tint, stateSet);
@@ -445,7 +458,9 @@ function makeGradient(ctx, gradient, rect, vm) {
     const radians = (angle * Math.PI) / 180;
     const dx = Math.cos(radians);
     const dy = -Math.sin(radians);
-    const half = Math.max(rect.right - rect.left, rect.bottom - rect.top) / 2;
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    const half = (Math.abs(width * dx) + Math.abs(height * dy)) / 2;
     const grad = ctx.createLinearGradient(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half);
     for (const [offset, color] of stops) grad.addColorStop(offset, cssColor(color));
     return grad;
@@ -473,7 +488,19 @@ export function drawShapeNode(ctx, shape, rect, options = {}) {
   }
 
   ctx.save();
-  if (shapeType === 'oval' || shapeType === 'ring') {
+  if (shapeType === 'ring') {
+    const thickness = Math.max(1, Number(stroke ? dimensionOf(vm, attrValue(stroke, 'width'), 0) : 0) || Math.min(rect.right - rect.left, rect.bottom - rect.top) / 8);
+    ctx.beginPath();
+    const cx2 = (rect.left + rect.right) / 2;
+    const cy2 = (rect.top + rect.bottom) / 2;
+    const radius = Math.max(1, Math.min(rect.right - rect.left, rect.bottom - rect.top) / 2 - thickness / 2);
+    ctx.arc(cx2, cy2, radius, 0, Math.PI * 2);
+    ctx.lineWidth = thickness;
+    ctx.strokeStyle = fillStyle || cssColor(applyAlphaToColor(0xff000000, alpha, options));
+    ctx.stroke();
+    ctx.restore();
+    return;
+  } else if (shapeType === 'oval') {
     ovalPath(ctx, rect);
   } else if (shapeType === 'line') {
     const y = (rect.top + rect.bottom) / 2;
@@ -624,8 +651,7 @@ function drawXmlRoot(ctx, node, rect, options) {
     let drew = false;
     for (const item of elementChildren(node)) {
       if (item.name !== 'item') continue;
-      const id = String(attrValue(item, 'id') ?? '');
-      if (id.includes('mask')) continue;
+      if (isMaskItemId(attrValue(item, 'id'))) continue;
       drew = drawItem(ctx, item, rect, options) || drew;
     }
     return drew;
@@ -725,7 +751,9 @@ export function drawDrawable(ctx, drawable, rect, options = {}) {
         const image = drawable.bitmap?.image;
         if (!image) return false;
         ctx.save();
-        ctx.drawImage(image, safeRect.left, safeRect.top, safeRect.right - safeRect.left, safeRect.bottom - safeRect.top);
+        const ninePatch = drawable.bitmap?.ninePatch;
+        if (ninePatch) drawNinePatchImage(ctx, image, ninePatch, safeRect);
+        else ctx.drawImage(image, safeRect.left, safeRect.top, safeRect.right - safeRect.left, safeRect.bottom - safeRect.top);
         ctx.restore();
         return true;
       }
@@ -769,13 +797,20 @@ function drawDexObject(ctx, object, rect, options) {
     return false;
   }
   if (!drawRes || (drawRes.kind !== 'dex' && drawRes.kind !== 'native')) return false;
-  setDrawableBounds(vm, object, rect);
+  const width = rect.right - rect.left;
+  const height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0) return false;
+  ctx.save();
+  ctx.translate(rect.left, rect.top);
+  setDrawableBounds(vm, object, { left: 0, top: 0, right: width, bottom: height });
   try {
-    const canvasObject = createCanvasObject(vm, ctx, rect);
+    const canvasObject = createCanvasObject(vm, ctx, { left: 0, top: 0, right: width, bottom: height });
     vm.invoke({ classDesc: descriptor, name: 'draw', proto: drawRes.method.proto }, object, [canvasObject], 'virtual');
     return true;
   } catch (_error) {
     return false;
+  } finally {
+    ctx.restore();
   }
 }
 
@@ -996,14 +1031,26 @@ PEER_DRAWERS.gradient = (ctx, peer, rect, options) => {
   else shapePath(ctx, rect, corners);
   let fill = null;
   if (Array.isArray(peer.colors) && peer.colors.length >= 2) {
-    const [c1, c2] = peer.colors;
-    const gradient = ctx.createLinearGradient(
-      rect.left, rect.top,
-      peer.gradientType === 1 ? rect.left : rect.right,
-      peer.gradientType === 1 ? rect.bottom : rect.top,
-    );
-    gradient.addColorStop(0, cssColor(c1));
-    gradient.addColorStop(1, cssColor(c2));
+    const colors = peer.colors;
+    const centerX = rect.left + ((rect.right - rect.left) * (Number(peer.gradientCenterX) || 0.5));
+    const centerY = rect.top + ((rect.bottom - rect.top) * (Number(peer.gradientCenterY) || 0.5));
+    const type = peer.gradientType | 0;
+    let gradient = null;
+    if (type === 1) {
+      gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(1, Number(peer.gradientRadius) || Math.max(rect.right - rect.left, rect.bottom - rect.top) / 2));
+    } else if (type === 2 && typeof ctx.createConicGradient === 'function') {
+      gradient = ctx.createConicGradient(0, centerX, centerY);
+    } else {
+      const angle = Number(peer.gradientAngle);
+      const radians = ((Number.isFinite(angle) ? angle : 270) * Math.PI) / 180;
+      const dx = Math.cos(radians);
+      const dy = -Math.sin(radians);
+      const width = rect.right - rect.left;
+      const height = rect.bottom - rect.top;
+      const half = (Math.abs(width * dx) + Math.abs(height * dy)) / 2;
+      gradient = ctx.createLinearGradient(centerX - dx * half, centerY - dy * half, centerX + dx * half, centerY + dy * half);
+    }
+    colors.forEach((color, index) => gradient.addColorStop(colors.length === 1 ? 0 : index / (colors.length - 1), cssColor(color)));
     fill = gradient;
   } else if (typeof peer.color === 'number' && (peer.color >>> 24) !== 0) {
     fill = cssColor(applyAlphaToColor(peer.color, alpha, options));
@@ -1109,12 +1156,65 @@ PEER_DRAWERS.rotate = (ctx, peer, rect, options) => {
   return drew;
 };
 
+export function drawNinePatchImage(ctx, image, ninePatch, rect) {
+  const width = rect.right - rect.left;
+  const height = rect.bottom - rect.top;
+  if (!image || !ninePatch || !ninePatch.xDivs?.length || !ninePatch.yDivs?.length) {
+    ctx.drawImage(image, rect.left, rect.top, width, height);
+    return;
+  }
+  const srcW = image.width;
+  const srcH = image.height;
+  const xs = [0, ...ninePatch.xDivs, srcW];
+  const ys = [0, ...ninePatch.yDivs, srcH];
+  const mapAxis = (bounds, target, sourceSize, stretchPairs) => {
+    const mapped = [0];
+    let stretchSource = 0;
+    for (let i = 0; i + 1 < bounds.length; i++) {
+      if (i % 2 === 1) stretchSource += Math.max(0, bounds[i + 1] - bounds[i]);
+    }
+    const fixedSource = sourceSize - stretchSource;
+    const stretchTarget = Math.max(0, target - fixedSource);
+    let cursor = 0;
+    for (let i = 0; i + 1 < bounds.length; i++) {
+      const sourceLength = Math.max(0, bounds[i + 1] - bounds[i]);
+      let length;
+      if (i % 2 === 1) {
+        length = stretchSource > 0 ? (sourceLength / stretchSource) * stretchTarget : 0;
+      } else {
+        length = sourceLength;
+      }
+      cursor += length;
+      mapped.push(cursor);
+    }
+    return mapped;
+  };
+  const mappedX = mapAxis(xs, width, srcW);
+  const mappedY = mapAxis(ys, height, srcH);
+  for (let row = 0; row < ys.length - 1; row++) {
+    for (let col = 0; col < xs.length - 1; col++) {
+      const sx = xs[col];
+      const sy = ys[row];
+      const sw = xs[col + 1] - sx;
+      const sh = ys[row + 1] - sy;
+      const dx = rect.left + mappedX[col];
+      const dy = rect.top + mappedY[row];
+      const dw = mappedX[col + 1] - mappedX[col];
+      const dh = mappedY[row + 1] - mappedY[row];
+      if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) continue;
+      ctx.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
+  }
+}
+
 PEER_DRAWERS.bitmap = (ctx, peer, rect, options) => {
   const image = peer.image || peer.bitmap?.image;
   if (!image) return false;
   ctx.save();
   ctx.globalAlpha = (peer.alpha === undefined ? 255 : peer.alpha) / 255;
-  ctx.drawImage(image, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+  const ninePatch = peer.ninePatch || peer.bitmap?.ninePatch;
+  if (ninePatch) drawNinePatchImage(ctx, image, ninePatch, rect);
+  else ctx.drawImage(image, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
   ctx.restore();
   return true;
 };
@@ -1278,6 +1378,14 @@ const DrawableDef = nativeDef('Landroid/graphics/drawable/Drawable;', {
     'getPadding(Landroid/graphics/Rect;)Z': () => 0,
     'jumpToCurrentState()V': () => undefined,
     'applyTheme(Landroid/content/res/Resources$Theme;)V': () => undefined,
+    'setCallback(Landroid/graphics/drawable/Drawable$Callback;)V': (self, [callback]) => { self.callback = callback ?? null; },
+    'getCallback()Landroid/graphics/drawable/Drawable$Callback;': (self) => self.callback ?? null,
+    'invalidateSelf()V': (self) => { self.callback && self.vm?.screen?.invalidate?.(); },
+    'scheduleSelf(Ljava/lang/Runnable;J)V': () => undefined,
+    'unscheduleSelf(Ljava/lang/Runnable;)V': () => undefined,
+    'getLayoutDirection()I': () => 0,
+    'setLayoutDirection(I)Z': () => false,
+    'onStateChange([I)Z': () => false,
   },
 });
 
@@ -1678,6 +1786,8 @@ const StateListDrawableDef = nativeDef('Landroid/graphics/drawable/StateListDraw
     },
     'isStateful()Z': () => 1,
     'getOpacity()I': () => -3,
+    'getIntrinsicWidth()I': (self) => self.intrinsicWidth ?? -1,
+    'getIntrinsicHeight()I': (self) => self.intrinsicHeight ?? -1,
     ...baseDrawableMethods(),
   },
 });
@@ -1767,8 +1877,7 @@ function xmlDrawablePadding(node, vm) {
     let result = null;
     for (const item of elementChildren(node)) {
       if (item.name !== 'item') continue;
-      const id = String(attrValue(item, 'id') ?? '');
-      if (id.includes('mask')) continue;
+      if (isMaskItemId(attrValue(item, 'id'))) continue;
       result = mergePadding(result, xmlDrawablePadding(elementChildren(item)[0], vm));
       if (!result && attrValue(item, 'drawable') !== null) {
         const resolved = drawableFromAttr(vm, attrValue(item, 'drawable'));
@@ -1849,6 +1958,64 @@ export function resourceDrawableDescriptor(value) {
   return null;
 }
 
+function resourceIntrinsicSize(value, vm) {
+  if (!value || typeof value !== 'object') return null;
+  if (value.type === 'color' || value.type === 'bitmap') return null;
+  if (value.type === 'shape') {
+    const size = firstChildNamed(value.xml, 'size');
+    if (!size) return null;
+    const width = dimensionOf(vm, attrValue(size, 'width'), 0);
+    const height = dimensionOf(vm, attrValue(size, 'height'), 0);
+    return width > 0 || height > 0 ? { width, height } : null;
+  }
+  if (value.type === 'xml') {
+    const node = value.xml;
+    if (!node) return null;
+    if (node.name === 'shape') {
+      const size = firstChildNamed(node, 'size');
+      if (!size) return null;
+      const width = dimensionOf(vm, attrValue(size, 'width'), 0);
+      const height = dimensionOf(vm, attrValue(size, 'height'), 0);
+      return width > 0 || height > 0 ? { width, height } : null;
+    }
+    if (node.name === 'vector') {
+      const width = dimensionOf(vm, attrValue(node, 'width'), 0);
+      const height = dimensionOf(vm, attrValue(node, 'height'), 0);
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    if (node.name === 'inset') {
+      const child = elementChildren(node)[0];
+      const inner = child ? resourceIntrinsicSize({ type: 'xml', xml: child }, vm) : null;
+      if (!inner) return null;
+      const uniform = dimensionOf(vm, attrValue(node, 'inset'), 0);
+      const pick = (name) => {
+        const raw = attrValue(node, name);
+        return raw === null || raw === undefined ? uniform : dimensionOf(vm, raw, 0);
+      };
+      return {
+        width: inner.width + pick('insetLeft') + pick('insetRight'),
+        height: inner.height + pick('insetTop') + pick('insetBottom'),
+      };
+    }
+    if (node.name === 'selector' || node.name === 'layer-list' || node.name === 'ripple' || node.name === 'level-list' || node.name === 'animated-selector') {
+      let best = null;
+      for (const item of elementChildren(node)) {
+        if (item.name !== 'item') continue;
+        const child = elementChildren(item)[0];
+        let size = child ? resourceIntrinsicSize({ type: 'xml', xml: child }, vm) : null;
+        if (!size && attrValue(item, 'drawable') !== null) {
+          const resolved = drawableFromAttr(vm, attrValue(item, 'drawable'));
+          size = resolved ? resourceIntrinsicSize(resolved, vm) : null;
+        }
+        if (!size) continue;
+        if (!best || size.height > best.height) best = size;
+      }
+      return best;
+    }
+  }
+  return null;
+}
+
 export function drawableObject(vm, value) {
   if (!value || typeof value !== 'object') return value;
   if (value.$peer || value.$nativeClass || value.$dexClass || value.$descriptor) return value;
@@ -1865,6 +2032,11 @@ export function drawableObject(vm, value) {
     peer.bitmap = value.bitmap;
   }
   if (value.type === 'xml' && value.tint !== undefined) peer.tint = value.tint;
+  const intrinsic = resourceIntrinsicSize(value, vm);
+  if (intrinsic) {
+    peer.intrinsicWidth = intrinsic.width;
+    peer.intrinsicHeight = intrinsic.height;
+  }
   return object;
 }
 
@@ -1888,8 +2060,7 @@ function xmlOutlineRadius(node, vm) {
   if (node.name === 'ripple') {
     for (const item of elementChildren(node)) {
       if (item.name !== 'item') continue;
-      const id = String(attrValue(item, 'id') ?? '');
-      if (id.includes('mask')) continue;
+      if (isMaskItemId(attrValue(item, 'id'))) continue;
       const child = elementChildren(item)[0];
       if (child) return xmlOutlineRadius(child, vm);
       const resolved = drawableFromAttr(vm, attrValue(item, 'drawable'));
@@ -2211,6 +2382,139 @@ function outlineViewFromObject(viewObject, vm) {
 export const OUTLINE_CLASSES = {
   Outline: OutlineDef,
   ViewOutlineProvider: ViewOutlineProviderDef,
+};
+
+function floatArrayValues(value) {
+  const raw = value?.$data || value;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    if (typeof entry !== 'number') return Number(entry) || 0;
+    return floatBitsToNumber(entry | 0);
+  });
+}
+
+function intArrayValues(value) {
+  const raw = value?.$data || value;
+  return Array.isArray(raw) ? raw.map((entry) => entry | 0) : [];
+}
+
+function makeShaderPeer(kind, fields) {
+  return peerClass(function () {
+    Object.assign(this, fields);
+    this.kind = kind;
+  }, { kind });
+}
+
+const TileModeDef = nativeDef('Landroid/graphics/Shader$TileMode;', {
+  super: 'Ljava/lang/Object;',
+  staticFields: new Map([
+    ['CLAMP:Landroid/graphics/Shader$TileMode;', { lazy: (vm) => tileModeObject(vm, 'CLAMP') }],
+    ['REPEAT:Landroid/graphics/Shader$TileMode;', { lazy: (vm) => tileModeObject(vm, 'REPEAT') }],
+    ['MIRROR:Landroid/graphics/Shader$TileMode;', { lazy: (vm) => tileModeObject(vm, 'MIRROR') }],
+  ]),
+  methods: {
+    'name()Ljava/lang/String;': (self) => self.name,
+    'ordinal()I': (self) => self.ordinal | 0,
+  },
+});
+
+function tileModeObject(vm, name) {
+  if (!vm._tileModes) vm._tileModes = new Map();
+  if (vm._tileModes.has(name)) return vm._tileModes.get(name);
+  const object = vm.allocateRawObject('Landroid/graphics/Shader$TileMode;');
+  object.$peer = { name, ordinal: ['CLAMP', 'REPEAT', 'MIRROR'].indexOf(name) };
+  vm._tileModes.set(name, object);
+  return object;
+}
+
+const ShaderDef = nativeDef('Landroid/graphics/Shader;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'setLocalMatrix(Landroid/graphics/Matrix;)V': () => undefined,
+    'getLocalMatrix(Landroid/graphics/Matrix;)Z': () => 0,
+    'hasLocalMatrix()Z': () => 0,
+  },
+});
+
+const LinearGradientDef = nativeDef('Landroid/graphics/LinearGradient;', {
+  super: 'Landroid/graphics/Shader;',
+  ctor: makeShaderPeer('linear', {}),
+  methods: {
+    '<init>(FFFF[I[FLandroid/graphics/Shader$TileMode;)V': (self, [x0, y0, x1, y1, colors, positions]) => {
+      self.kind = 'linear';
+      self.x0 = Number(x0) || 0;
+      self.y0 = Number(y0) || 0;
+      self.x1 = Number(x1) || 0;
+      self.y1 = Number(y1) || 0;
+      self.colors = intArrayValues(colors);
+      self.positions = floatArrayValues(positions);
+    },
+    '<init>(FFFFIILandroid/graphics/Shader$TileMode;)V': (self, [x0, y0, x1, y1, color0, color1]) => {
+      self.kind = 'linear';
+      self.x0 = Number(x0) || 0;
+      self.y0 = Number(y0) || 0;
+      self.x1 = Number(x1) || 0;
+      self.y1 = Number(y1) || 0;
+      self.colors = [color0 >>> 0, color1 >>> 0];
+      self.positions = [];
+    },
+  },
+});
+
+const RadialGradientDef = nativeDef('Landroid/graphics/RadialGradient;', {
+  super: 'Landroid/graphics/Shader;',
+  ctor: makeShaderPeer('radial', {}),
+  methods: {
+    '<init>(FFFP[I[FLandroid/graphics/Shader$TileMode;)V': (self, [cx, cy, radius, colors, positions]) => {
+      self.kind = 'radial';
+      self.cx = Number(cx) || 0;
+      self.cy = Number(cy) || 0;
+      self.radius = Number(radius) || 0;
+      self.radius1 = self.radius;
+      self.colors = intArrayValues(colors);
+      self.positions = floatArrayValues(positions);
+    },
+    '<init>(FFFIILandroid/graphics/Shader$TileMode;)V': (self, [cx, cy, radius, color0, color1]) => {
+      self.kind = 'radial';
+      self.cx = Number(cx) || 0;
+      self.cy = Number(cy) || 0;
+      self.radius = Number(radius) || 0;
+      self.radius1 = self.radius;
+      self.colors = [color0 >>> 0, color1 >>> 0];
+      self.positions = [];
+    },
+  },
+});
+
+const SweepGradientDef = nativeDef('Landroid/graphics/SweepGradient;', {
+  super: 'Landroid/graphics/Shader;',
+  ctor: makeShaderPeer('sweep', {}),
+  methods: {
+    '<init>(FF[I[F)V': (self, [cx, cy, colors, positions]) => {
+      self.kind = 'sweep';
+      self.cx = Number(cx) || 0;
+      self.cy = Number(cy) || 0;
+      self.startAngle = 0;
+      self.colors = intArrayValues(colors);
+      self.positions = floatArrayValues(positions);
+    },
+    '<init>(FFII)V': (self, [cx, cy, color0, color1]) => {
+      self.kind = 'sweep';
+      self.cx = Number(cx) || 0;
+      self.cy = Number(cy) || 0;
+      self.startAngle = 0;
+      self.colors = [color0 >>> 0, color1 >>> 0];
+      self.positions = [];
+    },
+  },
+});
+
+export const SHADER_CLASSES = {
+  Shader: ShaderDef,
+  TileMode: TileModeDef,
+  LinearGradient: LinearGradientDef,
+  RadialGradient: RadialGradientDef,
+  SweepGradient: SweepGradientDef,
 };
 
 export const DRAWABLE_CLASSES = {

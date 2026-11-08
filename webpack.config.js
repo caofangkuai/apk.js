@@ -8,12 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV !== 'development';
 
 const debugFlags = [
-  'DBG_CAST', 'DBG_INV', 'CAS_DBG', 'FV_DBG',
-  'DBG_GLP', 'DBG_RVL', 'DBG_INF', 'DBG_LP', 'DBG_THROW',
-  'DBG_NPE', 'DBG_GD', 'DBG_EXC', 'DBG_CODEOFF', 'DBG_TRACE_TOOLBAR',
-  'DBG_LAYOUT', 'DBG_MISSING', 'DBG_TXT', 'DBG_ARG', 'DBG_MS',
-  'DBG_CD', 'DBG_INIT', 'DBG_PC', 'DBG_FR', 'DBG_BA2', 'DBG_CF',
-  'DBG_PA', 'DBG_NPE_RV', 'DBG_MTS', 'DBG_SH', 'NO_THEME_APPLY',
+  'DBG_CAST', 'DBG_INV', 'CAS_DBG', 'FV_DBG', 'DBG_GLP',
+  'DBG_NPE', 'DBG_EXC', 'DBG_MISSING', 'DBG_ARG', 'DBG_MS',
+  'DBG_FR', 'DBG_PA', 'DBG_NPE_RV', 'DBG_MTS', 'DBG_SH',
+  'NO_THEME_APPLY',
 ];
 const defines = {
   'process.env.NODE_ENV': JSON.stringify(isProd ? 'production' : 'development'),

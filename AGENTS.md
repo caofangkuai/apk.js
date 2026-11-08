@@ -136,13 +136,53 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，基线 HEAD `0a77108`；2026-11-08 两轮改动均未提交（用户未要求 commit/push）。
-- 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`。
+- 分支 `main`，基线 HEAD `0a77108`；2026-11-08 五轮改动均未提交（用户未要求 commit/push）。
+- 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
-- 本轮验证通过：`npm run test:all`、`npm run build`、`npm run site`。
+- 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
 
-### 本轮已完成（2026-11-08 第二轮：真机 APK 与控件对齐）
+### 本轮已完成（2026-11-08 第五轮：AOSP 控件绘制对齐）
+
+1. **DisplayMetrics 密度链路**：`TypedValue.applyDimension` 之前直接读 `metrics.density`（JavaObject 上为 undefined，回退 1），导致 Material 的 dp→px 全部减半。新增 `metricsValue()` 从 `$fields` 读 `density:F` 并按 IEEE 位解码；TabLayout 高度从 48px 恢复为 96px（48dp），AppBar 总高 208px。
+2. **程序化控件样式属性**：新增 `applyProgrammaticViewStyle()`，在 `View/ImageView` 的 `(Context,AttributeSet,I)` 构造路径通过 `themeAttributeValues` 读取 defStyleAttr，应用 minWidth/minHeight/scaleType/padding/textSize/textColor/textAllCaps/gravity。Toolbar 导航按钮从 48px 恢复 112px（56dp），图标居中。
+3. **View 最小尺寸**：`View.measure` 在 onMeasure/dex 测量后按 minWidth/minHeight 钳制测量结果（AT_MOST 封顶）；尺寸被放大后重新测量 MATCH_PARENT 子项。NavigationView 菜单项从 34px 恢复 96px（48dp），CheckedTextView 同步填满 96px 并由 gravity 垂直居中。
+4. **文本排版回归 AOSP**：TextView 统一行距模型（pitch=descent-ascent，首行 baseline=-top/-ascent，includeFontPadding 计入 top/bottom），测量与绘制共用；getBaseline 改 `paddingTop+firstBaseline`；字体度量 leading 改 0、bottom 0.27em；wrapText 增加整段快速路径和词边界折行。
+5. **LinearLayout**：权重只在 EXACTLY 下分配（AT_MOST 不再拉伸）；水平布局增加 baselineAligned 对齐（maxAscent/maxDescent）；水平测量增加 MATCH_PARENT 高度二趟测量。
+6. **FrameLayout**：增加 MATCH_PARENT 子项二趟测量。
+7. **NinePatch**：`npTc` 解析修正为 padding@12、xDivs@32、numX+1 顶点；绘制支持多段可拉伸区域按比例缩放。
+8. **Drawable**：线性渐变按矩形在方向上的投影长度取端点（不再用 max(w,h)/2）；ring 改为描边圆环；矩形 stroke 内缩 strokeWidth/2；DEX GradientDrawable 支持 angle/radial/sweep 与多色 stop；Drawable 补 setCallback/getCallback。
+9. **elevation 阴影**：改为离屏画布绘制 ambient(0.039)/spot(0.19) 两遍阴影并挖掉本体，修复 Canvas 阴影被源 alpha(0.01) 衰减到不可见的问题。
+10. **杂项 host**：TextView getLineCount/getMaxLines/setSingleLine/setCompoundDrawables*、View getMinimumWidth/Height/getSuggestedMinimum*、hasTransientState、Drawable setCallback、Arrays.fill、Long.bitCount/rotateRight 等。
+
+### 本轮已完成（2026-11-08 第四轮：DEX 绘制与渲染补全）
+
+1. **支持 DEX 覆写的 `View.draw(Canvas)`**（`view.js`）：之前在宿主 `View.draw` 里只处理 `onDraw`/`dispatchDraw`，导致 `AppBarLayout`、`ViewPager`、`TabLayout$f`（SlidingTabIndicator）等覆写 `draw` 的类被跳过或报错。现在检测并调用 DEX `draw`，super 调用进入宿主管线时不再二次 translate（避免内容整体偏移），TabLayout 指示条、AppBar/ViewPager 自绘恢复正常。
+2. **View native canvas 解包**：`onDraw/draw/dispatchDraw` 的 native 入口把 Java `Canvas` 解成 adapter，修复 DEX super 调用时 `canvas.save is not a function`。
+3. **Paint Shader 链路**：新增 `Shader` / `Shader$TileMode` / `LinearGradient` / `RadialGradient` / `SweepGradient` host，`Paint.setShader` 参与 `applyPaint`/`applyPaintRaw`，Canvas2D 生成对应 gradient；修复依赖 shader 的渐变绘制。
+4. **NinePatch**：解析 PNG `npTc` 块（`resources.js#parseNinePatchChunk`），`NinePatchDrawable` 与 bitmap drawable 走九宫格切片绘制。
+5. **资源 Drawable intrinsic / colorFilter**：资源包装对象补 `getIntrinsicWidth/Height`（selector/layer/inset/shape/vector），`colorFilter` 作为 SRC_IN 颜色参与填充，修复 TabLayout 指示条高度/着色。
+6. 同步修复 `Drawable` 的 `getBounds` 与 DEX draw 调用顺序。
+7. 位图异步加载完成后触发 `decorView.requestLayout()`，避免 ImageView 在图片到达前测量为 0x0 后不再重新布局。
+8. ListView 支持 `convertView` 复用：`notifyDataSetChanged/notifyDataSetInvalidated` 标记版本并触发观察者，`ensureItems` 用旧 item 作为 convertView 重新绑定；`getFirstVisiblePosition/getLastVisiblePosition` 按滚动位置计算。
+9. 交互验证：抽屉、Tab 切换、列表滚动、溢出 PopupMenu 均正常；抽屉 header 的 teal/orange 分块是应用自身 layer-list（70dp 左条 + 橙色主体），非渲染错误。
+10. Vector drawable 携带 `resources.density`，修复 24dp 图标被按 24px 绘制（三点菜单过小）。
+11. DEX Drawable 绘制改为「画布 translate + bounds 归零」；Canvas.drawPath 补 rMoveTo/quadTo/rQuadTo/cubicTo/rCubicTo/arcTo。
+12. ImageView 对纯 DEX Drawable 增加「离屏渲染 + ink bbox 居中」：先画到带 padding 的离屏画布（避免自绘 drawable 越界被裁），扫描 alpha 包围盒，再按包围盒中心对齐到目标 rect。修复 Toolbar 两横线导航图标贴左上问题；现在图标为 36×14px 的两条横线，水平居中（x≈6..41）、与右侧三点菜单同一行。
+
+### 上一轮已完成（2026-11-08 第三轮：类名/特判清理）
+
+按静态审计结论依次清理：
+
+1. 删除 4 处确认违规：`Lf/a/h/a;`、`Lf/a/m/a$a;`（混淆 shell 宿主）、`Lk7/t;`/`Lq7/l;`（R8 后的 Kotlin collections 映射）、`MarginsLayoutParams$LayoutParams` 分支；同时删掉因此失效的 `kotlinJoinToString`。
+2. 删除 21 处类名/混淆名调试探针：TabLayout/Toolbar/RecyclerView/appcompat/FitWindows/CoordinatorLayout/ResourceManagerInternal、`Lpc/a;`、`Lf7/a;`、混淆字段 `b`、`checkVectorDrawableSetup`、`apk.js Browser`、`kotlin.jvm.internal.h.i`、`h0.b.b` 等；移除直接 `process.env` 读取（浏览器不兼容），调试开关统一走 `debugFlag`/`globalThis` 且不再含类名。`debug.js` 与 `webpack.config.js` 删除 9+ 个死 flag。
+3. VIRTUAL_FS 硬件指纹改为 `hardwareIdentity()` 按 `navigator.platform` / UA / `hardwareConcurrency` / `screen` 生成（`apkjs-<arch>-*` 系列）：音频 codec/card、i2c BOM、触摸/LCD、GPU、中断名、input devices 均不再写死真机型号；`INPUT_DEVICE_DEFINITIONS` 同步。
+4. 修 9 处质量风险：三份 `id.includes('mask')` 合并为精确 `isMaskItemId()`（0x0102000a / `/mask`）；ProgressBar 横向判定改为精确 `ProgressBar.Horizontal`；主题颜色回退去掉 `/background|text|color/i` 猜测，改白名单 key；`LayoutParams` 判断改 `endsWith`。
+5. 新增 `tools/check-refs.mjs` + `npm run check:refs`：禁止 androidx/Material/应用内部类名、非 `android/java/javax/org` descriptor、混淆 descriptor、具体设备指纹与 `process.env` 直读；已并入 `test:all` 和 CI（`.github/workflows/deploy.yml`）。
+
+验证：DeviceInfoHW 仍可启动渲染（`image-debug/devinfo-clean.png`），硬件项显示 navigator 推导值；`npm run check:refs` 为空。
+
+### 上一轮已完成（2026-11-08 第二轮：真机 APK 与控件对齐）
 
 1. **CJK 字体**：`tools/setup-fonts.sh`（`npm run setup:fonts`）下载 Noto Sans CJK SC 并生成 `/etc/fonts/fonts.conf`。容器默认没有 fontconfig 配置，node-canvas 会退回豆腐块；浏览器仍用系统字体。
 2. **DeviceInfoHW 启动链路修复**（上传的 5.4.1 APK 之前只渲染出空壳）：
@@ -159,7 +199,7 @@ npm run site
 10. **剩余 Drawable**：`VectorDrawable/ClipDrawable/ScaleDrawable/RotateDrawable/NinePatchDrawable/AnimatedVectorDrawable` host 与对应绘制分支；drawable padding 解析（shape `<padding>`、inset、layer-list、ripple）用于 `compoundPadding`。
 11. **RecyclerView 支撑**：补 `View.offsetTopAndBottom/LeftAndRight`、`ViewGroup.offsetChildrenTopAndBottom/LeftAndRight` native；RecyclerView 本体仍是 DEX 执行。
 
-已知差异：TabLayout 选中下划线（TabView 自绘 indicator）尚未出现；DeviceInfoHW 的表格行自身不带 divider（原生同样如此）；Toolbar/AppBar 阴影在示例中仍偏淡。
+已知差异（第四轮已修 TabLayout 自绘 indicator / DEX draw；表格行自身无 divider 与原生一致）；Toolbar/AppBar 阴影仍偏淡。
 
 ### 上一轮已完成（2026-11-08 第一轮）
 
@@ -208,20 +248,18 @@ npm run site
 
 ### 仍待修复的系统性 UI 差异
 
-1. **TabLayout 选中下划线**：TabView 自绘 indicator（`TabLayout$i.j`）通过 `setBounds(TabView 全宽) + draw` 绘制，目前未落到可见像素；需要确认该 drawable 是 Gradient/Ripple 的哪一种并验证 bounds。
-2. **MaterialShapeDrawable 阴影**：Material 组件在软件层用 `ShadowRenderer` 的三段渐变（0x44/0x14/0x00）而不是高斯模糊；目前统一走 Canvas 阴影，Card/Button 阴影观感会偏软。
-3. **elevation overlay**：深色主题下 MaterialShapeDrawable 的 elevation overlay 颜色叠加未实现。
-4. **NinePatch 解码**：`NinePatchDrawable` 目前只按普通位图缩放，未解析 npTc 的拉伸/内边距。
-5. **AnimatedVectorDrawable 属性动画**：只画出目标 vector，未执行 trimPath/旋转动画（ProgressBar 的 circular indeterminate 是 JS 近似）。
-6. **RecyclerView 真机验证**：host 基建已补（offsetChildren / addViewInLayout / drawChild），但没有使用 RecyclerView 的测试 APK 做回归。
-7. **ListView 回收**：仍是“一次性创建全部 item + scrollY 位移”，未实现 AbsListView 的 scrap/recycle 与 fillDown/fillUp 局部布局；大列表会有性能差。
-8. **TextInputLayout / AppBarLayout 细节**：浮动标签、collapse 行为仍依赖 DEX 执行，未做 host 侧兜底。
+1. **MaterialShapeDrawable 阴影**：Shader host 已具备，但 Material 的 `ShadowRenderer` 三段渐变（0x44/0x14/0x00）尚未按其几何复现；当前 Card/Button 阴影仍走 Canvas shadow。
+2. **elevation overlay**：深色主题下 MaterialShapeDrawable 的 elevation overlay 颜色叠加未实现。
+3. **AnimatedVectorDrawable 属性动画**：只画目标 vector，未执行 trimPath/旋转动画（ProgressBar circular indeterminate 仍是 JS 近似）。
+4. **ListView 窗口化布局**：已支持 convertView 复用与可见位置，但仍是全量创建 + scrollY 位移，未实现 fillDown/fillUp 窗口。
+5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的回归 APK。
+6. **TextInputLayout / AppBarLayout 细节**：浮动标签、collapse 行为依赖 DEX 执行，未做 host 兜底。
 
 ### 建议接手顺序
 
-1. TabLayout indicator 与 MaterialShapeDrawable 阴影（当前截图最明显的差异）。
-2. NinePatch 解码与 AnimatedVectorDrawable 动画。
-3. ListView 回收/局部布局，RecyclerView 回归样例。
+1. MaterialShapeDrawable `ShadowRenderer` 三段渐变阴影。
+2. AnimatedVectorDrawable 属性动画。
+3. ListView 回收/局部布局与 RecyclerView 回归样例。
 4. elevation overlay 与深色主题。
 5. 继续用 `node tools/render-apk.mjs <apk> <名称>` 对照原生截图。
 
@@ -238,6 +276,6 @@ npm run site
 ### 待用户确认
 
 - “屏幕测试”子页顶部 ActionBar 缺失是否为预期。
-- 是否清理 `src/` 中遗留的通用调试钩子：`__DBG_EQ`、`__DBG_FLAG`、`__DBG_ARG`、`__DBG_FVID`、`__MS4`、`__DBG_CV`、`__nodeFs`、`__TXT`、`__DBG_TLS`、`__DBG_SH`、`__GFDBG`、`__DBG_NPE_RV` 等。
+- 是否继续清理剩余通用调试钩子（已无类名）：`__DBG_EQ`、`__DBG_FLAG`、`__DBG_ARG`、`__DBG_FVID`、`__DBG_CV`、`__TXT`、`__DBG_TLS`、`__DBG_SH`、`__DBG_NPE_RV` 等。
 - `image-debug/` 是否只保留最新一张图（删除旧图需用户确认）。
 - 历史凭据如曾泄露，需要用户在平台侧轮换（不要把明文写入仓库或文档）。

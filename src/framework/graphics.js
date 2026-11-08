@@ -87,9 +87,9 @@ export class Paint {
     return {
       ascent: -this.textSize * 0.93,
       descent: this.textSize * 0.24,
-      leading: this.textSize * 0.1,
+      leading: 0,
       top: -this.textSize * 1.05,
-      bottom: this.textSize * 0.3,
+      bottom: this.textSize * 0.27,
     };
   }
 
@@ -343,10 +343,68 @@ export class Canvas {
           cy = cmd.y;
           ctx.lineTo(this.originX + cx, this.originY + cy);
           break;
+        case 'rMoveTo':
+          cx += cmd.dx || 0;
+          cy += cmd.dy || 0;
+          startX = cx;
+          startY = cy;
+          ctx.moveTo(this.originX + cx, this.originY + cy);
+          break;
         case 'rLineTo':
           cx += cmd.x;
           cy += cmd.y;
           ctx.lineTo(this.originX + cx, this.originY + cy);
+          break;
+        case 'quadTo':
+          ctx.quadraticCurveTo(this.originX + cmd.x1, this.originY + cmd.y1, this.originX + cmd.x2, this.originY + cmd.y2);
+          cx = cmd.x2;
+          cy = cmd.y2;
+          break;
+        case 'rQuadTo':
+          {
+            const x1 = cx + (cmd.dx1 || 0);
+            const y1 = cy + (cmd.dy1 || 0);
+            cx += cmd.dx2 || 0;
+            cy += cmd.dy2 || 0;
+            ctx.quadraticCurveTo(this.originX + x1, this.originY + y1, this.originX + cx, this.originY + cy);
+          }
+          break;
+        case 'cubicTo':
+          ctx.bezierCurveTo(this.originX + cmd.x1, this.originY + cmd.y1, this.originX + cmd.x2, this.originY + cmd.y2, this.originX + cmd.x3, this.originY + cmd.y3);
+          cx = cmd.x3;
+          cy = cmd.y3;
+          break;
+        case 'rCubicTo':
+          {
+            const x1 = cx + (cmd.dx1 || 0);
+            const y1 = cy + (cmd.dy1 || 0);
+            const x2 = cx + (cmd.dx2 || 0);
+            const y2 = cy + (cmd.dy2 || 0);
+            cx += cmd.dx3 || 0;
+            cy += cmd.dy3 || 0;
+            ctx.bezierCurveTo(this.originX + x1, this.originY + y1, this.originX + x2, this.originY + y2, this.originX + cx, this.originY + cy);
+          }
+          break;
+        case 'arcTo':
+          {
+            const left = cmd.left || 0;
+            const top = cmd.top || 0;
+            const right = cmd.right || 0;
+            const bottom = cmd.bottom || 0;
+            const acx = (left + right) / 2;
+            const acy = (top + bottom) / 2;
+            const rx = Math.abs(right - left) / 2;
+            const ry = Math.abs(bottom - top) / 2;
+            const start = ((cmd.startAngle || 0) * Math.PI) / 180;
+            const end = start + ((cmd.sweepAngle || 0) * Math.PI) / 180;
+            const startX2 = acx + rx * Math.cos(start);
+            const startY2 = acy + ry * Math.sin(start);
+            ctx.lineTo(this.originX + startX2, this.originY + startY2);
+            if (typeof ctx.ellipse === 'function') ctx.ellipse(this.originX + acx, this.originY + acy, rx, ry, 0, start, end, end < start);
+            else ctx.arc(this.originX + acx, this.originY + acy, Math.max(rx, ry), start, end, end < start);
+            cx = acx + rx * Math.cos(end);
+            cy = acy + ry * Math.sin(end);
+          }
           break;
         case 'close':
           ctx.closePath();
@@ -381,6 +439,43 @@ export class Canvas {
     if (paint?.alpha !== undefined) ctx.globalAlpha = paint.alpha;
     ctx.drawImage(bitmap.image, this.originX + left, this.originY + top, bitmap.width, bitmap.height);
     ctx.restore();
+  }
+
+  concat(matrix) {
+    const [a, b, c, d, e, f] = matrix || [1, 0, 0, 1, 0, 0];
+    this.context.transform(a, b, c, d, e, f);
+  }
+
+  clipPath(commands) {
+    if (!commands || !commands.length) return false;
+    const ctx = this.context;
+    ctx.beginPath();
+    let cx = 0;
+    let cy = 0;
+    for (const cmd of commands) {
+      switch (cmd.type) {
+        case 'moveTo': cx = cmd.x; cy = cmd.y; ctx.moveTo(this.originX + cx, this.originY + cy); break;
+        case 'rMoveTo': cx += cmd.dx || 0; cy += cmd.dy || 0; ctx.moveTo(this.originX + cx, this.originY + cy); break;
+        case 'lineTo': cx = cmd.x; cy = cmd.y; ctx.lineTo(this.originX + cx, this.originY + cy); break;
+        case 'rLineTo': cx += cmd.x; cy += cmd.y; ctx.lineTo(this.originX + cx, this.originY + cy); break;
+        case 'quadTo': ctx.quadraticCurveTo(this.originX + cmd.x1, this.originY + cmd.y1, this.originX + cmd.x2, this.originY + cmd.y2); cx = cmd.x2; cy = cmd.y2; break;
+        case 'rQuadTo': {
+          const x1 = cx + (cmd.dx1 || 0); const y1 = cy + (cmd.dy1 || 0); cx += cmd.dx2 || 0; cy += cmd.dy2 || 0;
+          ctx.quadraticCurveTo(this.originX + x1, this.originY + y1, this.originX + cx, this.originY + cy); break;
+        }
+        case 'cubicTo': ctx.bezierCurveTo(this.originX + cmd.x1, this.originY + cmd.y1, this.originX + cmd.x2, this.originY + cmd.y2, this.originX + cmd.x3, this.originY + cmd.y3); cx = cmd.x3; cy = cmd.y3; break;
+        case 'rCubicTo': {
+          const x1 = cx + (cmd.dx1 || 0); const y1 = cy + (cmd.dy1 || 0);
+          const x2 = cx + (cmd.dx2 || 0); const y2 = cy + (cmd.dy2 || 0);
+          cx += cmd.dx3 || 0; cy += cmd.dy3 || 0;
+          ctx.bezierCurveTo(this.originX + x1, this.originY + y1, this.originX + x2, this.originY + y2, this.originX + cx, this.originY + cy); break;
+        }
+        case 'close': ctx.closePath(); break;
+        default: break;
+      }
+    }
+    ctx.clip();
+    return true;
   }
 
   drawVector(drawable, left, top, width, height) {
@@ -525,20 +620,37 @@ export function wrapText(text, textSize, maxWidth, typeface = 'Noto Sans CJK SC'
       lines.push('');
       continue;
     }
+    if (measureTextWidth(paragraph, textSize, typeface) <= maxWidth) {
+      lines.push(paragraph);
+      continue;
+    }
+    const tokens = paragraph.match(/[\u4e00-\u9fff]|[^\s\u4e00-\u9fff]+\s*|\s+/g) || [paragraph];
     let current = '';
     let width = 0;
-    for (const char of paragraph) {
-      const charWidth = measureTextWidth(char, textSize, typeface);
-      if (width + charWidth > maxWidth && current) {
-        lines.push(current);
-        current = char;
-        width = charWidth;
+    for (const token of tokens) {
+      const tokenWidth = measureTextWidth(token, textSize, typeface);
+      if (current && width + tokenWidth > maxWidth) {
+        lines.push(current.replace(/\s+$/, ''));
+        current = '';
+        width = 0;
+      }
+      if (tokenWidth > maxWidth && token.length > 1) {
+        for (const char of token) {
+          const charWidth = measureTextWidth(char, textSize, typeface);
+          if (current && width + charWidth > maxWidth) {
+            lines.push(current);
+            current = '';
+            width = 0;
+          }
+          current += char;
+          width += charWidth;
+        }
       } else {
-        current += char;
-        width += charWidth;
+        current += token;
+        width += tokenWidth;
       }
     }
-    lines.push(current);
+    lines.push(current.replace(/\s+$/, ''));
   }
   return lines;
 }
@@ -547,6 +659,43 @@ export function resolvePaintColor(paint) {
   const p = paint || null;
   if (!p) return 0xff000000;
   return applyColorFilter(p.color, p.colorFilter);
+}
+
+export function paintGradient(ctx, paint) {
+  const shader = paint?.shader;
+  if (!shader) return null;
+  const peer = shader.$peer || shader;
+  if (!peer) return null;
+  try {
+    if (peer.kind === 'linear') {
+      const gradient = ctx.createLinearGradient(peer.x0, peer.y0, peer.x1, peer.y1);
+      addGradientStops(gradient, peer);
+      return gradient;
+    }
+    if (peer.kind === 'radial') {
+      const gradient = ctx.createRadialGradient(peer.cx, peer.cy, peer.radius0 ?? 0, peer.cx, peer.cy, peer.radius1 ?? peer.radius ?? 0);
+      addGradientStops(gradient, peer);
+      return gradient;
+    }
+    if (peer.kind === 'sweep' && typeof ctx.createConicGradient === 'function') {
+      const gradient = ctx.createConicGradient((peer.startAngle || 0) * Math.PI / 180, peer.cx, peer.cy);
+      addGradientStops(gradient, peer);
+      return gradient;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+function addGradientStops(gradient, peer) {
+  const colors = peer.colors || [];
+  if (!colors.length) return;
+  const positions = peer.positions && peer.positions.length === colors.length ? peer.positions : null;
+  for (let i = 0; i < colors.length; i++) {
+    const offset = positions ? positions[i] : (colors.length === 1 ? 0 : i / (colors.length - 1));
+    gradient.addColorStop(Math.max(0, Math.min(1, Number(offset) || 0)), cssColor(colors[i]));
+  }
 }
 
 export function applyColorFilter(color, filter) {
@@ -585,8 +734,9 @@ export function applyColorFilter(color, filter) {
 function applyPaint(ctx, paint) {
   const p = paint || new Paint();
   const paintColor = applyColorFilter(p.color, p.colorFilter);
-  ctx.fillStyle = cssColor(paintColor);
-  ctx.strokeStyle = cssColor(paintColor);
+  const gradient = paintGradient(ctx, p);
+  ctx.fillStyle = gradient || cssColor(paintColor);
+  ctx.strokeStyle = gradient || cssColor(paintColor);
   ctx.lineWidth = p.strokeWidth || 1;
   if (p.strokeJoin) ctx.lineJoin = p.strokeJoin;
   if (p.strokeCap) ctx.lineCap = p.strokeCap;

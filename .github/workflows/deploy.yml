@@ -32,6 +32,9 @@ jobs:
       - name: Build browser bundle
         run: npm run build
 
+      - name: Check forbidden class references
+        run: npm run check:refs
+
       - name: Run regression tests
         run: npm run test:all
 

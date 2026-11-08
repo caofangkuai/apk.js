@@ -15,6 +15,42 @@ const ANDROID_FRAMEWORK_COLORS = new Map([
   [0x0106007b, 0xff333333], [0x0106007c, 0xff222222], [0x0106007d, 0xff111111],
 ]);
 
+function toByteView(bytes) {
+  if (bytes instanceof Uint8Array) return bytes;
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  if (bytes && bytes.buffer instanceof ArrayBuffer) return new Uint8Array(bytes.buffer, bytes.byteOffset || 0, bytes.byteLength || bytes.length);
+  return new Uint8Array(0);
+}
+
+export function parseNinePatchChunk(bytes) {
+  const data = toByteView(bytes);
+  if (data.length < 12 || data[0] !== 0x89 || data[1] !== 0x50) return null;
+  let offset = 8;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  while (offset + 8 <= data.length) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]);
+    const chunkStart = offset + 8;
+    if (type === 'npTc') {
+      const chunk = data.subarray(chunkStart, chunkStart + length);
+      if (chunk.length < 32) return null;
+      const view2 = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      const numX = chunk[1];
+      const numY = chunk[2];
+      const padding = [view2.getInt32(12), view2.getInt32(16), view2.getInt32(20), view2.getInt32(24)];
+      let cursor = 32;
+      const xDivs = [];
+      const yDivs = [];
+      for (let i = 0; i <= numX; i++) { xDivs.push(view2.getInt32(cursor)); cursor += 4; }
+      for (let i = 0; i <= numY; i++) { yDivs.push(view2.getInt32(cursor)); cursor += 4; }
+      return { xDivs, yDivs, padding };
+    }
+    if (type === 'IEND') break;
+    offset = chunkStart + length + 4;
+  }
+  return null;
+}
+
 function resolveAndroidColor(value) {
   let v = value;
   if (v && typeof v === 'object') v = v.reference ?? v.value ?? v;
@@ -254,7 +290,7 @@ export class Resources {
       }
       if (root?.name === 'vector') {
         const tint = this.resolveVectorTint(root);
-        return { type: 'xml', xml: root, tint, $descriptor: 'Landroid/graphics/drawable/VectorDrawable;' };
+        return { type: 'xml', xml: root, tint, density: this.density, $descriptor: 'Landroid/graphics/drawable/VectorDrawable;' };
       }
       return { type: 'xml', xml: root };
     }
@@ -265,10 +301,12 @@ export class Resources {
 
   decodeBitmap(bytes, key) {
     if (this.bitmapCache.has(key)) return this.bitmapCache.get(key);
+    const ninePatch = /\.9\.png$/i.test(String(key)) ? parseNinePatchChunk(bytes) : null;
     const loader = this.apk.imageLoader;
     if (loader) {
       const bitmap = new Bitmap(null, 0, 0, key);
       bitmap.pending = true;
+      if (ninePatch) bitmap.ninePatch = ninePatch;
       loader(bytes, key)
         .then((image) => {
           bitmap.image = image;
@@ -276,14 +314,17 @@ export class Resources {
           bitmap.height = image.height;
           bitmap.pending = false;
           this.apk.invalidate();
+          this.vm?.screen?.decorView?.requestLayout?.();
         })
         .catch(() => {
           bitmap.pending = false;
+          this.vm?.screen?.decorView?.requestLayout?.();
         });
       this.bitmapCache.set(key, bitmap);
       return bitmap;
     }
     const bitmap = new Bitmap(null, 1, 1, key);
+    if (ninePatch) bitmap.ninePatch = ninePatch;
     this.bitmapCache.set(key, bitmap);
     return bitmap;
   }

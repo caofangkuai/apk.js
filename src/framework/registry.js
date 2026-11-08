@@ -1,7 +1,7 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
 import { floatBitsToNumber, numberToFloatBits, toInt } from '../runtime/values.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
-import { JAVA_CORE_CLASSES, deviceCapabilities, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
+import { JAVA_CORE_CLASSES, deviceCapabilities, hardwareIdentity, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
 import {
   LayoutInflater,
   buildLayoutParamsViaDex,
@@ -9,6 +9,7 @@ import {
   layoutParamsDescriptorFor,
 } from './layout-inflater.js';
 import { Resources, convertDimension } from './resources.js';
+import { ATTR_IDS } from '../res/axml.js';
 import { Handler, Looper, Message, MessageQueue } from './os.js';
 import { Toast } from './toast.js';
 import { installSensorSources, readSensorValues } from './sensors.js';
@@ -47,7 +48,7 @@ import {
   resolveStateListColor,
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
-import { DRAWABLE_CLASSES, OUTLINE_CLASSES, drawableObject } from './drawables.js';
+import { DRAWABLE_CLASSES, OUTLINE_CLASSES, SHADER_CLASSES, drawableObject } from './drawables.js';
 import { OPENGL_CLASSES } from './opengl.js';
 
 export const FRAMEWORK_CLASSES = {};
@@ -245,13 +246,16 @@ function makeSinkStream(vm) {
   return object;
 }
 
-const INPUT_DEVICE_DEFINITIONS = [
+const INPUT_DEVICE_DEFINITIONS = (() => {
+  const identity = hardwareIdentity();
+  return [
   { id: 1, name: 'apk.js Touchscreen', vendorId: 1, productId: 1, descriptor: 'a1b2c3d4e5f60718', sources: 0x00001002 },
   { id: 2, name: 'apk.js Touch Keys', vendorId: 1, productId: 2, descriptor: 'b1b2c3d4e5f60719', sources: 0x00000101 },
   { id: 3, name: 'gpio-keys', vendorId: 1, productId: 3, descriptor: 'c1b2c3d4e5f6071a', sources: 0x00000101 },
-  { id: 4, name: 'wsa881x-i2c-codec -snd-card', vendorId: 1, productId: 4, descriptor: 'd1b2c3d4e5f6071b', sources: 0x00000001 },
-  { id: 5, name: 'wsa881x-i2c-codec -snd-card', vendorId: 1, productId: 5, descriptor: 'e1b2c3d4e5f6071c', sources: 0x00000001 },
-];
+    { id: 4, name: `${identity.soundCard} -snd-card`, vendorId: 1, productId: 4, descriptor: 'd1b2c3d4e5f6071b', sources: 0x00000001 },
+    { id: 5, name: `${identity.soundCard} -snd-card`, vendorId: 1, productId: 5, descriptor: 'e1b2c3d4e5f6071c', sources: 0x00000001 },
+  ];
+})();
 
 const SENSOR_DEFINITIONS = [
   { type: 1, name: 'Accelerometer', vendor: 'apk.js', stringType: 'android.sensor.accelerometer', power: 0.13, resolution: 0.0383, maxRange: 156.8 },
@@ -710,6 +714,22 @@ function packageOfClassName(className) {
   return index < 0 ? null : className.slice(0, index);
 }
 
+function metricsValue(metrics, name, fallback = 0) {
+  if (!metrics) return fallback;
+  if (metrics.$fields) {
+    for (const [key, value] of metrics.$fields) {
+      if (key.endsWith(`->${name}:F`)) return floatBitsToNumber(Number(value) | 0);
+      if (key.endsWith(`->${name}:I`)) return Number(value) | 0;
+    }
+  }
+  if (metrics.$peer && metrics.$peer[name] !== undefined) {
+    const value = Number(metrics.$peer[name]);
+    return Number.isFinite(value) ? value : fallback;
+  }
+  const direct = Number(metrics[name]);
+  return Number.isFinite(direct) ? direct : fallback;
+}
+
 function rectFNumber(bits) {
   return floatBitsToNumber(Number(bits) | 0);
 }
@@ -730,6 +750,18 @@ function readRectF(vm, rect) {
     return stored ? floatBitsToNumber(Number(raw) | 0) : Number(raw) || 0;
   };
   return [read('left'), read('top'), read('right'), read('bottom')];
+}
+
+function writeRectF(vm, rect, left, top, right, bottom) {
+  if (!rect) return;
+  const values = { left, top, right, bottom };
+  for (const [name, value] of Object.entries(values)) {
+    if (typeof vm?.setField === 'function') {
+      vm.setField(rect, { classDesc: 'Landroid/graphics/RectF;', name, type: 'F' }, numberToFloatBits(value));
+    } else if (rect.$peer) {
+      rect.$peer[name] = numberToFloatBits(value);
+    }
+  }
 }
 
 function resolveBitmapPeer(vm, bitmap) {
@@ -1004,6 +1036,7 @@ function buildFrameworkDefinitions(vm) {
         'getColor(I)I': (self, [resId], vm) => (self.resources || vm.resources).getColor(resId >>> 0),
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, (self.resources || vm.resources).getDrawable(resId >>> 0)),
         'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => vm.getSystemService?.(jsString(name)) ?? null,
+        'getSystemService(Ljava/lang/Class;)Ljava/lang/Object;': (self, [clazz], vm) => vm.getSystemServiceByClass?.(clazz) ?? null,
         'getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;': (self, [name], vm) => {
           const prefs = vm.allocateRawObject('Landroid/content/SharedPreferences;');
           prefs.$peer = { name: jsString(name) };
@@ -1087,6 +1120,7 @@ function buildFrameworkDefinitions(vm) {
         'getApplicationInfo()Landroid/content/pm/ApplicationInfo;': (self, _args, vm) =>
           vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;'),
         'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => contextSystemService(vm, jsString(name)),
+        'getSystemService(Ljava/lang/Class;)Ljava/lang/Object;': (self, [clazz], vm) => vm.getSystemServiceByClass?.(clazz) ?? null,
         'getClassLoader()Ljava/lang/ClassLoader;': (self, _args, vm) => {
           if (!vm.classLoaderObject) {
             vm.classLoaderObject = vm.allocateRawObject('Ljava/lang/ClassLoader;');
@@ -1199,8 +1233,8 @@ function buildFrameworkDefinitions(vm) {
       staticMethods: {
         'applyDimension(IFLandroid/util/DisplayMetrics;)F': (_self, [unit, value, metrics]) => {
           const v = Number(value) || 0;
-          const density = Number(metrics?.density ?? 1) || 1;
-          const scaledDensity = Number(metrics?.scaledDensity ?? density) || density;
+          const density = metricsValue(metrics, 'density', 1) || 1;
+          const scaledDensity = metricsValue(metrics, 'scaledDensity', density) || density;
           switch (unit | 0) {
             case 1: return v * density;
             case 2: return v * scaledDensity;
@@ -1570,15 +1604,6 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
-    nativeDef('Lf/a/h/a;', {
-      super: 'Ljava/lang/Object;',
-      staticMethods: {
-        'a(Ljava/lang/String;)Ljava/lang/String;': (_self, [command]) => runShellCommand(jsString(command)),
-      },
-    })
-  );
-
-  defs.push(
     nativeDef('Ljava/lang/Process;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -1611,15 +1636,6 @@ function buildFrameworkDefinitions(vm) {
       },
       staticMethods: {
         'getRuntime()Ljava/lang/Runtime;': (_self, _args, vm) => ensureRuntimeSingleton(vm),
-      },
-    })
-  );
-
-  defs.push(
-    nativeDef('Lf/a/m/a$a;', {
-      super: 'Ljava/lang/Object;',
-      methods: {
-        'a(Ljava/lang/String;)Ljava/lang/String;': (self, [command]) => runShellCommand(jsString(command)),
       },
     })
   );
@@ -2405,7 +2421,13 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/view/View;', {
       super: 'Ljava/lang/Object;',
       ctor: viewPeerConstructor('Landroid/view/View;'),
-      methods: viewMethods(),
+      methods: {
+        ...viewMethods(),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self, _args, vm) => applyProgrammaticViewStyle(vm, self, 0),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': (self, args, vm) => applyProgrammaticViewStyle(vm, self, args?.[2] | 0),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;II)V': (self, args, vm) => applyProgrammaticViewStyle(vm, self, args?.[2] | 0),
+        '<init>(Landroid/content/Context;)V': () => undefined,
+      },
       staticMethods: {
         'generateViewId()I': () => ++VIEW_ID_COUNTER,
         'getDefaultSize(II)I': (_self, [size, spec]) => getDefaultSize(size, spec),
@@ -2615,7 +2637,7 @@ function buildFrameworkDefinitions(vm) {
           }
           return false;
         },
-        'dispatchDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.dispatchDraw?.(canvas),
+        'dispatchDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.dispatchDraw?.(canvas?.$peer?.canvas || canvas),
         'getBackground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getBackground() ?? null,
         'getBaseline()I': (self) => self.view?.getBaseline?.() ?? -1,
         'getFocusedChild()Landroid/view/View;': () => null,
@@ -2717,7 +2739,6 @@ function buildFrameworkDefinitions(vm) {
           inflater.vm = self.vm;
           const result = inflater.inflate(resId, unwrapView(root) || null, !!attach);
           if (globalThis.__DBG_INF2) { const dump=(v,d)=>{ if(d>3)return; console.error('  '.repeat(d)+'TREE '+(v.id>>>0).toString(16)+' '+(v.$descriptor||v.constructor?.name)+' kids='+(v.children?.length||0)); for(const c of v.children||[]) dump(c,d+1); }; console.error('INFLATE_RES',(resId>>>0).toString(16)); if(result) dump(result,0); }
-          if (process.env.DBG_INF) console.error('INFLATE3', resId, 'root?', !!unwrapView(root), 'attach', !!attach, '->', result ? (result.constructor?.name + '#' + (result.id >>> 0)) : 'NULL');
           return viewObject(self.vm, result);
         },
         'setFactory(Landroid/view/LayoutInflater$Factory;)V': (self, [factory]) => {
@@ -3086,7 +3107,6 @@ function buildFrameworkDefinitions(vm) {
         const rc = vm.registry.resolve(self.classDesc);
         vm.ensureClassInitialized(rc);
         const object = vm.allocateObject(rc);
-        if (process.env.DBG_INV) console.error('REG-CTOR class=' + self.classDesc + ' rc=' + !!rc + ' obj=' + (object === null || object === undefined ? 'NIL' : typeof object) + ' args=' + (argumentList && argumentList.length));
         vm.executeMethod(targetMethod, object, argumentList);
         return object;
       },
@@ -3115,6 +3135,24 @@ function buildFrameworkDefinitions(vm) {
         },
         'setGravity(I)V': (self, [gravity]) => self.view?.setGravity(gravity | 0),
         'getTransformationMethod()Landroid/text/method/TransformationMethod;': () => null,
+        'getLineCount()I': (self) => self.view?.getLineCount?.() ?? 0,
+        'getMaxLines()I': (self) => self.view?.maxLines ?? 0,
+        'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines?.(lines | 0),
+        'setSingleLine(Z)V': (self, [single]) => self.view?.setSingleLine?.(!!single),
+        'setSingleLine()V': (self) => self.view?.setSingleLine?.(true),
+        'setEllipsize(Landroid/text/TextUtils$TruncateAt;)V': (self, [where]) => self.view?.setEllipsize?.(where ?? null),
+        'getEllipsize()Landroid/text/TextUtils$TruncateAt;': (self) => self.view?.getEllipsize?.() ?? null,
+        'setIncludeFontPadding(Z)V': (self, [include]) => self.view?.setIncludeFontPadding?.(!!include),
+        'getIncludeFontPadding()Z': (self) => self.view?.includeFontPadding ?? true,
+        'setLineSpacing(FF)V': (self, [extra, multiplier]) => self.view?.setLineSpacing?.(Number(extra), Number(multiplier)),
+        'setCompoundDrawables(Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;)V': (self, [l, t, r, b]) => self.view?.setCompoundDrawables?.(l, t, r, b),
+        'setCompoundDrawablesRelative(Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;)V': (self, [l, t, r, b]) => self.view?.setCompoundDrawables?.(l, t, r, b),
+        'setCompoundDrawablesWithIntrinsicBounds(IIII)V': (self, [l, t, r, b], vm) => {
+          const get = (id) => (id ? drawableObject(vm, vm.resources.getDrawable(id >>> 0)) : null);
+          self.view?.setCompoundDrawables?.(get(l), get(t), get(r), get(b));
+        },
+        'setCompoundDrawablePadding(I)V': (self, [padding]) => { if (self.view) self.view.compoundDrawablePadding = padding | 0; },
+        'getCompoundDrawablePadding()I': (self) => self.view?.compoundDrawablePadding ?? 0,
         'setMovementMethod(Landroid/text/method/MovementMethod;)V': (self, [method]) => {
           self.movementMethod = method ?? null;
         },
@@ -3468,17 +3506,49 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/widget/OverScroller;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        '<init>(Landroid/content/Context;)V': () => undefined,
-        '<init>(Landroid/content/Context;Landroid/view/animation/Interpolator;)V': () => undefined,
-        'isFinished()Z': () => true,
-        'abortAnimation()V': () => undefined,
-        'computeScrollOffset()Z': () => false,
-        'fling(IIIIIIIIII)Z': () => false,
-        'springBack(IIIIII)Z': () => false,
-        'getCurrX()I': () => 0,
-        'getCurrY()I': () => 0,
-        'startScroll(IIII)V': () => undefined,
-        'startScroll(IIIII)V': () => undefined,
+        '<init>(Landroid/content/Context;)V': (self) => { resetScroller(self); },
+        '<init>(Landroid/content/Context;Landroid/view/animation/Interpolator;)V': (self) => { resetScroller(self); },
+        'startScroll(IIII)V': (self, [sx, sy, dx, dy]) => startScroller(self, sx, sy, dx, dy, 250),
+        'startScroll(IIIII)V': (self, [sx, sy, dx, dy, duration]) => startScroller(self, sx, sy, dx, dy, duration),
+        'computeScrollOffset()Z': (self) => {
+          if (self.scrollerFinished) return false;
+          const elapsed = Date.now() - self.scrollerStartTime;
+          const duration = Math.max(1, self.scrollerDuration | 0);
+          if (elapsed >= duration) {
+            self.scrollerCurrX = self.scrollerFinalX;
+            self.scrollerCurrY = self.scrollerFinalY;
+            self.scrollerFinished = true;
+          } else {
+            const t = elapsed / duration;
+            self.scrollerCurrX = Math.round(self.scrollerStartX + (self.scrollerFinalX - self.scrollerStartX) * t);
+            self.scrollerCurrY = Math.round(self.scrollerStartY + (self.scrollerFinalY - self.scrollerStartY) * t);
+          }
+          return true;
+        },
+        'isFinished()Z': (self) => !!self.scrollerFinished,
+        'abortAnimation()V': (self) => { self.scrollerFinished = true; },
+        'forceFinished(Z)V': (self, [finished]) => { self.scrollerFinished = !!finished; },
+        'getCurrX()I': (self) => self.scrollerCurrX | 0,
+        'getCurrY()I': (self) => self.scrollerCurrY | 0,
+        'getStartX()I': (self) => self.scrollerStartX | 0,
+        'getStartY()I': (self) => self.scrollerStartY | 0,
+        'getFinalX()I': (self) => self.scrollerFinalX | 0,
+        'getFinalY()I': (self) => self.scrollerFinalY | 0,
+        'fling(IIIIIIIIII)Z': (self, [sx, sy, vx, vy, minX, maxX, minY, maxY]) => {
+          const targetX = Math.max(minX | 0, Math.min(maxX | 0, (sx | 0) + Math.round((vx | 0) * 0.2)));
+          const targetY = Math.max(minY | 0, Math.min(maxY | 0, (sy | 0) + Math.round((vy | 0) * 0.2)));
+          startScroller(self, sx | 0, sy | 0, targetX - (sx | 0), targetY - (sy | 0), 300);
+          return true;
+        },
+        'springBack(IIIIII)Z': (self, [sx, sy, minX, maxX, minY, maxY]) => {
+          const targetX = Math.max(minX | 0, Math.min(maxX | 0, sx | 0));
+          const targetY = Math.max(minY | 0, Math.min(maxY | 0, sy | 0));
+          startScroller(self, sx | 0, sy | 0, targetX - (sx | 0), targetY - (sy | 0), 250);
+          return true;
+        },
+        'setFriction(F)V': () => undefined,
+        'extendDuration(I)V': () => undefined,
+        'timePassed()I': (self) => (Date.now() - (self.scrollerStartTime || Date.now())) | 0,
       },
     })
   );
@@ -3488,6 +3558,9 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/ImageView;'),
       methods: {
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self, _args, vm) => applyProgrammaticViewStyle(vm, self, 0),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': (self, args, vm) => applyProgrammaticViewStyle(vm, self, args?.[2] | 0),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;II)V': (self, args, vm) => applyProgrammaticViewStyle(vm, self, args?.[2] | 0),
         'setImageResource(I)V': (self, [resId]) => {
           self.view.drawable = drawableObject(self.vm, self.vm.resources.getDrawable(resId >>> 0));
           self.view.invalidate();
@@ -3652,10 +3725,25 @@ function buildFrameworkDefinitions(vm) {
         },
         'areAllItemsEnabled()Z': () => true,
         'isEnabled(I)Z': () => true,
-        'registerDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
-        'unregisterDataSetObserver(Landroid/database/DataSetObserver;)V': () => undefined,
-        'notifyDataSetChanged()V': () => undefined,
-        'notifyDataSetInvalidated()V': () => undefined,
+        'registerDataSetObserver(Landroid/database/DataSetObserver;)V': (self, [observer]) => {
+          if (!observer) return;
+          if (!self.observers) self.observers = new Set();
+          self.observers.add(observer);
+        },
+        'unregisterDataSetObserver(Landroid/database/DataSetObserver;)V': (self, [observer]) => {
+          self.observers?.delete(observer);
+        },
+        'notifyDataSetChanged()V': (self, _args, vm) => {
+          self.$dirty = (self.$dirty | 0) + 1;
+          for (const observer of self.observers || []) {
+            try {
+              vm.invoke({ classDesc: 'Landroid/database/DataSetObserver;', name: 'onChanged', proto: { descriptor: '()V', parameters: [], returnType: 'V' } }, observer, [], 'virtual');
+            } catch (_) {
+              // 忽略观察者异常
+            }
+          }
+        },
+        'notifyDataSetInvalidated()V': (self) => { self.$dirty = (self.$dirty | 0) + 1; },
       },
     })
   );
@@ -3697,8 +3785,8 @@ function buildFrameworkDefinitions(vm) {
         'getOnItemSelectedListener()Landroid/widget/AdapterView$OnItemSelectedListener;': (self) => self.view?.$onItemSelectedListener ?? null,
         'getSelectedItemPosition()I': () => -1,
         'getSelectedItemId()J': () => 0,
-        'getFirstVisiblePosition()I': () => 0,
-        'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
+        'getFirstVisiblePosition()I': (self) => self.view?.firstVisiblePosition?.() ?? 0,
+        'getLastVisiblePosition()I': (self) => self.view?.lastVisiblePosition?.() ?? Math.max(0, (self.view?.$items?.length ?? 1) - 1),
         'getChildCount()I': (self) => self.view?.$items?.length ?? 0,
         'getChildAt(I)Landroid/view/View;': (self, [index]) => self.view?.$items?.[index | 0]?.$javaObject ?? null,
         'getPositionForView(Landroid/view/View;)I': () => -1,
@@ -4431,6 +4519,7 @@ function buildFrameworkDefinitions(vm) {
         'setShader(Landroid/graphics/Shader;)V': (self, [shader]) => {
           self.paint.shader = shader ?? null;
         },
+        'getShader()Landroid/graphics/Shader;': (self) => self.paint.shader ?? null,
         'setDither(Z)V': () => undefined,
         'setFilterBitmap(Z)V': () => undefined,
         'setSubpixelText(Z)V': () => undefined,
@@ -4562,6 +4651,15 @@ function buildFrameworkDefinitions(vm) {
           self.canvas?.clipPath?.(peer?.commands || []);
           return true;
         },
+        'clipPath(Landroid/graphics/Path;Landroid/graphics/Region$Op;)Z': (self, [path]) => {
+          const peer = path?.$peer || path;
+          self.canvas?.clipPath?.(peer?.commands || []);
+          return true;
+        },
+        'concat(Landroid/graphics/Matrix;)V': (self, [matrix]) => {
+          const m = matrix?.$peer?.matrix;
+          if (m && self.canvas?.concat) self.canvas.concat(m);
+        },
         'scale(FF)V': (self, [sx, sy]) => self.canvas?.scale?.(sx, sy),
         'saveLayer(Landroid/graphics/RectF;Landroid/graphics/Paint;)I': (self, [bounds, paint], vm) => {
           const rect = bounds ? readRectF(vm, bounds) : null;
@@ -4672,6 +4770,85 @@ function buildFrameworkDefinitions(vm) {
       methods: {
         'name()Ljava/lang/String;': (self) => self.name,
         'ordinal()I': (self) => self.ordinal,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/graphics/Matrix;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class MatrixPeer {
+        constructor() {
+          this.matrix = [1, 0, 0, 1, 0, 0];
+        }
+      },
+      methods: {
+        '<init>()V': (self) => { self.matrix = [1, 0, 0, 1, 0, 0]; },
+        '<init>(Landroid/graphics/Matrix;)V': (self, [other]) => { self.matrix = [...(other?.$peer?.matrix || [1, 0, 0, 1, 0, 0])]; },
+        'reset()V': (self) => { self.matrix = [1, 0, 0, 1, 0, 0]; },
+        'set(Landroid/graphics/Matrix;)V': (self, [other]) => { self.matrix = [...(other?.$peer?.matrix || [1, 0, 0, 1, 0, 0])]; },
+        'setConcat(Landroid/graphics/Matrix;Landroid/graphics/Matrix;)V': (self, [a, b]) => {
+          self.matrix = multiplyMatrices(a?.$peer?.matrix || [1, 0, 0, 1, 0, 0], b?.$peer?.matrix || [1, 0, 0, 1, 0, 0]);
+        },
+        'setTranslate(FF)V': (self, [x, y]) => { self.matrix = [1, 0, 0, 1, Number(x) || 0, Number(y) || 0]; },
+        'setScale(FF)V': (self, [sx, sy]) => { self.matrix = [Number(sx) || 0, 0, 0, Number(sy) || 0, 0, 0]; },
+        'setScale(FFFF)V': (self, [sx, sy, px, py]) => {
+          const x = Number(sx) || 0; const y = Number(sy) || 0;
+          self.matrix = [x, 0, 0, y, (Number(px) || 0) * (1 - x), (Number(py) || 0) * (1 - y)];
+        },
+        'setRotate(F)V': (self, [degrees]) => {
+          const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
+          self.matrix = [c, s, -s, c, 0, 0];
+        },
+        'setRotate(FFF)V': (self, [degrees, px, py]) => {
+          const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
+          const x = Number(px) || 0; const y = Number(py) || 0;
+          self.matrix = [c, s, -s, c, x - c * x + s * y, y - s * x - c * y];
+        },
+        'postTranslate(FF)V': (self, [x, y]) => { self.matrix = multiplyMatrices(self.matrix, [1, 0, 0, 1, Number(x) || 0, Number(y) || 0]); },
+        'preTranslate(FF)V': (self, [x, y]) => { self.matrix = multiplyMatrices([1, 0, 0, 1, Number(x) || 0, Number(y) || 0], self.matrix); },
+        'postScale(FF)V': (self, [sx, sy]) => { self.matrix = multiplyMatrices(self.matrix, [Number(sx) || 0, 0, 0, Number(sy) || 0, 0, 0]); },
+        'preScale(FF)V': (self, [sx, sy]) => { self.matrix = multiplyMatrices([Number(sx) || 0, 0, 0, Number(sy) || 0, 0, 0], self.matrix); },
+        'postRotate(F)V': (self, [degrees]) => {
+          const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
+          self.matrix = multiplyMatrices(self.matrix, [c, s, -s, c, 0, 0]);
+        },
+        'preRotate(F)V': (self, [degrees]) => {
+          const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
+          self.matrix = multiplyMatrices([c, s, -s, c, 0, 0], self.matrix);
+        },
+        'getValues([F)V': (self, [out]) => { if (out?.$data) for (let i = 0; i < 9 && i < self.matrix.length; i++) out.$data[i] = numberToFloatBits(self.matrix[i]); },
+        'setValues([F)V': (self, [values]) => { if (values?.$data) self.matrix = values.$data.slice(0, 9).map((v) => floatBitsToNumber(Number(v) | 0)); },
+        'isIdentity()Z': (self) => {
+          const m = self.matrix || [];
+          return (m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0) ? 1 : 0;
+        },
+        'mapRect(Landroid/graphics/RectF;)Z': (self, [rect], vm) => {
+          if (!rect) return false;
+          const [l, t, r, b] = readRectF(vm, rect);
+          const pts = [[l, t], [r, t], [l, b], [r, b]].map(([x, y]) => mapPoint(self.matrix, x, y));
+          let minX = pts[0][0], maxX = pts[0][0], minY = pts[0][1], maxY = pts[0][1];
+          for (const [x, y] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+          writeRectF(vm, rect, minX, minY, maxX, maxY);
+          return true;
+        },
+        'mapPoints([F)V': (self, [points]) => {
+          if (!points?.$data) return;
+          const data = points.$data;
+          for (let i = 0; i + 1 < data.length; i += 2) {
+            const [x, y] = mapPoint(self.matrix, floatBitsToNumber(Number(data[i]) | 0), floatBitsToNumber(Number(data[i + 1]) | 0));
+            data[i] = numberToFloatBits(x);
+            data[i + 1] = numberToFloatBits(y);
+          }
+        },
+        'mapPoints([F[F)V': (self, [src, dst]) => {
+          if (!src?.$data || !dst?.$data) return;
+          for (let i = 0; i + 1 < src.$data.length; i += 2) {
+            const [x, y] = mapPoint(self.matrix, floatBitsToNumber(Number(src.$data[i]) | 0), floatBitsToNumber(Number(src.$data[i + 1]) | 0));
+            dst.$data[i] = numberToFloatBits(x);
+            dst.$data[i + 1] = numberToFloatBits(y);
+          }
+        },
       },
     })
   );
@@ -5139,6 +5316,55 @@ function buildFrameworkDefinitions(vm) {
     })
   );
 
+    defs.push(
+    nativeDef('Landroid/os/BatteryManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getLongProperty(I)J': (_self, [property]) => {
+          switch (property | 0) {
+            case 1: return 3200000;   // CHARGE_COUNTER
+            case 2: return -420000;   // CURRENT_NOW
+            case 3: return -400000;   // CURRENT_AVERAGE
+            case 4: return 87;        // CAPACITY
+            case 5: return 12000000;  // ENERGY_COUNTER
+            case 6: return 2;         // STATUS
+            default: return 0;
+          }
+        },
+        'getIntProperty(I)I': (self, [property], vm) => {
+          const value = vm.registry.invokeNative
+            ? null
+            : null;
+          void value;
+          switch (property | 0) {
+            case 1: return 3200000;
+            case 2: return -420000;
+            case 3: return -400000;
+            case 4: return 87;
+            case 5: return 12000000;
+            case 6: return 2;
+            default: return 0;
+          }
+        },
+        'isCharging()Z': () => true,
+        'getStringProperty(I)Ljava/lang/String;': () => null,
+      },
+    }),
+    nativeDef('Landroid/hardware/usb/UsbManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getDeviceList()Ljava/util/HashMap;': (_self, _args, vm) => {
+          const map = vm.allocateRawObject('Ljava/util/HashMap;');
+          map.$peer = { map: new Map() };
+          return map;
+        },
+        'getAccessoryList()[Landroid/hardware/usb/UsbAccessory;': () => null,
+        'hasPermission(Landroid/hardware/usb/UsbDevice;)Z': () => false,
+        'openDevice(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;': () => null,
+      },
+    }),
+    );
+
   defs.push(
     nativeDef('Landroid/os/Build;', {
       super: 'Ljava/lang/Object;',
@@ -5463,6 +5689,7 @@ function buildFrameworkDefinitions(vm) {
 
   defs.push(...Object.values(OPENGL_CLASSES));
   defs.push(...Object.values(OUTLINE_CLASSES));
+  defs.push(...Object.values(SHADER_CLASSES));
   defs.push(...Object.values(DRAWABLE_CLASSES));
   defs.push(...coreGraphicDefs());
   defs.push(...cryptoDefs());
@@ -6542,7 +6769,6 @@ function viewMethods() {
     'requestApplyInsets()V': () => undefined,
     'setOnKeyListener(Landroid/view/View$OnKeyListener;)V': () => undefined,
     'setMeasuredDimension(II)V': (self, [w, h], vm) => {
-      if (globalThis.__RVT && /RecyclerView$/.test(String(self.object?.$dexClass?.descriptor || self.view?.$descriptor || ''))) console.error('RVSMD ' + (self.view?.$descriptor) + ' w=' + (w|0) + ' h=' + (h|0));
       self.view?.setMeasuredDimension(w | 0, h | 0);
       syncDexViewField(self, vm, 'mMeasuredWidth', 'I', w | 0);
       syncDexViewField(self, vm, 'mMeasuredHeight', 'I', h | 0);
@@ -6764,9 +6990,8 @@ function viewMethods() {
     'getPaddingRight()I': (self) => self.view?.getPaddingRight() ?? 0,
     'getPaddingBottom()I': (self) => self.view?.getPaddingBottom() ?? 0,
     'getLayoutParams()Landroid/view/ViewGroup$LayoutParams;': (self, _args, vm) => {
-      if (process.env.DBG_LP && !self?.view) console.error('GLP-SELF isJavaObj=' + !!(self && self.$fields) + ' ncls=' + self?.$nativeClass + ' dex=' + self?.$dexClass?.descriptor + ' peer=' + !!self?.$peer);
       const view = self.view;
-      if (!view) { if (process.env.DBG_LP) console.error('GLP-NOVIEW self=', self && (self.constructor?.name||'obj'), 'selfDesc=', self?.descriptor, 'objDesc=', self?.object?.$dexClass?.descriptor, 'keys=', self&&Object.keys(self).join(',')); return null; }
+      if (!view) return null;
       const descriptor = layoutParamsDescriptorFor(view, vm);
       const existing = view.$layoutParamsObject;
       if (existing && existing.$fields) {
@@ -6799,7 +7024,6 @@ function viewMethods() {
       object.$layoutParams = effective;
       view.layoutParams = effective;
       view.$layoutParamsObject = object;
-      if (process.env.DBG_LP) console.error('GLP parentName=', view.parent?.constructor?.name, 'parentDesc=', view.parent?.$descriptor, 'desc=', descriptor, 'view=', view.constructor?.name, 'viewDesc=', view.$descriptor);
       return object;
     },
     'setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V': (self, [params]) => {
@@ -6835,8 +7059,8 @@ function viewMethods() {
     },
     'onMeasure(II)V': (self, [w, h]) => self.view?.onMeasure(w, h),
     'onLayout(ZIIII)V': (self, [changed, l, t, r, b]) => self.view?.onLayout(!!changed, l, t, r, b),
-    'onDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.onDraw(canvas),
-    'draw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.draw(canvas),
+    'onDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.onDraw(canvas?.$peer?.canvas || canvas),
+    'draw(Landroid/graphics/Canvas;)V': (self, [canvas]) => self.view?.draw(canvas?.$peer?.canvas || canvas),
     'onTouchEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => self.view?.onTouchEvent(event) ?? false,
     'dispatchTouchEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => self.view?.dispatchTouchEvent(event) ?? false,
     'onAttachedToWindow()V': (self) => self.view?.onAttachedToWindow(),
@@ -7080,9 +7304,85 @@ const DEFAULT_THEME_ATTRIBUTES = {
   colorPrimaryDark: 0xff303f9f >>> 0,
 };
 
+function multiplyMatrices(a, b) {
+  const [a0, a1, a2, a3, a4, a5] = a;
+  const [b0, b1, b2, b3, b4, b5] = b;
+  return [
+    a0 * b0 + a2 * b1,
+    a1 * b0 + a3 * b1,
+    a0 * b2 + a2 * b3,
+    a1 * b2 + a3 * b3,
+    a0 * b4 + a2 * b5 + a4,
+    a1 * b4 + a3 * b5 + a5,
+  ];
+}
+
+function mapPoint(matrix, x, y) {
+  const [a, b, c, d, e, f] = matrix || [1, 0, 0, 1, 0, 0];
+  return [a * x + c * y + e, b * x + d * y + f];
+}
+
+function applyProgrammaticViewStyle(vm, self, defStyleAttr) {
+  const view = self?.view;
+  if (!view || !defStyleAttr || !vm?.resources) return;
+  const ids = [
+    ATTR_IDS.minWidth, ATTR_IDS.minHeight, ATTR_IDS.background, ATTR_IDS.scaleType,
+    ATTR_IDS.padding, ATTR_IDS.paddingLeft, ATTR_IDS.paddingTop, ATTR_IDS.paddingRight, ATTR_IDS.paddingBottom,
+    ATTR_IDS.textSize, ATTR_IDS.textColor, ATTR_IDS.textAllCaps, ATTR_IDS.textStyle, ATTR_IDS.gravity,
+  ];
+  const values = themeAttributeValues(vm, ids, 0, null, defStyleAttr | 0);
+  const present = values.__present || new Set();
+  const density = vm.resources.density || 1;
+  const num = (id) => {
+    if (!present.has(id >>> 0)) return null;
+    const value = values.get(id >>> 0);
+    if (typeof value === 'number') return value;
+    if (value?.dimension) return Math.round(convertDimension(value, density));
+    if (typeof value === 'string') {
+      const resolved = vm.resources.resolve?.(value);
+      return typeof resolved === 'number' ? resolved : null;
+    }
+    return null;
+  };
+  const minWidth = num(ATTR_IDS.minWidth);
+  if (minWidth !== null) view.minWidth = minWidth;
+  const minHeight = num(ATTR_IDS.minHeight);
+  if (minHeight !== null) view.minHeight = minHeight;
+  // 背景交由 DEX/主题链路处理，避免把主题属性误解析成颜色。
+  if (present.has(ATTR_IDS.scaleType)) {
+    const ordinal = Number(values.get(ATTR_IDS.scaleType)) | 0;
+    view.scaleType = ['matrix', 'fitXY', 'fitStart', 'fitCenter', 'fitEnd', 'center', 'centerCrop', 'centerInside'][ordinal] || 'fitCenter';
+  }
+  const padding = num(ATTR_IDS.padding);
+  if (padding !== null) view.setPadding?.(padding, padding, padding, padding);
+  const paddings = [ATTR_IDS.paddingLeft, ATTR_IDS.paddingTop, ATTR_IDS.paddingRight, ATTR_IDS.paddingBottom].map((id) => num(id));
+  if (paddings.some((value) => value !== null)) {
+    view.paddingLeft = paddings[0] ?? view.paddingLeft;
+    view.paddingTop = paddings[1] ?? view.paddingTop;
+    view.paddingRight = paddings[2] ?? view.paddingRight;
+    view.paddingBottom = paddings[3] ?? view.paddingBottom;
+  }
+  const textSize = num(ATTR_IDS.textSize);
+  if (textSize !== null && typeof view.setTextSize === 'function') view.setTextSize(textSize);
+  if (present.has(ATTR_IDS.textColor) && typeof view.setTextColor === 'function') {
+    const raw = values.get(ATTR_IDS.textColor);
+    if (typeof raw === 'number') view.setTextColor(raw >>> 0);
+    else if (typeof raw === 'string') {
+      const resId = vm.resources.resolve?.(raw);
+      if (typeof resId === 'number') view.setTextColor(resId >>> 0);
+    }
+  }
+  if (present.has(ATTR_IDS.textAllCaps) && typeof view.setTextAllCaps === 'function') view.setTextAllCaps(!!values.get(ATTR_IDS.textAllCaps));
+  const gravity = num(ATTR_IDS.gravity);
+  if (gravity !== null) view.gravity = gravity;
+}
+
 function themeStore(vm) {
   if (!vm) return DEFAULT_THEME_ATTRIBUTES;
-  if (!vm.themeAttributes) vm.themeAttributes = { ...DEFAULT_THEME_ATTRIBUTES };
+  if (!vm.themeAttributes) {
+    const density = vm.resources?.displayMetrics?.density || 1;
+    vm.themeAttributes = { ...DEFAULT_THEME_ATTRIBUTES, actionBarSize: Math.round(56 * density) };
+  }
   return vm.themeAttributes;
 }
 
@@ -7231,6 +7531,15 @@ function frameworkColorAttrKey(id) {
   return value >= 0x01000000 && value < 0x02000000 ? FRAMEWORK_COLOR_ATTR_KEYS.get(value) || null : null;
 }
 
+const BACKGROUND_COLOR_KEYS = new Set([
+  'windowBackground', 'colorBackground', 'background', 'colorSurface', 'colorSurfaceVariant',
+]);
+const TEXT_COLOR_KEYS = new Set([
+  'textColor', 'textColorPrimary', 'textColorSecondary', 'textColorTertiary',
+  'textColorHint', 'textColorLink', 'textColorHighlight',
+  'textColorPrimaryInverse', 'textColorSecondaryInverse',
+]);
+
 function resolveThemeColorForKey(vm, key) {
   if (!key) return undefined;
   const store = themeStore(vm);
@@ -7247,11 +7556,11 @@ function resolveThemeColorForKey(vm, key) {
     const resolved = vm.resources?.resolve?.(refId >>> 0);
     if (typeof resolved === 'number') return resolved >>> 0;
   }
-  if (/background/i.test(key)) {
+  if (BACKGROUND_COLOR_KEYS.has(key)) {
     const fallback = store.colorBackground ?? store.colorSurface ?? 0xffffffff;
     if (typeof fallback === 'number') return fallback >>> 0;
   }
-  if (/text/i.test(key)) {
+  if (TEXT_COLOR_KEYS.has(key)) {
     const fallback = store.textColorPrimary ?? 0xff000000;
     if (typeof fallback === 'number') return fallback >>> 0;
   }
@@ -7315,8 +7624,8 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
       result.set(id, store[key]);
       present.add(id);
     } else if (key) {
-      const cosmetic = /color/i.test(key);
-      result.set(id, cosmetic ? 0xff2196f3 >>> 0 : 0);
+      const isColorAttr = key.endsWith('Color') || key.startsWith('color');
+      result.set(id, isColorAttr ? 0xff2196f3 >>> 0 : 0);
     } else {
       result.set(id, 0);
     }

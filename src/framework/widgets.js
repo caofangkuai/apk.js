@@ -247,17 +247,29 @@ export class TextView extends View {
     const paint = this.textPaint;
     paint.textSize = this.textSize;
     const metrics = paint.getFontMetricsInt();
-    const lineHeight = Math.max(1, metrics.descent - metrics.ascent);
-    return { ascent: metrics.ascent, descent: metrics.descent, leading: metrics.leading, lineHeight };
+    const pitch = Math.max(1, Math.round((metrics.descent - metrics.ascent) * this.lineSpacingMultiplier + this.lineSpacingExtra));
+    const topPadding = this.includeFontPadding ? Math.max(0, -metrics.top) : Math.max(0, -metrics.ascent);
+    const bottomPadding = this.includeFontPadding ? Math.max(0, metrics.bottom - metrics.descent) : 0;
+    return {
+      ascent: metrics.ascent,
+      descent: metrics.descent,
+      top: metrics.top,
+      bottom: metrics.bottom,
+      leading: metrics.leading,
+      pitch,
+      topPadding,
+      bottomPadding,
+      firstBaseline: (this.includeFontPadding ? -metrics.top : -metrics.ascent),
+    };
   }
 
   lineHeightPx() {
-    return this.textLineMetrics().lineHeight * this.lineSpacingMultiplier + this.lineSpacingExtra;
+    return this.textLineMetrics().pitch;
   }
 
   getBaseline() {
-    const { ascent } = this.textLineMetrics();
-    return Math.round(this.paddingTop - ascent);
+    const { firstBaseline } = this.textLineMetrics();
+    return Math.round(this.paddingTop + (this.includeFontPadding ? firstBaseline : firstBaseline));
   }
 
   getLineHeight() {
@@ -413,7 +425,7 @@ export class TextView extends View {
       measureTextWidth(display, this.textSize, this.typeface)
       + compoundPadding.left + compoundPadding.right + compoundLeft + compoundRight,
     );
-    const lineHeight = this.lineHeightPx();
+    const textMetrics = this.textLineMetrics();
     const widthMode = MeasureSpec.getMode(widthSpec);
     const heightMode = MeasureSpec.getMode(heightSpec);
     let width = desiredWidth;
@@ -422,11 +434,11 @@ export class TextView extends View {
     width = Math.max(width, this.minWidth + this.paddingLeft + this.paddingRight);
     this.ensureTextLayout(width);
     const lines = Math.max(1, this.lines.length);
-    let height = Math.ceil(lines * lineHeight) + compoundPadding.top + compoundPadding.bottom;
+    const textHeight = (this.includeFontPadding ? textMetrics.bottom - textMetrics.top : textMetrics.descent - textMetrics.ascent) + (lines - 1) * textMetrics.pitch;
+    let height = Math.ceil(Math.max(textMetrics.pitch, textHeight)) + compoundPadding.top + compoundPadding.bottom;
     if (heightMode === MeasureSpec.EXACTLY) height = MeasureSpec.getSize(heightSpec);
     else if (heightMode === MeasureSpec.AT_MOST) height = Math.min(height, MeasureSpec.getSize(heightSpec));
     height = Math.max(height, this.minHeight + compoundPadding.top + compoundPadding.bottom);
-    if (globalThis.__TXT && this.text === 'apk.js Browser') console.error('TXMEAS w=' + width + ' h=' + height + ' lines=' + this.lines.length + ' lh=' + lineHeight + ' minH=' + this.minHeight + ' padT=' + this.paddingTop + ' padB=' + this.paddingBottom + ' hMode=' + heightMode + ' hSize=' + MeasureSpec.getSize(heightSpec));
     this.setMeasuredDimension(width, height);
   }
 
@@ -456,12 +468,14 @@ export class TextView extends View {
     }
     const metrics = this.textLineMetrics();
     const paintMetrics = paint.getFontMetricsInt();
-    const lineHeight = Math.max(1, paintMetrics.bottom - paintMetrics.top) * this.lineSpacingMultiplier + this.lineSpacingExtra;
+    const lineHeight = metrics.pitch;
+    const firstBaselineOffset = metrics.firstBaseline;
     const compoundPadding = this.compoundPadding();
     const compoundLeftDrawable = this.compoundWidth([0]);
     const compoundRightDrawable = this.compoundWidth([2]);
     const boxHeight = height - compoundPadding.top - compoundPadding.bottom;
-    const layoutHeight = this.lines.length * lineHeight;
+    const textHeight = (this.includeFontPadding ? metrics.bottom - metrics.top : metrics.descent - metrics.ascent) + (this.lines.length - 1) * metrics.pitch;
+    const layoutHeight = Math.max(lineHeight, textHeight);
     const gravity = this.gravity;
     let voffset = 0;
     if ((gravity & 0x70) !== 0x30 && layoutHeight < boxHeight) {
@@ -492,7 +506,7 @@ export class TextView extends View {
       } else if ((gravity & 0x07) === 0x05) {
         x = baseRight - lineWidth;
       }
-      const baseline = compoundPadding.top + voffset + i * lineHeight - paintMetrics.top;
+      const baseline = compoundPadding.top + voffset + firstBaselineOffset + i * lineHeight;
       canvas.drawText(line, x, baseline, paint);
     }
     if (ctx) ctx.restore();
@@ -668,6 +682,70 @@ function normalizeScaleType(value) {
   const index = SCALE_TYPES.findIndex((name) => name.toLowerCase() === text.toLowerCase().replace(/[_-]/g, ''));
   if (index >= 0) return SCALE_TYPES[index];
   return 'fitCenter';
+}
+
+function createOffscreenContext(sourceCtx, width, height) {
+  try {
+    if (typeof document !== 'undefined' && document.createElement) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(width));
+      canvas.height = Math.max(1, Math.round(height));
+      return canvas.getContext('2d');
+    }
+    const Ctor = sourceCtx?.canvas?.constructor;
+    if (Ctor) {
+      const canvas = new Ctor(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
+      return canvas.getContext('2d');
+    }
+  } catch (_) {
+    void _;
+  }
+  return null;
+}
+
+function drawDexDrawableCentered(ctx, drawable, target, vm, view) {
+  const width = Math.max(1, Math.round(target.right - target.left));
+  const height = Math.max(1, Math.round(target.bottom - target.top));
+  const pad = Math.max(width, height);
+  const surfaceWidth = width + pad * 2;
+  const surfaceHeight = height + pad * 2;
+  const offscreen = createOffscreenContext(ctx, surfaceWidth, surfaceHeight);
+  if (!offscreen) {
+    drawDrawable(ctx, drawable, target, { vm, state: view.drawableStateMap(), stateSet: view.drawableState() });
+    return;
+  }
+  drawDrawable(offscreen, drawable, { left: pad, top: pad, right: pad + width, bottom: pad + height }, {
+    vm,
+    state: view.drawableStateMap(),
+    stateSet: view.drawableState(),
+  });
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  try {
+    const data = offscreen.getImageData(0, 0, surfaceWidth, surfaceHeight).data;
+    for (let y = 0; y < surfaceHeight; y++) {
+      for (let x = 0; x < surfaceWidth; x++) {
+        if (data[(y * surfaceWidth + x) * 4 + 3] === 0) continue;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  } catch (_) {
+    minX = maxX = minY = maxY = -1;
+  }
+  if (maxX < 0) {
+    drawDrawable(ctx, drawable, target, { vm, state: view.drawableStateMap(), stateSet: view.drawableState() });
+    return;
+  }
+  const inkWidth = maxX - minX + 1;
+  const inkHeight = maxY - minY + 1;
+  const dx = target.left + Math.round((width - inkWidth) / 2) - minX;
+  const dy = target.top + Math.round((height - inkHeight) / 2) - minY;
+  ctx.drawImage(offscreen.canvas, dx, dy);
 }
 
 export class ImageView extends View {
@@ -879,7 +957,8 @@ export class ImageView extends View {
       canvas.drawVector(drawable, rect.left, rect.top, rect.width, rect.height);
     } else {
       const vm = this.$vm || this.vm;
-      drawDrawable(ctx, drawable, target, { vm, state: this.drawableStateMap(), stateSet: this.drawableState() });
+      if (drawable.$dexClass) drawDexDrawableCentered(ctx, drawable, target, vm, this);
+      else drawDrawable(ctx, drawable, target, { vm, state: this.drawableStateMap(), stateSet: this.drawableState() });
     }
     ctx.restore();
   }

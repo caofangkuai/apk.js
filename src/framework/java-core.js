@@ -666,7 +666,6 @@ export const JAVA_CORE_CLASSES = {
       },
       'getConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;': (self, [paramTypes], vm) => {
         const result = findConstructor(vm, self.$descriptor, paramTypes, { declaredOnly: true });
-        if (process.env.DBG_INV) console.error('GETCTOR ' + self.$descriptor + ' params=' + (paramTypes?.$data?.length ?? 'null') + ' -> ' + (result ? 'ok' : 'NULL'));
         return result;
       },
       'getDeclaredConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;': (self, [paramTypes], vm) =>
@@ -2632,6 +2631,12 @@ JAVA_CORE_CLASSES['Ljava/util/Arrays;'] = nativeDef('Ljava/util/Arrays;', {
       return result;
     },
     'asList([Ljava/lang/Object;)Ljava/util/List;': (_self, [source], vm) => makeList(vm, arrayValues(source).slice()),
+    'fill([II)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(toInt(value)); },
+    'fill([JJ)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(toLong(value)); },
+    'fill([FF)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(Number(value)); },
+    'fill([DD)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(Number(value)); },
+    'fill([ZZ)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(!!value); },
+    'fill([Ljava/lang/Object;Ljava/lang/Object;)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(value); },
     'sort([Ljava/lang/Object;)V': (_self, [source]) => {
       if (!source || !Array.isArray(source.$data)) return undefined;
       source.$data.sort((a, b) => (a === null ? -1 : b === null ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
@@ -3938,58 +3943,6 @@ function appendIterable(vm, builder, iterable) {
   return builder;
 }
 
-function invokeOrUndefined(vm, receiver, name, proto, args) {
-  try {
-    const classDesc = receiver?.$dexClass?.descriptor || receiver?.$nativeClass?.$descriptor || 'Ljava/lang/Object;';
-    return vm.invoke({ classDesc, name, proto: { descriptor: proto, parameters: [], returnType: 'Ljava/lang/Object;' } }, receiver, args, 'virtual');
-  } catch (_) {
-    return undefined;
-  }
-}
-
-function kotlinJoinToString(vm, iterable, separator, prefix, postfix, limit, truncated, transform) {
-  const items = iterableValues(iterable, vm);
-  const sep = jsString(separator) ?? ', ';
-  const pre = jsString(prefix) ?? '';
-  const post = jsString(postfix) ?? '';
-  const max = toInt(limit);
-  const tail = jsString(truncated) ?? '...';
-  const parts = [];
-  const bound = max < 0 ? items.length : Math.min(items.length, max);
-  for (let i = 0; i < bound; i++) {
-    let value = items[i];
-    if (transform) {
-      const rendered = invokeOrUndefined(vm, transform, 'invoke', '(Ljava/lang/Object;)Ljava/lang/Object;', [value]);
-      if (rendered !== undefined) value = rendered;
-    }
-    parts.push(jsString(value) ?? String(value ?? ''));
-  }
-  if (max >= 0 && items.length > max) parts.push(tail);
-  return pre + parts.join(sep) + post;
-}
-
-JAVA_CORE_CLASSES['Lk7/t;'] = nativeDef('Lk7/t;', {
-  super: 'Ljava/lang/Object;',
-  staticMethods: {
-    'A(Ljava/lang/Iterable;)Ljava/util/Set;': (_self, [iterable], vm) => makeSet(vm, [...new Set(iterableValues(iterable, vm))]),
-    'B(Ljava/lang/Iterable;Ljava/lang/Iterable;)Ljava/util/List;': (_self, [first, second], vm) => makeList(vm, [...iterableValues(first, vm), ...iterableValues(second, vm)]),
-    'o(Ljava/lang/Iterable;Ljava/lang/Object;)Z': (self, [iterable, value], vm) => iterableValues(iterable, vm).includes(value),
-    'p(Ljava/util/List;)Ljava/lang/Object;': (self, [list]) => collectionValues(list)[0] ?? null,
-    'q(Ljava/lang/Iterable;Ljava/lang/Object;)I': (self, [iterable, value], vm) => iterableValues(iterable, vm).lastIndexOf(value),
-    's(Ljava/lang/Iterable;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ILjava/lang/CharSequence;Lq7/l;)Ljava/lang/String;': (_self, [iterable, separator, prefix, postfix, limit, truncated, transform], vm) => kotlinJoinToString(vm, iterable, separator, prefix, postfix, limit, truncated, transform),
-    'u(Ljava/util/List;)Ljava/lang/Object;': (self, [list]) => collectionValues(list).at(-1) ?? null,
-    'v(Ljava/lang/Iterable;)Ljava/lang/Comparable;': (self, [iterable], vm) => {
-      const values = iterableValues(iterable, vm).filter((value) => value !== null && value !== undefined);
-      if (values.length === 0) return null;
-      return values.reduce((max, value) => (value > max ? value : max));
-    },
-    'w(Ljava/lang/Iterable;Ljava/util/Collection;)Ljava/util/Collection;': (_self, [iterable, target], vm) => appendIterable(vm, target, iterable),
-    'x(Ljava/lang/Iterable;)Ljava/util/List;': (_self, [iterable], vm) => makeList(vm, iterableValues(iterable, vm)),
-    'y(Ljava/lang/Iterable;)Ljava/util/List;': (_self, [iterable], vm) => makeList(vm, [...new Set(iterableValues(iterable, vm))]),
-    'z(Ljava/util/Collection;)Ljava/util/List;': (_self, [collection], vm) => makeList(vm, collectionValues(collection)),
-  },
-});
-
 function getDefaultLocale(vm) {
   const def = vm.registry.resolve('Ljava/util/Locale;');
   let instance = def?.staticValues?.get('DEFAULT:Ljava/util/Locale;');
@@ -4087,6 +4040,26 @@ function integerDef(descriptor, bits) {
         const v = toInt(value) >>> 0;
         return v === 0 ? 32 : (31 - Math.clz32(v & -v)) | 0;
       },
+      ...(isLong ? {
+        'bitCount(J)I': (_self, [value]) => {
+          let v = BigInt.asUintN(64, toLong(value));
+          let count = 0;
+          while (v > 0n) { count += Number(v & 1n); v >>= 1n; }
+          return count;
+        },
+        'rotateRight(JI)J': (_self, [value, distance]) => {
+          const v = BigInt.asUintN(64, toLong(value));
+          const d = ((toInt(distance) % 64) + 64) % 64;
+          const shifted = (v >> BigInt(d)) | (v << BigInt(64 - d || 64));
+          return BigInt.asIntN(64, BigInt.asUintN(64, shifted));
+        },
+        'rotateLeft(JI)J': (_self, [value, distance]) => {
+          const v = BigInt.asUintN(64, toLong(value));
+          const d = ((toInt(distance) % 64) + 64) % 64;
+          const shifted = (v << BigInt(d)) | (v >> BigInt(64 - d || 64));
+          return BigInt.asIntN(64, BigInt.asUintN(64, shifted));
+        },
+      } : {}),
       'bitCount(I)I': (_self, [value]) => {
         let v = toInt(value) >>> 0;
         let count = 0;
@@ -4487,11 +4460,40 @@ function describeMemory() {
   return { type, vendor, maxFreqHz, gigabytes };
 }
 
-function describeFingerprint() {
-  const agent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
-  if (/samsung/i.test(agent)) return 'samsung_fingerprint';
-  if (/google|pixel/i.test(agent)) return 'goodix_fingerprint';
-  return 'fpc_fingerprint';
+export function hardwareIdentity() {
+  const nav = readNavigator();
+  const platform = String(nav?.platform || 'Linux x86_64');
+  const ua = String(nav?.userAgent || '');
+  const combined = platform + ' ' + ua;
+  const arch = /aarch64|arm64/i.test(combined) ? 'arm64' : (/arm/i.test(combined) ? 'arm' : 'x86_64');
+  const cores = deviceCapabilities().cores;
+  const tag = 'apkjs-' + arch;
+  let panelSize = '';
+  try {
+    if (typeof screen !== 'undefined' && screen && screen.width && screen.height) {
+      panelSize = ' ' + Math.round(screen.width) + 'x' + Math.round(screen.height);
+    }
+  } catch (error) {
+    void error;
+  }
+  return {
+    platform,
+    arch,
+    cores,
+    tag,
+    model: tag + ' browser',
+    touch: tag + '-touch',
+    panel: tag + ' panel' + panelSize,
+    codec: tag + '-codec',
+    soundCard: tag + '-sndcard',
+    gpu: tag + '-gpu',
+    charger: tag + '-charger',
+    sensorAccel: tag + '-accel',
+    sensorMagn: tag + '-magn',
+    sensorAls: tag + '-als',
+    sensorProx: tag + '-prox',
+    fingerprint: tag + '-fp',
+  };
 }
 
 const HARDWARE_FS_SEEDED = { done: false };
@@ -4499,6 +4501,7 @@ const HARDWARE_FS_SEEDED = { done: false };
 function seedHardwareFs() {
   if (HARDWARE_FS_SEEDED.done) return;
   HARDWARE_FS_SEEDED.done = true;
+  const identity = hardwareIdentity();
   const write = (path, value) => {
     const bytes = typeof value === 'string' ? utf8Encode(value) : Uint8Array.from(value || []);
     VIRTUAL_FS.write(path, bytes);
@@ -4506,12 +4509,12 @@ function seedHardwareFs() {
   write('/proc/version', 'Linux version 4.14.0 #1 SMP PREEMPT Thu Jan 1 00:00:00 UTC 2026\n');
   write('/proc/cpuinfo', [
     'processor\t: 0',
-    'model name\t: ARMv8 Processor rev 1 (v8l)',
-    'Hardware\t: apk.js SoC',
+    'model name\t: ' + identity.platform + ' Processor',
+    'Hardware\t: ' + identity.tag + ' SoC',
     'Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32',
     '',
   ].join('\n'));
-  write('/proc/cmdline', 'console=ttyMSM0,115200n8 androidboot.hardware=browser androidboot.soc=apkjs\n');
+  write('/proc/cmdline', 'console=ttyS0,115200n8 androidboot.hardware=' + identity.arch + ' androidboot.soc=' + identity.tag + '\n');
   write('/proc/meminfo', [
     'MemTotal:        7956184 kB',
     'MemFree:         3021448 kB',
@@ -4566,41 +4569,41 @@ function seedHardwareFs() {
     'B: PROP=2',
     '',
     'I: Bus=0019 Vendor=0000 Product=0000 Version=0000',
-    'N: Name="wsa881x-i2c-codec"',
+    'N: Name="' + identity.soundCard + '"',
     'P: Phys=i2c-6-0023',
     'E: ABS=0',
-    'X: wsa-snd-card',
-    'Y: wsa_snd_card',
+    'X: ' + identity.soundCard,
+    'Y: ' + identity.soundCard,
     'S: Sysfs=/devices/platform/soc/soc:qcom,sound/input0',
     'U: Uniq=',
     'H: Handlers=event3',
     'B: PROP=0',
     '',
   ].join('\n'));
-  write('/proc/device-tree/model', 'apk.js Browser\0');
-  write('/proc/device-tree/compatible', 'apkjs,browser\0apkjs,soc\0');
-  write('/proc/hardware', 'apkjs,browser\n');
+  write('/proc/device-tree/model', identity.model + '\0');
+  write('/proc/device-tree/compatible', identity.tag + ',browser\0' + identity.tag + ',soc\0');
+  write('/proc/hardware', identity.tag + ',browser\n');
   write('/proc/interrupts', [
     '           CPU0       CPU1       CPU2       CPU3',
     ' 11:      12345      12000      11800      11600     GICv3  30 Level     arch_timer',
     ' 22:        456        432        410        399     GICv3 321 Level     i2c_geni',
-    ' 45:       7890       7800       7700       7650     GICv3  45 Level     goodix_ts',
-    ' 67:       2222       2100       2050       2010     GICv3  67 Level     synaptics_tcm',
+    ' 45:       7890       7800       7700       7650     GICv3  45 Level     ' + identity.touch,
+    ' 67:       2222       2100       2050       2010     GICv3  67 Level     ' + identity.touch + '-alt',
     '',
   ].join('\n'));
-  write('/proc/driver/tp_info', 'apk.js Touch GT9886\n');
-  write('/proc/driver/tpd_info', 'apk.js Touch GT9886\n');
-  write('/proc/tp_info', 'apk.js Touch GT9886\n');
-  write('/proc/driver/lcm_info', 'apk.js LCD Panel\n');
-  write('/proc/hw_info/lcd_info', 'apk.js LCD Panel\n');
-  write('/proc/hw_info/tp_info', 'apk.js Touch GT9886\n');
-  write('/proc/hw_info/camera_info', 'apk.js Camera\n');
-  write('/proc/AllHWList/LCM', 'apk.js LCD Panel\n');
-  write('/proc/AllHWList/LCM0', 'apk.js LCD Panel\n');
+  write('/proc/driver/tp_info', identity.touch + '\n');
+  write('/proc/driver/tpd_info', identity.touch + '\n');
+  write('/proc/tp_info', identity.touch + '\n');
+  write('/proc/driver/lcm_info', identity.panel + '\n');
+  write('/proc/hw_info/lcd_info', identity.panel + '\n');
+  write('/proc/hw_info/tp_info', identity.touch + '\n');
+  write('/proc/hw_info/camera_info', identity.tag + ' camera\n');
+  write('/proc/AllHWList/LCM', identity.panel + '\n');
+  write('/proc/AllHWList/LCM0', identity.panel + '\n');
   write('/proc/devicesinfo', 'apk.js Browser\n');
   write('/proc/app_info', 'apk.js Browser\n');
   write('/proc/hctinfo', 'apk.js Browser\n');
-  write('/proc/device-tree/chosen/atag,videolfb-lcmname', 'apk.js LCD Panel\0');
+  write('/proc/device-tree/chosen/atag,videolfb-lcmname', identity.panel + '\0');
   write('/proc/device-tree/chosen/atag,videolfb-islcmfound', '1\0');
   write('/proc/device-tree/amlogic-dt-id', 'apkjs\0');
   write('/proc/dumchar_info', 'apk.js Storage\n');
@@ -4608,14 +4611,14 @@ function seedHardwareFs() {
   write('/proc/rknand', 'apk.js Storage\n');
   write('/proc/partinfo', 'mmcblk0p1 262144\nmmcblk0p2 60807168\n');
   write('/proc/devicesinfo', 'apk.js Browser\n');
-  write('/proc/gt9xx_config', 'apk.js Touch GT9886\n');
-  write('/proc/gt1x_debug', 'apk.js Touch GT1X\n');
+  write('/proc/gt9xx_config', identity.touch + '\n');
+  write('/proc/gt1x_debug', identity.touch + '\n');
   write('/proc/hwinfo', 'apk.js Browser\n');
 
-  write('/sys/class/graphics/fb0/lcd_model', 'apk.js LCD Panel 1080x2400\n');
+  write('/sys/class/graphics/fb0/lcd_model', identity.panel + '\n');
   write('/sys/class/lcd/panel/lcd_type', 'TFT\n');
-  write('/sys/class/lcdkit/lcd_model', 'apk.js LCD Panel\n');
-  write('/sys/class/graphics/fb0/panel_info', 'apk.js LCD Panel 1080x2400\n');
+  write('/sys/class/lcdkit/lcd_model', identity.panel + '\n');
+  write('/sys/class/graphics/fb0/panel_info', identity.panel + '\n');
   write('/sys/class/block/mmcblk0/size', '122142720\n');
   write('/sys/class/block/mmcblk0/queue/rotational', '0\n');
   write('/sys/class/mmc_host/mmc0/mmc0:0001/name', 'UFS 128GB\n');
@@ -4630,15 +4633,15 @@ function seedHardwareFs() {
   write('/sys/devices/system/cpu/cpu0/cache/index3/size', '2048K\n');
   write('/sys/class/thermal/thermal_zone0/temp', '36000\n');
   write('/sys/class/net/wlan0/address', '02:00:00:00:00:01\n');
-  write('/sys/class/fingerprint/fingerprint/name', 'apk.js Fingerprint\n');
-  write('/sys/class/nfc/nfc_chip_type', 'apk.js NFC\n');
+  write('/sys/class/fingerprint/fingerprint/name', identity.fingerprint + '\n');
+  write('/sys/class/nfc/nfc_chip_type', identity.tag + '-nfc\n');
   write('/dev/block/by-name/boot', 'mmcblk0p1\n');
   write('/dev/block/by-name/system', 'mmcblk0p2\n');
   write('/dev/block/by-name/userdata', 'mmcblk0p3\n');
   write('/dev/block/by-name/recovery', 'mmcblk0p4\n');
   for (const [bus, addr, chip] of [
-    [1, '0018', 'bma255'], [2, '0019', 'ak09918'], [3, '0020', 'pa22c'],
-    [4, '0021', 'goodix_ts'], [5, '0022', 'bq25890'], [6, '0023', 'wsa881x'],
+    [1, '0018', identity.sensorAccel], [2, '0019', identity.sensorMagn], [3, '0020', identity.sensorAls],
+    [4, '0021', identity.touch], [5, '0022', identity.charger], [6, '0023', identity.codec],
   ]) {
     write(`/sys/bus/i2c/drivers/${chip}/${bus}-${addr}/name`, `${chip}\n`);
     write(`/sys/bus/i2c/devices/${bus}-${addr}/name`, `${chip}\n`);
@@ -4675,16 +4678,16 @@ function seedHardwareFs() {
   ].join('\n'));
   write('/sys/class/power_supply/battery/manufacturer', 'apk.js\n');
   write('/sys/class/power_supply/battery/batt_capacity_max', '4500000\n');
-  write('/sys/class/sensors/accelerometer_sensor/name', 'apk.js Accelerometer\n');
-  write('/sys/class/sensors/magnetic_sensor/name', 'apk.js Magnetometer\n');
-  write('/sys/class/sensors/acc_sensor/info', 'apk.js Accelerometer\n');
-  write('/sys/class/hw_info', 'apk.js Browser\n');
-  write('/sys/touchscreen/touch_chip_info', 'apk.js Touch\n');
-  write('/sys/devices/platform/huawei_touch/touch_chip_info', 'apk.js Touch\n');
-  write('/sys/module/mali/version', 'Mali-G78\n');
+  write('/sys/class/sensors/accelerometer_sensor/name', identity.sensorAccel + '\n');
+  write('/sys/class/sensors/magnetic_sensor/name', identity.sensorMagn + '\n');
+  write('/sys/class/sensors/acc_sensor/info', identity.sensorAccel + '\n');
+  write('/sys/class/hw_info', identity.model + '\n');
+  write('/sys/touchscreen/touch_chip_info', identity.touch + '\n');
+  write('/sys/devices/platform/huawei_touch/touch_chip_info', identity.touch + '\n');
+  write('/sys/module/mali/version', identity.gpu + '\n');
   write('/sys/class/kgsl/kgsl-3d0/gpu_available_frequencies', '800000000 600000000 400000000\n');
-  write('/sys/bus/soc/devices/soc0/chip_name', 'apk.js SoC\n');
-  write('/sys/bus/soc/devices/soc0/machine', 'apk.js Browser\n');
+  write('/sys/bus/soc/devices/soc0/chip_name', identity.tag + ' SoC\n');
+  write('/sys/bus/soc/devices/soc0/machine', identity.model + '\n');
   write('/sys/bus/soc/devices/soc0/soc_id', '1\n');
   const memoryDescriptor = describeMemory();
   const memoryGb = Math.max(1, Math.round(memoryBytes / (1024 * 1024 * 1024)));
@@ -4712,32 +4715,33 @@ function seedHardwareFs() {
   write('/sys/class/sec/sec_hw_param/ddr_info', `${memoryGb}GB ${memoryDescriptor.type} ${memoryDescriptor.vendor}\n`);
   write('/sys/class/devfreq/ddrfreq/max_freq', `${memoryDescriptor.maxFreqHz}\n`);
 
-  const audioCodec = 'wsa881x-i2c-codec';
-  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
-  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/status', 'okay\n');
-  write('/sys/bus/i2c/drivers/wsa881x/6-0023/driver_name', `${audioCodec}\n`);
-  write('/sys/bus/i2c/drivers/wsa881x/6-0023/codec_name', `${audioCodec}\n`);
-  write('/sys/bus/i2c/devices/6-0023/CID', `${audioCodec}\n`);
-  write('/sys/bus/i2c/devices/6-0023/of_node/name', 'wsa881x\0');
+  const audioCodec = identity.codec;
+  const audioDriverPath = '/sys/bus/i2c/drivers/' + audioCodec;
+  write(audioDriverPath + '/6-0023/of_node/compatible', identity.tag + ',codec\0');
+  write(audioDriverPath + '/6-0023/of_node/status', 'okay\n');
+  write(audioDriverPath + '/6-0023/driver_name', audioCodec + '\n');
+  write(audioDriverPath + '/6-0023/codec_name', audioCodec + '\n');
+  write('/sys/bus/i2c/devices/6-0023/CID', audioCodec + '\n');
+  write('/sys/bus/i2c/devices/6-0023/of_node/name', audioCodec + '\0');
   VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/i2c-6');
   write('/sys/bus/i2c/devices/i2c-6/name', 'i2c-6\n');
   write('/sys/bus/i2c/devices/i2c-6/6-0023/name', `${audioCodec}\n`);
   write('/sys/bus/i2c/devices/i2c-6/6-0023/of_node/name', `${audioCodec}\0`);
-  write('/sys/bus/i2c/devices/i2c-6/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
+  write('/sys/bus/i2c/devices/i2c-6/6-0023/of_node/compatible', identity.tag + ',codec\0');
   VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/6-0023/of_node');
   VIRTUAL_FS.mkdirs('/sys/bus/i2c/devices/6-0023');
   write('/sys/bus/i2c/devices/6-0023/of_node/name', `${audioCodec}\0`);
-  write('/sys/bus/i2c/devices/6-0023/of_node/compatible', 'qcom,wsa881x-codec\0');
+  write('/sys/bus/i2c/devices/6-0023/of_node/compatible', identity.tag + ',codec\0');
   write('/sys/bus/i2c/devices/6-0023/of_node/status', 'okay\0');
-  write('/sys/bus/i2c/drivers/wsa881x/6-0023/of_node/name', `${audioCodec}\n`);
+  write(audioDriverPath + '/6-0023/of_node/name', audioCodec + '\n');
   write('/proc/asound/card0/codec#0', `Codec: ${audioCodec}\n`);
   write('/proc/asound/card0/codec#1', `Codec: ${audioCodec}\n`);
   write('/proc/asound/card0/pcm0p/info', `card: 0\ndevice: 0\nsubdevice: 0\nstream: PLAYBACK\nid: MultiMedia1\nname: MultiMedia1\nsubname: subdevice #0\nclass: 0\nsubclass: 0\nsubdevices_count: 1\nsubdevices_avail: 1\n`);
-  write('/proc/asound/cards', ' 0 [msm8996tashasn]: MSM8996TASHA - MSM8996TASHA\n                      apk.js SoC - msm8996tashasndcard\n');
+  write('/proc/asound/cards', ' 0 [' + identity.soundCard + ']: ' + identity.platform + ' - ' + identity.platform + '\n                      ' + identity.tag + ' SoC - ' + identity.soundCard + '\n');
   write('/proc/asound/devices', '  0: [ 0]   : control\n 16: [ 0- 0]: digital audio playback\n 24: [ 0- 0]: digital audio capture\n');
-  write('/sys/class/sound/card0/id', 'msm8996tashasndcard\n');
+  write('/sys/class/sound/card0/id', identity.soundCard + '\n');
 
-  const fingerprintDescriptor = describeFingerprint();
+  const fingerprintDescriptor = identity.fingerprint;
   for (const driver of ['fpc1020', 'fpc1145', 'fpc1022_irq', 'goodix_fp', 'cdfinger_fp']) {
     write(`/sys/bus/platform/drivers/${driver}/uevent`, [
       `DRIVER=${driver}`,
@@ -4749,11 +4753,11 @@ function seedHardwareFs() {
   write('/sys/bus/platform/drivers/goodix_fp/goodix_fp.0/name', 'goodix_fp.0\n');
   write('/sys/bus/platform/drivers/mi2s/uevent', 'DRIVER=mi2s\nMODALIAS=platform:mi2s\n');
   write('/sys/bus/platform/drivers/mi2s/name', 'mi2s\n');
-  VIRTUAL_FS.mkdirs(`/sys/bus/platform/drivers/${audioCodec}`);
-  write(`/sys/bus/platform/drivers/${audioCodec}/uevent`, `DRIVER=${audioCodec}\nMODALIAS=platform:${audioCodec}\n`);
-  write(`/sys/bus/platform/drivers/${audioCodec}/name`, `${audioCodec}\n`);
+  VIRTUAL_FS.mkdirs(audioDriverPath);
+  write(audioDriverPath + '/uevent', 'DRIVER=' + audioCodec + '\nMODALIAS=platform:' + audioCodec + '\n');
+  write(audioDriverPath + '/name', audioCodec + '\n');
   for (let codecIndex = 0; codecIndex < 2; codecIndex++) {
-    const dir = `/sys/bus/platform/drivers/${audioCodec}/${audioCodec}.${codecIndex}`;
+    const dir = audioDriverPath + '/' + audioCodec + '.' + codecIndex;
     write(`${dir}/name`, `${audioCodec}\n`);
     write(`${dir}/uevent`, `DRIVER=${audioCodec}\nMODALIAS=platform:${audioCodec}\n`);
     VIRTUAL_FS.mkdirs(dir);
@@ -4863,7 +4867,7 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     },
     'exists()Z': (self) => VIRTUAL_FS.exists(self.path),
     'isFile()Z': (self) => VIRTUAL_FS.isFile(self.path),
-    'isDirectory()Z': (self) => { if (globalThis.__DBG_FLAG && String(self.path).includes('wsa881x')) console.error('ISDIR ' + self.path); return VIRTUAL_FS.isDirectory(self.path); },
+    'isDirectory()Z': (self) => VIRTUAL_FS.isDirectory(self.path),
     'length()J': (self) => VIRTUAL_FS.length(self.path),
     'getTotalSpace()J': (self) => BigInt(storageCapacityForPath(self.path).totalBytes),
     'getFreeSpace()J': (self) => BigInt(storageCapacityForPath(self.path).availableBytes),
