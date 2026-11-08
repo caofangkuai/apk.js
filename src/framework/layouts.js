@@ -1,3 +1,4 @@
+import { drawDrawable } from './drawables.js';
 import {
   HORIZONTAL,
   MeasureSpec,
@@ -240,17 +241,26 @@ export class LinearLayout extends ViewGroup {
 
     const heightSize = MeasureSpec.getSize(heightSpec);
     const remaining = heightMode === MeasureSpec.EXACTLY || heightMode === MeasureSpec.AT_MOST
-      ? Math.max(0, heightSize - totalHeight)
+      ? heightSize - totalHeight
       : 0;
+    let remainingExcess = remaining;
+    let remainingWeightSum = this.weightSum > 0 ? this.weightSum : totalWeight;
 
-    if (remaining > 0 && totalWeight > 0) {
+    if (remainingExcess !== 0 && totalWeight > 0) {
       totalHeight = this.paddingTop + this.paddingBottom;
       for (let i = 0; i < count; i++) {
         const entry = measured[i];
         if (!entry) continue;
         const child = entry.child;
-        const share = entry.weight > 0 ? Math.floor((remaining * entry.weight) / totalWeight) : 0;
-        const height = child.getMeasuredHeight() + share;
+        if (entry.weight <= 0) {
+          totalHeight += child.getMeasuredHeight() + entry.marginsV;
+          continue;
+        }
+        const share = Math.trunc((entry.weight * remainingExcess) / remainingWeightSum);
+        remainingExcess -= share;
+        remainingWeightSum -= entry.weight;
+        const useShareOnly = entry.lp.height === 0 && heightMode === MeasureSpec.EXACTLY;
+        const height = Math.max(0, (useShareOnly ? 0 : child.getMeasuredHeight()) + share);
         child.measure(
           MeasureSpec.makeMeasureSpec(child.getMeasuredWidth(), MeasureSpec.EXACTLY),
           MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
@@ -302,17 +312,26 @@ export class LinearLayout extends ViewGroup {
 
     const widthSize = MeasureSpec.getSize(widthSpec);
     const remaining = widthMode === MeasureSpec.EXACTLY || widthMode === MeasureSpec.AT_MOST
-      ? Math.max(0, widthSize - totalWidth)
+      ? widthSize - totalWidth
       : 0;
+    let remainingExcess = remaining;
+    let remainingWeightSum = this.weightSum > 0 ? this.weightSum : totalWeight;
 
-    if (remaining > 0 && totalWeight > 0) {
+    if (remainingExcess !== 0 && totalWeight > 0) {
       totalWidth = this.paddingLeft + this.paddingRight;
       for (let i = 0; i < count; i++) {
         const entry = measured[i];
         if (!entry) continue;
         const child = entry.child;
-        const share = entry.weight > 0 ? Math.floor((remaining * entry.weight) / totalWeight) : 0;
-        const width = entry.weight > 0 ? share : child.getMeasuredWidth();
+        if (entry.weight <= 0) {
+          totalWidth += child.getMeasuredWidth() + entry.marginsH;
+          continue;
+        }
+        const share = Math.trunc((entry.weight * remainingExcess) / remainingWeightSum);
+        remainingExcess -= share;
+        remainingWeightSum -= entry.weight;
+        const useShareOnly = entry.lp.width === 0 && widthMode === MeasureSpec.EXACTLY;
+        const width = Math.max(0, (useShareOnly ? 0 : child.getMeasuredWidth()) + share);
         child.measure(
           MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
           MeasureSpec.makeMeasureSpec(child.getMeasuredHeight(), MeasureSpec.EXACTLY)
@@ -1007,12 +1026,152 @@ export class ListView extends ViewGroup {
     this.$onItemSelectedListener = null;
     this.$onScrollListener = null;
     this.divider = null;
-    this.dividerHeight = 0;
+    this.dividerHeight = Math.round(1 * this.getDensity());
+    this.dividerColor = null;
     this.selector = null;
     this.choiceMode = 0;
     this.$items = [];
     this.$itemCount = -1;
     this.$pressedItem = -1;
+    this.$contentHeight = 0;
+    this.$touchStartY = 0;
+    this.$touchStartScroll = 0;
+    this.$dragging = false;
+    this.$selectionPadding = { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+
+  setDivider(drawable) {
+    this.divider = drawable;
+    const vm = this.$vm || this.vm;
+    let height = 0;
+    if (drawable) {
+      try {
+        height = Number(vm?.invokeByName?.('getIntrinsicHeight', '()I', drawable, []) ?? 0) || 0;
+      } catch (_) {
+        height = 0;
+      }
+      if (!height && drawable.type === 'shape') {
+        const size = (drawable.xml?.children || []).find((c) => c.name === 'size');
+        const attr = size?.attrs?.find((a) => a.name === 'height');
+        const value = attr?.value;
+        if (value && typeof value === 'object' && value.dimension) {
+          height = value.dimension.value * (vm?.resources?.displayMetrics?.density || 1);
+        }
+      }
+    }
+    this.dividerHeight = Math.round(height);
+    this.requestLayout();
+    return this;
+  }
+
+  setSelector(drawable) {
+    this.selector = drawable;
+    const vm = this.$vm || this.vm;
+    const padding = { left: 0, top: 0, right: 0, bottom: 0 };
+    if (drawable) {
+      try {
+        const paddingRect = vm?.allocateRawObject?.('Landroid/graphics/Rect;');
+        if (paddingRect && vm?.invokeByName?.('getPadding', '(Landroid/graphics/Rect;)Z', drawable, [paddingRect])) {
+          const peer = paddingRect.$peer || {};
+          padding.left = peer.left | 0;
+          padding.top = peer.top | 0;
+          padding.right = peer.right | 0;
+          padding.bottom = peer.bottom | 0;
+        }
+      } catch (_) {
+        void _;
+      }
+    }
+    this.$selectionPadding = padding;
+    this.invalidate();
+    return this;
+  }
+
+  themeHighlight() {
+    const vm = this.$vm || this.vm;
+    const theme = vm?.themeAttributes;
+    if (theme && typeof theme.colorControlHighlight === 'number') return theme.colorControlHighlight >>> 0;
+    return 0x1f000000;
+  }
+
+  drawSelector(canvas) {
+    const index = this.$pressedItem;
+    if (index < 0) return;
+    const item = this.$items[index];
+    if (!item) return;
+    const ctx = canvas.context;
+    const pad = this.$selectionPadding;
+    const rect = {
+      left: item.left - pad.left,
+      top: item.top - pad.top,
+      right: item.right + pad.right,
+      bottom: item.bottom + pad.bottom,
+    };
+    if (this.selector) {
+      drawDrawable(ctx, this.selector, rect, {
+        vm: this.$vm || this.vm,
+        state: { enabled: true, pressed: true, focused: false, selected: false },
+        stateSet: [0x0101009e, 0x010100a7],
+      });
+      return;
+    }
+    ctx.save();
+    const highlight = this.themeHighlight();
+    ctx.fillStyle = 'rgba(0,0,0,' + ((highlight >>> 24) / 255) + ')';
+    ctx.fillRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    ctx.restore();
+  }
+
+  dividerPaintColor() {
+    if (this.dividerColor !== null && this.dividerColor !== undefined) return this.dividerColor >>> 0;
+    const vm = this.$vm || this.vm;
+    const theme = vm?.themeAttributes;
+    if (theme) {
+      if (typeof theme.listDivider === 'number') return theme.listDivider >>> 0;
+      const ref = theme.$attrReferences?.listDivider;
+      if (ref !== undefined) {
+        const resolved = vm?.resources?.resolve?.(ref >>> 0);
+        if (typeof resolved === 'number' && resolved > 0xffffff) return resolved >>> 0;
+      }
+    }
+    return 0x1f000000;
+  }
+
+  drawDividers(canvas) {
+    if ((this.dividerHeight | 0) <= 0) return;
+    if (!this.divider && !this.$items.length) return;
+    const width = this.getWidth();
+    const listBottom = this.getHeight() - this.paddingBottom;
+    const ctx = canvas.context;
+    for (let i = 0; i < this.$items.length; i++) {
+      const item = this.$items[i];
+      const bottom = item.bottom;
+      if (bottom >= listBottom) continue;
+      const rect = {
+        left: this.paddingLeft,
+        top: bottom,
+        right: width - this.paddingRight,
+        bottom: bottom + this.dividerHeight,
+      };
+      if (this.divider) {
+        drawDrawable(ctx, this.divider, rect, { vm: this.$vm || this.vm });
+      } else {
+        const color = this.dividerPaintColor();
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,' + (((color >>> 24) & 0xff) / 255) + ')';
+        ctx.fillRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+        ctx.restore();
+      }
+    }
+  }
+
+  dispatchDraw(canvas) {
+    canvas.save();
+    canvas.translate(-(this.scrollX | 0), -(this.scrollY | 0));
+    this.drawSelector(canvas);
+    for (const child of this.children) child.draw(canvas);
+    this.drawDividers(canvas);
+    canvas.restore();
   }
 
   generateDefaultLayoutParams() {
@@ -1101,6 +1260,15 @@ export class ListView extends ViewGroup {
       item.layout(this.paddingLeft, y, this.paddingLeft + width, y + height);
       y += height + this.dividerHeight;
     }
+    this.$contentHeight = y + this.paddingBottom;
+    this.scrollRange = Math.max(0, this.$contentHeight - (bottom - top));
+    this.scrollY = Math.max(0, Math.min(this.scrollRange, this.scrollY | 0));
+  }
+
+  scrollTo(x, y) {
+    this.scrollX = 0;
+    this.scrollY = Math.max(0, Math.min(this.scrollRange || 0, y | 0));
+    this.invalidate();
   }
 
   itemIndexAt(x, y) {
@@ -1148,13 +1316,32 @@ export class ListView extends ViewGroup {
   onTouchEvent(event) {
     const host = toHostTouchEvent(event);
     if (host.action === 'down') {
-      this.$pressedItem = this.itemIndexAt(host.x, host.y);
+      this.$pressedItem = this.itemIndexAt(host.x, host.y + (this.scrollY | 0) - this.paddingTop);
+      this.$touchStartY = host.y;
+      this.$touchStartScroll = this.scrollY | 0;
+      this.$dragging = false;
       this.pressed = this.$pressedItem >= 0;
-      return this.pressed;
+      return this.pressed || this.scrollRange > 0;
     }
-    if (host.action === 'move') return this.pressed === true;
+    if (host.action === 'move') {
+      const delta = this.$touchStartY - host.y;
+      if (Math.abs(delta) > 8 && this.scrollRange > 0) {
+        this.$dragging = true;
+        this.$pressedItem = -1;
+        this.pressed = false;
+        this.scrollTo(0, this.$touchStartScroll + delta);
+      }
+      return true;
+    }
     if (host.action === 'up') {
-      const index = this.itemIndexAt(host.x, host.y);
+      const dragged = this.$dragging;
+      this.$dragging = false;
+      if (dragged) {
+        this.$pressedItem = -1;
+        this.pressed = false;
+        return true;
+      }
+      const index = this.itemIndexAt(host.x, host.y + (this.scrollY | 0) - this.paddingTop);
       const pressed = this.$pressedItem;
       this.$pressedItem = -1;
       this.pressed = false;

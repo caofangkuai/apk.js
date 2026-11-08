@@ -59,6 +59,14 @@ export class Paint {
     this.strokeWidth = Number(width) || 0;
   }
 
+  setColorFilter(filter) {
+    this.colorFilter = filter || null;
+  }
+
+  getColorFilter() {
+    return this.colorFilter;
+  }
+
   setStyle(style) {
     this.style = typeof style === 'number' ? (style === 0 ? 'fill' : style === 1 ? 'stroke' : 'fillAndStroke') : style;
   }
@@ -249,6 +257,57 @@ export class Canvas {
     ctx.restore();
   }
 
+  drawOval(left, top, right, bottom, paint) {
+    const ctx = this.context;
+    ctx.save();
+    applyPaint(ctx, paint);
+    ctx.beginPath();
+    const cx = this.originX + (left + right) / 2;
+    const cy = this.originY + (top + bottom) / 2;
+    const rx = Math.abs(right - left) / 2;
+    const ry = Math.abs(bottom - top) / 2;
+    if (typeof ctx.ellipse === 'function') ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    else ctx.arc(cx, cy, Math.max(rx, ry), 0, Math.PI * 2);
+    if (paint?.style === 'stroke') ctx.stroke();
+    else ctx.fill();
+    ctx.restore();
+  }
+
+  drawArc(left, top, right, bottom, startAngle, sweepAngle, useCenter, paint) {
+    const ctx = this.context;
+    ctx.save();
+    applyPaint(ctx, paint);
+    const cx = this.originX + (left + right) / 2;
+    const cy = this.originY + (top + bottom) / 2;
+    const rx = Math.abs(right - left) / 2;
+    const ry = Math.abs(bottom - top) / 2;
+    const start = ((Number(startAngle) || 0) * Math.PI) / 180;
+    const end = start + ((Number(sweepAngle) || 0) * Math.PI) / 180;
+    ctx.beginPath();
+    if (useCenter) ctx.moveTo(cx, cy);
+    if (typeof ctx.ellipse === 'function') ctx.ellipse(cx, cy, rx, ry, 0, start, end, sweepAngle < 0);
+    else ctx.arc(cx, cy, Math.max(rx, ry), start, end, sweepAngle < 0);
+    if (useCenter) ctx.closePath();
+    if (paint?.style === 'stroke') ctx.stroke();
+    else ctx.fill();
+    ctx.restore();
+  }
+
+  drawPoint(x, y, paint) {
+    const ctx = this.context;
+    ctx.save();
+    applyPaint(ctx, paint);
+    const strokeWidth = paint?.strokeWidth || 1;
+    ctx.fillRect(this.originX + x - strokeWidth / 2, this.originY + y - strokeWidth / 2, strokeWidth, strokeWidth);
+    ctx.restore();
+  }
+
+  saveLayer(bounds, paint) {
+    this.context.save();
+    if (paint?.alpha !== undefined) this.context.globalAlpha *= paint.alpha;
+    return this.stack.length;
+  }
+
   drawLine(x1, y1, x2, y2, paint) {
     const ctx = this.context;
     ctx.save();
@@ -416,8 +475,35 @@ export function blendColor(base, overlay, alpha = 1) {
   return (((Math.round(outA * 255) & 0xff) << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)) >>> 0;
 }
 
+let textMeasureContext;
+let textMeasureProbed = false;
+
+function measureContext() {
+  if (textMeasureProbed) return textMeasureContext;
+  textMeasureProbed = true;
+  try {
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvas = document.createElement('canvas');
+      textMeasureContext = canvas.getContext ? canvas.getContext('2d') : null;
+    }
+  } catch (_error) {
+    textMeasureContext = null;
+  }
+  return textMeasureContext;
+}
+
 export function measureTextWidth(text, textSize, typeface = 'Noto Sans CJK SC') {
   if (!text) return 0;
+  const ctx = measureContext();
+  if (ctx) {
+    try {
+      ctx.font = (Number(textSize) || 14) + 'px ' + (typeface || 'Noto Sans CJK SC');
+      const measured = ctx.measureText(String(text)).width;
+      if (Number.isFinite(measured) && measured > 0) return measured;
+    } catch (_error) {
+      void _error;
+    }
+  }
   let width = 0;
   for (const char of text) {
     const code = char.codePointAt(0);
@@ -457,10 +543,50 @@ export function wrapText(text, textSize, maxWidth, typeface = 'Noto Sans CJK SC'
   return lines;
 }
 
+export function resolvePaintColor(paint) {
+  const p = paint || null;
+  if (!p) return 0xff000000;
+  return applyColorFilter(p.color, p.colorFilter);
+}
+
+export function applyColorFilter(color, filter) {
+  const base = color >>> 0;
+  if (!filter) return base;
+  const peer = filter.$peer || filter;
+  const filterColor = peer?.color;
+  if (typeof filterColor !== 'number') return base;
+  const tint = filterColor >>> 0;
+  const mode = peer.mode === undefined ? 5 : (peer.mode?.$peer?.ordinal ?? peer.mode | 0);
+  switch (mode) {
+    case 5: // SRC_IN
+    case 9: // SRC_ATOP
+    case 3: // SRC_OVER
+    case 1: // SRC
+      return ((tint & 0xffffff) | (((base >>> 24) & 0xff) << 24)) >>> 0;
+    case 14: { // MULTIPLY
+      const r = Math.round((((base >>> 16) & 0xff) * ((tint >>> 16) & 0xff)) / 255);
+      const g = Math.round((((base >>> 8) & 0xff) * ((tint >>> 8) & 0xff)) / 255);
+      const b = Math.round(((base & 0xff) * (tint & 0xff)) / 255);
+      return ((((base >>> 24) & 0xff) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+    }
+    case 15: { // SCREEN
+      const r = 255 - Math.round(((255 - ((base >>> 16) & 0xff)) * (255 - ((tint >>> 16) & 0xff))) / 255);
+      const g = 255 - Math.round(((255 - ((base >>> 8) & 0xff)) * (255 - ((tint >>> 8) & 0xff))) / 255);
+      const b = 255 - Math.round(((255 - (base & 0xff)) * (255 - (tint & 0xff))) / 255);
+      return ((((base >>> 24) & 0xff) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+    }
+    case 0: // CLEAR
+      return 0;
+    default:
+      return tint;
+  }
+}
+
 function applyPaint(ctx, paint) {
   const p = paint || new Paint();
-  ctx.fillStyle = cssColor(p.color);
-  ctx.strokeStyle = cssColor(p.color);
+  const paintColor = applyColorFilter(p.color, p.colorFilter);
+  ctx.fillStyle = cssColor(paintColor);
+  ctx.strokeStyle = cssColor(paintColor);
   ctx.lineWidth = p.strokeWidth || 1;
   if (p.strokeJoin) ctx.lineJoin = p.strokeJoin;
   if (p.strokeCap) ctx.lineCap = p.strokeCap;

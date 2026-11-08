@@ -1,3 +1,13 @@
+import { STATE, colorStateListColor, drawDrawable, drawablePadding, outlineRadius, setDrawableBounds, stateSetFor } from './drawables.js';
+
+function viewObjectForOutline(vm, view) {
+  const object = vm.allocateRawObject('Landroid/view/View;');
+  object.$peer = { view };
+  object.$nativeClass = 'Landroid/view/View;';
+  object.$view = view;
+  return object;
+}
+
 export const MeasureSpec = {
   UNSPECIFIED: 0,
   EXACTLY: 1 << 30,
@@ -164,6 +174,7 @@ export class View {
     this.foreground = null;
     this.foregroundGravity = 0x800033;
     this.backgroundTint = null;
+    this.backgroundTintList = null;
     this.backgroundTintMode = null;
     this.paddingLeft = 0;
     this.paddingTop = 0;
@@ -256,6 +267,7 @@ export class View {
 
   setBackground(background) {
     this.background = background;
+    this.refreshDrawableState();
     this.invalidate();
     return this;
   }
@@ -285,9 +297,24 @@ export class View {
   }
 
   setBackgroundTintList(color) {
-    this.backgroundTint = color;
+    this.backgroundTintList = color;
+    this.backgroundTint = typeof color === 'number' ? color >>> 0 : null;
     this.invalidate();
     return this;
+  }
+
+  getBackgroundTintList() {
+    return this.backgroundTintList ?? null;
+  }
+
+  setBackgroundTintMode(mode) {
+    this.backgroundTintMode = mode;
+    this.invalidate();
+    return this;
+  }
+
+  getBackgroundTintMode() {
+    return this.backgroundTintMode ?? null;
   }
 
   setVisibility(visibility) {
@@ -309,8 +336,10 @@ export class View {
   }
 
   setEnabled(enabled) {
-    this.enabled = !!enabled;
-    this.invalidate();
+    const next = !!enabled;
+    if (this.enabled === next) return this;
+    this.enabled = next;
+    this.refreshDrawableState();
     return this;
   }
 
@@ -717,8 +746,10 @@ export class View {
   }
 
   setSelected(selected) {
-    this.selected = !!selected;
-    this.invalidate();
+    const next = !!selected;
+    if (this.selected === next) return this;
+    this.selected = next;
+    this.refreshDrawableState();
     return this;
   }
 
@@ -727,8 +758,10 @@ export class View {
   }
 
   setActivated(activated) {
-    this.activated = !!activated;
-    this.invalidate();
+    const next = !!activated;
+    if (this.activated === next) return this;
+    this.activated = next;
+    this.refreshDrawableState();
     return this;
   }
 
@@ -737,8 +770,10 @@ export class View {
   }
 
   setPressed(pressed) {
-    this.pressed = !!pressed;
-    this.invalidate();
+    const next = !!pressed;
+    if (this.pressed === next) return this;
+    this.pressed = next;
+    this.refreshDrawableState();
     return this;
   }
 
@@ -1022,16 +1057,17 @@ export class View {
     return this.focusable;
   }
 
-  offsetLeftAndRight(offset) {
-    this.left += offset;
-    this.right += offset;
-    this.invalidate();
+  offsetTopAndBottom(offset) {
+    const delta = offset | 0;
+    this.top += delta;
+    this.bottom += delta;
+    if (typeof this.onOffsetChanged === 'function') this.onOffsetChanged(0, delta);
   }
 
-  offsetTopAndBottom(offset) {
-    this.top += offset;
-    this.bottom += offset;
-    this.invalidate();
+  offsetLeftAndRight(offset) {
+    const delta = offset | 0;
+    this.left += delta;
+    this.right += delta;
   }
 
   setScrollX(value) {
@@ -1230,13 +1266,84 @@ export class View {
     canvas.translate(offsetX + this.translationX, offsetY + this.translationY);
     const alpha = this.alpha;
     if (alpha < 1) canvas.context.globalAlpha = alpha;
+    this.drawElevation(canvas);
     this.drawBackground(canvas);
     if (!this.drawWithDex(canvas)) {
       this.onDraw(canvas);
       this.dispatchDraw(canvas);
     }
+    this.drawForeground(canvas);
     if (alpha < 1) canvas.context.globalAlpha = 1;
     canvas.restore();
+  }
+
+  outlineRadius() {
+    return outlineRadius(this.background, this.vm || this.$vm);
+  }
+
+  drawElevation(canvas) {
+    const elevation = Number(this.elevation) || 0;
+    if (elevation <= 0) return;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    if (width <= 0 || height <= 0) return;
+    const outline = this.computeOutline();
+    if (!outline || outline.empty) return;
+    if (outline.alpha <= 0) return;
+    const ctx = canvas.context;
+    const left = outline.left;
+    const top = outline.top;
+    const right = outline.right;
+    const bottom = outline.bottom;
+    const radius = outline.radius || 0;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.19)';
+    ctx.shadowBlur = Math.max(1, elevation * 2);
+    ctx.shadowOffsetY = Math.max(0, elevation * 0.3);
+    ctx.fillStyle = 'rgba(0,0,0,0.01)';
+    roundedRectPath(ctx, left, top, right - left, bottom - top, radius);
+    ctx.fill();
+    ctx.shadowColor = 'rgba(0,0,0,0.039)';
+    ctx.shadowBlur = Math.max(1, elevation * 3);
+    ctx.shadowOffsetY = 0;
+    roundedRectPath(ctx, left, top, right - left, bottom - top, radius);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  computeOutline() {
+    const vm = this.vm || this.$vm || null;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    if (this.outlineProvider && vm?.invoke) {
+      try {
+        const outlineObject = vm.allocateRawObject('Landroid/graphics/Outline;');
+        const peer = vm.registry.getPeer(outlineObject, 'Landroid/graphics/Outline;');
+        if (peer) {
+          peer.alpha = 1;
+          const viewObj = this.$javaObject || viewObjectForOutline(vm, this);
+          vm.invoke(
+            { classDesc: 'Landroid/view/ViewOutlineProvider;', name: 'getOutline', proto: { descriptor: '(Landroid/view/View;Landroid/graphics/Outline;)V', parameters: ['Landroid/view/View;', 'Landroid/graphics/Outline;'], returnType: 'V' } },
+            this.outlineProvider,
+            [viewObj, outlineObject],
+            'virtual',
+          );
+          return { ...peer.outlineRect, radius: peer.outlineRadius || 0, alpha: peer.alpha, empty: peer.outlineEmpty === true };
+        }
+      } catch (_) {
+        void _;
+      }
+    }
+    const radius = this.outlineRadius();
+    return {
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      radius,
+      alpha: radius > 0 || this.background ? 1 : 0,
+      empty: width <= 0 || height <= 0,
+    };
   }
 
   canvasObject(canvas) {
@@ -1312,102 +1419,123 @@ export class View {
   drawBackground(canvas) {
     const bg = this.background;
     if (!bg) return;
-    if (this.drawDexBackground(canvas, bg)) return;
-    if (bg.type === 'color') {
-      const color = this.backgroundTint !== null ? this.backgroundTint : bg.color;
-      canvas.context.save();
-      canvas.context.fillStyle = colorToCss(color);
-      canvas.context.fillRect(0, 0, this.getWidth(), this.getHeight());
-      canvas.context.restore();
-      return;
-    }
-    if (bg.type === 'shape') {
-      drawShapeBackground(canvas, bg, this);
-      return;
-    }
-    if (bg.type === 'xml') {
-      const root = bg.xml;
-      const inner = unwrapXmlDrawable(root);
-      if (inner && inner.name === 'shape') {
-        drawShapeBackground(canvas, { type: 'shape', xml: inner }, this);
-      } else if (inner && inner.name === 'vector') {
-        if (typeof canvas.drawVector === 'function') canvas.drawVector(inner, 0, 0, this.getWidth(), this.getHeight());
-      }
-      return;
-    }
+    const width = this.getWidth();
+    const height = this.getHeight();
+    if (width <= 0 || height <= 0) return;
+    const options = this.drawableOptions({
+      tint: this.backgroundTintList ?? this.backgroundTint ?? null,
+    });
+    const drew = drawDrawable(
+      canvas.context,
+      bg,
+      { left: 0, top: 0, right: width, bottom: height },
+      options,
+    );
+    if (drew) return;
     if (bg.type === 'bitmap' && bg.bitmap?.image) {
       canvas.context.save();
-      canvas.context.drawImage(bg.bitmap.image, 0, 0, this.getWidth(), this.getHeight());
+      canvas.context.drawImage(bg.bitmap.image, 0, 0, width, height);
       canvas.context.restore();
-      return;
-    }
-    const peerDrawable = bg.$peer || (bg.$object ? bg.$object.$peer : null) || getDrawablePeer(this, bg);
-    if (peerDrawable) {
-      const content = peerDrawable.content;
-      if (content) {
-        const contentPeer = content.$peer || (content.$object ? content.$object.$peer : null) || getDrawablePeer(this, content);
-        if (contentPeer && (contentPeer.color !== undefined || contentPeer.cornerRadii || contentPeer.cornerRadius)) {
-          drawPeerDrawable(canvas, contentPeer, this);
-          return;
-        }
-      }
-      if (peerDrawable.color !== undefined || peerDrawable.cornerRadii || peerDrawable.cornerRadius) {
-        drawPeerDrawable(canvas, peerDrawable, this);
-      }
     }
   }
 
-  drawDexBackground(canvas, bg) {
-    const vm = bg?.$vm || this.vm || this.$vm;
-    if (!vm || typeof vm.findVirtual !== 'function') return false;
-    const descriptor = bg.$descriptor || bg.$dexClass?.descriptor || bg.$runtimeClass?.descriptor;
-    if (!descriptor || this.$drawingDexBackground) return false;
-    let drawRes = null;
-    try {
-      drawRes = vm.findVirtual(descriptor, 'draw', '(Landroid/graphics/Canvas;)V');
-    } catch (_) {
-      return false;
-    }
-    if (!drawRes || drawRes.kind !== 'dex') return false;
+  drawForeground(canvas) {
+    const fg = this.foreground;
+    if (!fg) return;
     const width = this.getWidth();
     const height = this.getHeight();
-    if (width <= 0 || height <= 0) return false;
-    this.$drawingDexBackground = true;
-    try {
-      let boundsRes = null;
-      try {
-        boundsRes = vm.findVirtual(descriptor, 'setBounds', '(IIII)V');
-      } catch (_) {
-        boundsRes = null;
+    if (width <= 0 || height <= 0) return;
+    const options = this.drawableOptions({
+      tint: this.foregroundTintList ?? null,
+    });
+    drawDrawable(canvas.context, fg, { left: 0, top: 0, right: width, bottom: height }, options);
+  }
+
+  drawableOptions(extra = {}) {
+    const vm = this.vm || this.$vm || null;
+    const theme = vm?.themeAttributes || null;
+    const highlight = theme && typeof theme.colorControlHighlight === 'number' ? theme.colorControlHighlight >>> 0 : null;
+    return {
+      vm,
+      state: this.drawableStateMap(),
+      stateSet: this.drawableState(),
+      tint: null,
+      rippleColor: highlight,
+      onInvalidate: () => this.invalidate(),
+      ...extra,
+    };
+  }
+
+  getBackgroundPadding() {
+    const vm = this.vm || this.$vm || null;
+    const padding = drawablePadding(this.background, vm);
+    if (!padding) return { left: 0, top: 0, right: 0, bottom: 0 };
+    return padding;
+  }
+
+  compoundPadding() {
+    const background = this.getBackgroundPadding();
+    return {
+      left: this.paddingLeft + (background.left || 0),
+      top: this.paddingTop + (background.top || 0),
+      right: this.paddingRight + (background.right || 0),
+      bottom: this.paddingBottom + (background.bottom || 0),
+    };
+  }
+
+  drawableStateMap() {
+    return {
+      enabled: this.enabled !== false,
+      pressed: this.pressed === true,
+      focused: this.focused === true || this.hasFocus === true,
+      selected: this.selected === true,
+      checked: this.checked === true || this.isChecked === true,
+      activated: this.activated === true,
+      hovered: this.hovered === true,
+    };
+  }
+
+  drawableState() {
+    const map = this.drawableStateMap();
+    const set = [];
+    for (const [name, id] of Object.entries(STATE)) {
+      if (map[name]) set.push(id);
+    }
+    return set;
+  }
+
+  refreshDrawableState() {
+    const vm = this.vm || this.$vm || null;
+    const state = this.drawableState();
+    const apply = (drawable) => {
+      if (!drawable || typeof drawable !== 'object') return;
+      const peer = drawable.$peer;
+      if (peer && typeof peer === 'object') {
+        peer.state = state;
       }
-      if (boundsRes && boundsRes.kind) {
-        const boundsProto = boundsRes.method?.proto || {
-          descriptor: '(IIII)V',
-          parameters: ['I', 'I', 'I', 'I'],
-          returnType: 'V',
-        };
+      if (!vm || typeof vm.findVirtual !== 'function') return;
+      const descriptor = drawable.$dexClass?.descriptor || drawable.$runtimeClass?.descriptor || drawable.$nativeClass;
+      if (!descriptor) return;
+      try {
+        const resolved = vm.findVirtual(descriptor, 'setState', '([I)Z');
+        if (!resolved) return;
+        const array = vm.newArray ? vm.newArray('I', state.length) : { $data: state.slice() };
+        if (array && array.$data) {
+          state.forEach((value, index) => { array.$data[index] = value | 0; });
+        }
         vm.invoke(
-          { classDesc: descriptor, name: 'setBounds', proto: boundsProto },
-          bg,
-          [0, 0, width, height],
+          { classDesc: descriptor, name: 'setState', proto: resolved.method?.proto || { descriptor: '([I)Z', parameters: ['[I'], returnType: 'Z' } },
+          drawable,
+          [array],
           'virtual',
         );
-      } else if (typeof vm.registry?.getPeer === 'function') {
-        const peer = vm.registry.getPeer(bg);
-        if (peer && typeof peer === 'object') peer.bounds = { left: 0, top: 0, right: width, bottom: height };
+      } catch {
+        // 忽略无 setState 实现的 Drawable
       }
-      vm.invoke(
-        { classDesc: descriptor, name: 'draw', proto: drawRes.method.proto },
-        bg,
-        [this.canvasObject(canvas)],
-        'virtual',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    } finally {
-      this.$drawingDexBackground = false;
-    }
+    };
+    apply(this.background);
+    apply(this.foreground);
+    this.invalidate();
   }
 
   onDraw(canvas) {}
@@ -1448,7 +1576,15 @@ export class View {
     const motionEvent = toMotionEventObject(vm, event);
     const hostEvent = toHostTouchEvent(event);
     const action = hostEvent.action;
-    if (action === 'down') this.$jsTouchIntercepted = false;
+    if (action === 'down') {
+      this.$jsTouchIntercepted = false;
+      const bgPeer = this.background?.$peer;
+      if (bgPeer && typeof bgPeer.setHotspot === 'function') bgPeer.setHotspot(hostEvent.x, hostEvent.y);
+      else if (bgPeer) {
+        bgPeer.hotspotX = hostEvent.x;
+        bgPeer.hotspotY = hostEvent.y;
+      }
+    }
     const dispatched = this.invokeDexTouch(
       'dispatchTouchEvent',
       '(Landroid/view/MotionEvent;)Z',
@@ -1661,6 +1797,23 @@ export class ViewGroup extends View {
     this.clipChildren = !!value;
   }
 
+  offsetChildrenTopAndBottom(offset) {
+    const delta = offset | 0;
+    for (const child of this.children || []) {
+      child.top += delta;
+      child.bottom += delta;
+      if (typeof child.onOffsetChanged === 'function') child.onOffsetChanged(0, delta);
+    }
+  }
+
+  offsetChildrenLeftAndRight(offset) {
+    const delta = offset | 0;
+    for (const child of this.children || []) {
+      child.left += delta;
+      child.right += delta;
+    }
+  }
+
   setClipToPadding(value) {
     this.clipToPadding = !!value;
   }
@@ -1869,172 +2022,13 @@ export function getChildMeasureSpec(spec, padding, childDimension) {
   return MeasureSpec.makeMeasureSpec(resultSize, resultMode);
 }
 
-export function colorToCss(color) {
-  const value = color >>> 0;
-  const a = ((value >>> 24) & 0xff) / 255;
-  const r = (value >>> 16) & 0xff;
-  const g = (value >>> 8) & 0xff;
-  const b = value & 0xff;
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-function getDrawablePeer(view, value) {
-  if (!value || typeof value !== 'object') return null;
-  const vm = view?.vm || view?.$vm || null;
-  if (!vm || !vm.registry?.getPeer) return null;
-  try {
-    const peer = vm.registry.getPeer(value);
-    return peer && typeof peer === 'object' ? peer : null;
-  } catch (_error) {
-    return null;
-  }
-}
-
-function unwrapXmlDrawable(node) {
-  let current = node;
-  const wrappers = new Set(['ripple', 'selector', 'inset', 'layer-list', 'animated-selector', 'animated-vector']);
-  let guard = 0;
-  while (current && wrappers.has(current.name) && guard++ < 8) {
-    const children = (current.children || []).filter((c) => c.type === 'element');
-    const inner = children.find((c) => c.name === 'item');
-    const next = inner || children[0];
-    if (!next) return current;
-    const nested = (next.children || []).filter((c) => c.type === 'element');
-    current = (nested.find((c) => c.name === 'shape' || c.name === 'vector') || next);
-    if (wrappers.has(current.name)) continue;
-    break;
-  }
-  return current;
-}
-
-function drawPeerDrawable(canvas, peer, view) {
-  const ctx = canvas.context;
-  const width = view.getWidth();
-  const height = view.getHeight();
-  const color = typeof peer.color === 'number' ? peer.color : 0;
-  const alpha = color >>> 24;
-  if (alpha === 0 && peer.color === 0 && !peer.cornerRadii && !peer.cornerRadius) return;
-  ctx.save();
-  ctx.fillStyle = colorToCss(color);
-  const radii = peer.cornerRadii;
-  const radius = peer.cornerRadius || (radii && radii.length ? Math.max(...radii) : 0);
-  if (radius > 0) {
-    roundedRect(ctx, 0, 0, width, height, radius);
-    ctx.fill();
-  } else {
-    ctx.fillRect(0, 0, width, height);
-  }
-  const strokeWidth = peer.strokeWidth || 0;
-  if (strokeWidth > 0) {
-    ctx.strokeStyle = colorToCss(peer.strokeColor || 0xff000000);
-    ctx.lineWidth = strokeWidth;
-    if (radius > 0) {
-      roundedRect(ctx, strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth, radius);
-      ctx.stroke();
-    } else {
-      ctx.strokeRect(strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth);
-    }
-  }
-  ctx.restore();
-}
-
-function resolveReferenceValue(vm, value, depth = 0) {
-  if (value === null || value === undefined || depth > 8) return value;
-  if (typeof value !== 'object' || value.reference === undefined) return value;
-  const resources = vm?.resources;
-  const id = value.reference >>> 0;
-  if (resources) {
-    let resolved;
-    try {
-      resolved = resources.resolve(id);
-    } catch (_error) {
-      resolved = null;
-    }
-    if (resolved !== null && resolved !== undefined) {
-      if (typeof resolved === 'object' && resolved.reference !== undefined) {
-        return resolveReferenceValue(vm, resolved, depth + 1);
-      }
-      return resolved;
-    }
-    const key = resources.table?.getEntry?.(id)?.key;
-    const theme = vm?.themeAttributes;
-    if (key && theme && Object.prototype.hasOwnProperty.call(theme, key)) {
-      return theme[key];
-    }
-  }
-  return value;
-}
-
-function resolveShapeColor(view, value) {
-  const vm = view?.vm || view?.$vm || null;
-  const resolved = resolveReferenceValue(vm, value);
-  if (resolved && typeof resolved === 'object') {
-    if (resolved.reference !== undefined) return resolved.reference >>> 0;
-    if (resolved.color !== undefined) return resolved.color >>> 0;
-  }
-  return parseShapeColor(resolved);
-}
-
-function resolveShapeDimension(view, value) {
-  const vm = view?.vm || view?.$vm || null;
-  const resolved = resolveReferenceValue(vm, value);
-  if (resolved && typeof resolved === 'object') {
-    if (resolved.dimension) {
-      const density = vm?.resources?.displayMetrics?.density || vm?.displayMetrics?.density || 1;
-      const unit = resolved.dimension.unit;
-      const magnitude = resolved.dimension.value;
-      if (unit === 'dp' || unit === 'dip' || unit === 'sp') return magnitude * density;
-      if (unit === 'pt') return magnitude * density * 1.333;
-      if (unit === 'in') return magnitude * density * 160;
-      if (unit === 'mm') return magnitude * density * 160 / 25.4;
-      return magnitude;
-    }
-    if (resolved.reference !== undefined) return resolved.reference;
-  }
-  if (typeof resolved === 'string' && /dp|dip|sp|pt|px/.test(resolved)) {
-    const density = vm?.resources?.displayMetrics?.density || 1;
-    const match = /^(-?\d+(?:\.\d+)?)(dp|dip|sp|pt|px)$/.exec(resolved);
-    if (match) return match[2] === 'px' ? parseFloat(match[1]) : parseFloat(match[1]) * density;
-  }
-  return parseDimensionAttr(resolved);
-}
-
-function drawShapeBackground(canvas, bg, view) {
-  const shape = bg.xml;
-  const ctx = canvas.context;
-  const width = view.getWidth();
-  const height = view.getHeight();
-  ctx.save();
-  const solid = shape.children.find((c) => c.type === 'element' && c.name === 'solid');
-  const corners = shape.children.find((c) => c.type === 'element' && c.name === 'corners');
-  const stroke = shape.children.find((c) => c.type === 'element' && c.name === 'stroke');
-  const color = solid ? resolveShapeColor(view, getShapeAttribute(solid, 'color')) : 0;
-  const radius = corners ? resolveShapeDimension(view, getShapeAttribute(corners, 'radius')) : 0;
-  ctx.fillStyle = colorToCss(color);
-  if (radius > 0) {
-    roundedRect(ctx, 0, 0, width, height, radius);
-    ctx.fill();
-  } else {
-    ctx.fillRect(0, 0, width, height);
-  }
-  if (stroke) {
-    const strokeColor = resolveShapeColor(view, getShapeAttribute(stroke, 'color'));
-    const strokeWidth = resolveShapeDimension(view, getShapeAttribute(stroke, 'width')) || 1;
-    ctx.strokeStyle = colorToCss(strokeColor);
-    ctx.lineWidth = strokeWidth;
-    if (radius > 0) {
-      roundedRect(ctx, strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth, radius);
-      ctx.stroke();
-    } else {
-      ctx.strokeRect(strokeWidth / 2, strokeWidth / 2, width - strokeWidth, height - strokeWidth);
-    }
-  }
-  ctx.restore();
-}
-
-function roundedRect(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
+export function roundedRectPath(ctx, x, y, w, h, r) {
+  const radius = Math.max(0, Math.min(Number(r) || 0, Math.abs(w) / 2, Math.abs(h) / 2));
   ctx.beginPath();
+  if (!radius) {
+    ctx.rect(x, y, w, h);
+    return;
+  }
   ctx.moveTo(x + radius, y);
   ctx.arcTo(x + w, y, x + w, y + h, radius);
   ctx.arcTo(x + w, y + h, x, y + h, radius);
@@ -2043,44 +2037,13 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function getShapeAttribute(node, name) {
-  if (!node) return null;
-  if (typeof node.getAttribute === 'function') {
-    const direct = node.getAttribute(`android:${name}`) ?? node.getAttribute(name);
-    if (direct !== undefined && direct !== null) return direct;
-  }
-  const attrs = node.attrs || [];
-  for (const attr of attrs) {
-    const attrName = attr.name || '';
-    if (attrName === name || attrName === `android:${name}` || attrName.endsWith(`:${name}`)) {
-      return attr.value ?? attr.data ?? null;
-    }
-  }
-  return null;
-}
-
-function parseShapeColor(value) {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === 'number') return value >>> 0;
-  if (typeof value === 'object' && value.reference !== undefined) return value.reference >>> 0;
-  const text = String(value);
-  if (text.startsWith('#')) {
-    const hex = text.slice(1);
-    if (hex.length === 6) return (0xff000000 | parseInt(hex, 16)) >>> 0;
-    if (hex.length === 8) return parseInt(hex, 16) >>> 0;
-    if (hex.length === 3) {
-      const [r, g, b] = hex.split('').map((c) => parseInt(c + c, 16));
-      return (0xff000000 | (r << 16) | (g << 8) | b) >>> 0;
-    }
-  }
-  return 0;
-}
-
-function parseDimensionAttr(value) {
-  if (!value) return 0;
-  if (typeof value === 'object' && value.dimension) return value.dimension.value;
-  const match = /^(-?\d+(?:\.\d+)?)(dp|sp|px)?$/.exec(String(value));
-  return match ? parseFloat(match[1]) : 0;
+export function colorToCss(color) {
+  const value = color >>> 0;
+  const a = ((value >>> 24) & 0xff) / 255;
+  const r = (value >>> 16) & 0xff;
+  const g = (value >>> 8) & 0xff;
+  const b = value & 0xff;
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 function callRunnable(runnable) {

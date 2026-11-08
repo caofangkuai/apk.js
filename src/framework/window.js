@@ -1,6 +1,6 @@
 import { ViewGroup, VISIBILITY, MeasureSpec, getChildMeasureSpec, resolveSize } from './view.js';
 import { FrameLayout } from './layouts.js';
-import { cssColor, Paint, drawVectorRaw } from './graphics.js';
+import { applyColorFilter, cssColor, Paint, drawVectorRaw } from './graphics.js';
 
 export function createCanvasAdapter(ctx, screen) {
   return {
@@ -19,12 +19,65 @@ export function createCanvasAdapter(ctx, screen) {
       ctx.rect(l, t, r - l, b - t);
       ctx.clip();
     },
+    clipPath: (commands) => {
+      if (!commands || !commands.length) return;
+      ctx.beginPath();
+      for (const cmd of commands) {
+        if (cmd.type === 'moveTo') ctx.moveTo(cmd.x, cmd.y);
+        else if (cmd.type === 'lineTo') ctx.lineTo(cmd.x, cmd.y);
+        else if (cmd.type === 'close') ctx.closePath();
+      }
+      ctx.clip();
+    },
     drawColor: (color) => {
       ctx.fillStyle = cssColor(color);
       ctx.fillRect(0, 0, screen.width, screen.height);
     },
     drawRect: (l, t, r, b, paint) => drawRectRaw(ctx, l, t, r, b, paint),
     drawRoundRect: (l, t, r, b, rx, ry, paint) => drawRoundRectRaw(ctx, l, t, r, b, rx, ry, paint),
+    drawOval: (l, t, r, b, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      ctx.beginPath();
+      const cx = (l + r) / 2;
+      const cy = (t + b) / 2;
+      const rx = Math.abs(r - l) / 2;
+      const ry = Math.abs(b - t) / 2;
+      if (typeof ctx.ellipse === 'function') ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      else ctx.arc(cx, cy, Math.max(rx, ry), 0, Math.PI * 2);
+      if (paint?.style === 'stroke') ctx.stroke();
+      else ctx.fill();
+      ctx.restore();
+    },
+    drawArc: (l, t, r, b, startAngle, sweepAngle, useCenter, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      const cx = (l + r) / 2;
+      const cy = (t + b) / 2;
+      const rx = Math.abs(r - l) / 2;
+      const ry = Math.abs(b - t) / 2;
+      const start = (Number(startAngle) || 0) * Math.PI / 180;
+      const end = start + (Number(sweepAngle) || 0) * Math.PI / 180;
+      ctx.beginPath();
+      if (useCenter) ctx.moveTo(cx, cy);
+      if (typeof ctx.ellipse === 'function') ctx.ellipse(cx, cy, rx, ry, 0, start, end, sweepAngle < 0);
+      else ctx.arc(cx, cy, Math.max(rx, ry), start, end, sweepAngle < 0);
+      if (useCenter) ctx.closePath();
+      if (paint?.style === 'stroke') ctx.stroke();
+      else ctx.fill();
+      ctx.restore();
+    },
+    drawPoint: (x, y, paint) => {
+      ctx.save();
+      applyPaintRaw(ctx, paint);
+      const strokeWidth = paint?.strokeWidth || 1;
+      ctx.fillRect(x - strokeWidth / 2, y - strokeWidth / 2, strokeWidth, strokeWidth);
+      ctx.restore();
+    },
+    saveLayer: (bounds, paint) => {
+      ctx.save();
+      if (paint?.alpha !== undefined) ctx.globalAlpha *= paint.alpha;
+    },
     drawCircle: (cx, cy, radius, paint) => {
       ctx.save();
       applyPaintRaw(ctx, paint);
@@ -671,8 +724,9 @@ function drawRoundRectRaw(ctx, l, t, r, b, rx, ry, paint) {
 
 function applyPaintRaw(ctx, paint) {
   const p = paint || new Paint();
-  ctx.fillStyle = cssColor(p.color);
-  ctx.strokeStyle = cssColor(p.color);
+  const paintColor = applyColorFilter(p.color, p.colorFilter);
+  ctx.fillStyle = cssColor(paintColor);
+  ctx.strokeStyle = cssColor(paintColor);
   ctx.lineWidth = p.strokeWidth || 1;
   ctx.font = `${p.fontWeight || 'normal'} ${p.textSize}px ${p.typeface || 'Noto Sans CJK SC'}`;
   ctx.textAlign = p.textAlign || 'left';

@@ -18,6 +18,10 @@
 
 ### Framework
 
+- [ ] TabLayout 选中 indicator 与 MaterialShapeDrawable 三段渐变阴影
+- [ ] `NinePatch` 解码、`AnimatedVectorDrawable` 属性动画
+- [ ] `ListView` 回收与局部布局，RecyclerView 回归样例
+- [ ] elevation overlay 与深色主题
 - [ ] `PopupWindow`、`AlertDialog` 的布局与绘制
 - [ ] `TextInputLayout` 的浮动标签动画
 - [ ] `BottomSheetDialog` 的拖拽行为
@@ -45,6 +49,24 @@
 
 ## 已完成
 
+- [x] CJK 字体安装脚本 `tools/setup-fonts.sh`
+- [x] EGL10/GLES/GLSurfaceView host 与 Thread 子类 `start()`，DeviceInfoHW 可启动
+- [x] 资源 Drawable 包装成 Java Drawable，修复 TabLayout `getBounds()` NPE
+- [x] Button Material 默认背景与 compound padding/基线居中
+- [x] LinearLayout 权重按 AOSP 递减算法
+- [x] ImageView 全量 `ScaleType` 几何
+- [x] ProgressBar Material 圆形/横向轨道与 indeterminate 动画
+- [x] ListView divider/selector/滚动
+- [x] Outline/ViewOutlineProvider 与 ambient+spot 阴影；Ripple 动画
+- [x] Clip/Scale/Rotate/NinePatch/AnimatedVector Drawable host
+- [x] `InsetDrawable` / `LayerDrawable` / `StateListDrawable` host 与统一 `drawDrawable` 解包
+- [x] `GradientDrawable.draw()` 与 shape gradient/stroke/dash
+- [x] tint 链路：View/Drawable tint、`PorterDuffColorFilter`、Canvas 消费 colorFilter
+- [x] Drawable state 传递与 `ColorStateList` 按序匹配
+- [x] `TextView` 字体度量行高/基线、`maxLines`+`ellipsize`、内容裁剪、compound drawable
+- [x] elevation 阴影与 foreground 绘制
+- [x] Canvas native 补全（circle/line/oval/arc/point/bitmap/clip/scale/saveLayer）
+- [x] 新增 `tests/drawables.mjs` 像素级回归
 - [x] 设备信息预置值中的品牌名统一为 `apk.js`
 - [x] 移除针对具体 APK 的 LayoutParams 与 SharedPreferences 硬编码，改为通用推导
 - [x] 设备信息接入 `navigator`（platform / language / hardwareConcurrency / deviceMemory / maxTouchPoints）

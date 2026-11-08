@@ -10,6 +10,7 @@ import {
 } from '../runtime/values.js';
 import { descriptorToName, nameToDescriptor } from '../dex/dexfile.js';
 import { parseBinaryXml } from '../res/axml.js';
+import { matchesStateSpec } from './drawables.js';
 
 export function nativeDef(descriptor, options = {}) {
   return new NativeClassDef(descriptor, options);
@@ -1312,20 +1313,27 @@ export const JAVA_CORE_CLASSES = {
         if (self.runnable) vm.runRunnable(self.runnable);
       },
       'start()V': (self, _args, vm) => {
-        if (!self.runnable) return;
-        const runnable = self.runnable;
-        const queue = vm.messageQueue;
-        if (queue && typeof queue.post === 'function') {
-          queue.post(runnable, 0);
-          return;
-        }
-        setTimeout(() => {
+        const task = () => {
           try {
-            vm.runRunnable(runnable);
+            if (self.runnable) {
+              vm.runRunnable(self.runnable);
+              return;
+            }
+            const object = self.$object || self.object || null;
+            if (object && typeof vm.invokeByName === 'function') {
+              vm.invokeByName('run', '()V', object, []);
+            }
           } catch (error) {
             if (!error || error.message !== 'vm-thread-exit') throw error;
           }
-        }, 0);
+        };
+        const queue = vm.messageQueue;
+        if (queue && typeof queue.post === 'function') queue.post(task, 0);
+        else setTimeout(task, 0);
+      },
+      'startAsync()V': (self, _args, vm) => {
+        const object = self.$object || self.object || null;
+        if (object && typeof vm.invokeByName === 'function') vm.invokeByName('run', '()V', object, []);
       },
       'getName()Ljava/lang/String;': (self) => self.threadName || 'main',
       'setName(Ljava/lang/String;)V': (self, [name]) => {
@@ -2435,6 +2443,21 @@ JAVA_CORE_CLASSES['Landroid/text/style/ForegroundColorSpan;'] = nativeDef('Landr
     },
     'getForegroundColor()I': (self) => self.color | 0,
     'updateDrawState(Landroid/text/TextPaint;)V': () => undefined,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/CountDownLatch;'] = nativeDef('Ljava/util/concurrent/CountDownLatch;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (count) {
+    this.count = Number(count) || 0;
+  }, { count: 0 }),
+  methods: {
+    '<init>(I)V': (self, [count]) => { self.count = Number(count) || 0; },
+    'await()V': () => undefined,
+    'await(JLjava/util/concurrent/TimeUnit;)Z': () => true,
+    'countDown()V': (self) => { self.count = Math.max(0, (self.count | 0) - 1); },
+    'getCount()J': (self) => self.count | 0,
+    'toString()Ljava/lang/String;': (self) => 'CountDownLatch(' + (self.count | 0) + ')',
   },
 });
 
@@ -3638,31 +3661,37 @@ JAVA_CORE_CLASSES['Landroid/content/res/ColorStateList;'] = nativeDef('Landroid/
       self.colors = colors?.$data || colors || [];
     },
     'getDefaultColor()I': (self) => {
-      const colors = self.colors;
-      return Array.isArray(colors) && colors.length ? (colors[colors.length - 1] | 0) >>> 0 : 0;
+      const states = self.states || [];
+      const colors = self.colors || [];
+      for (let i = 0; i < states.length; i++) {
+        const spec = states[i]?.$data || states[i] || [];
+        if (!spec.length && colors[i] !== undefined) return colors[i] | 0;
+      }
+      return Array.isArray(colors) && colors.length ? colors[0] | 0 : 0;
     },
     'getColorForState([II)I': (self, [stateSet, fallback]) => {
       const states = self.states || [];
       const colors = self.colors || [];
-      const requested = stateSet?.$data || stateSet || [];
-      let bestIndex = -1;
-      let bestLen = -1;
       for (let i = 0; i < states.length; i++) {
-        const spec = states[i]?.$data || states[i] || [];
-        let matches = true;
-        for (let j = 0; j < spec.length; j++) {
-          const state = spec[j] | 0;
-          const positive = state > 0;
-          const key = Math.abs(state);
-          if (positive !== requested.includes(key)) { matches = false; break; }
-        }
-        if (matches && spec.length > bestLen) { bestLen = spec.length; bestIndex = i; }
+        if (!matchesStateSpec(states[i], stateSet)) continue;
+        if (colors[i] !== undefined) return colors[i] | 0;
       }
-      if (bestIndex >= 0 && colors[bestIndex] !== undefined) return colors[bestIndex] | 0;
       return fallback | 0;
     },
     'isStateful()Z': (self) => (self.states || []).some((s) => (s?.$data || s || []).length > 0),
-    'withAlpha(I)Landroid/content/res/ColorStateList;': (self) => self,
+    'withAlpha(I)Landroid/content/res/ColorStateList;': (self, [alpha], vm) => {
+      const colors = (self.colors || []).map((color) => (((toInt(color) >>> 24) * (toInt(alpha) & 0xff) / 255) << 24 | (color & 0xffffff)) >>> 0);
+      const wrapper = vm?.wrapPrimitiveArray ? vm.wrapPrimitiveArray(self.states || [], '[[I') : { $data: self.states };
+      const colorArray = vm?.wrapPrimitiveArray ? vm.wrapPrimitiveArray(colors, '[I') : { $data: colors };
+      void wrapper;
+      const object = vm.allocateRawObject('Landroid/content/res/ColorStateList;');
+      const peer = vm.registry.getPeer(object, 'Landroid/content/res/ColorStateList;');
+      if (peer) {
+        peer.states = self.states;
+        peer.colors = colors;
+      }
+      return object;
+    },
   },
   staticMethods: {
     'valueOf(I)Landroid/content/res/ColorStateList;': (self, [color], vm) => {

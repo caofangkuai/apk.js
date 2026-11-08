@@ -718,6 +718,18 @@ export class LayoutInflater {
     if (view instanceof ProgressBar) {
       const progressAttr = getByName('progress');
       if (progressAttr) view.progress = Number(progressAttr.value) || 0;
+      const styleAttr = getByName('style');
+      if (styleAttr?.value !== undefined && styleAttr.value !== null) {
+        let styleId = styleAttr.value;
+        if (typeof styleId === 'object' && styleId.reference !== undefined) styleId = styleId.reference;
+        const key = typeof styleId === 'number' ? resources.table?.getEntry?.(styleId >>> 0)?.key : null;
+        const styleName = String(styleAttr.value);
+        if ((key && /horizontal/i.test(key)) || /horizontal/i.test(styleName)) {
+          view.setStyleHorizontal?.(true);
+        }
+      }
+      const indeterminateAttr = getByName('indeterminate');
+      if (indeterminateAttr) view.setIndeterminate?.(indeterminateAttr.value === true || indeterminateAttr.value === 'true');
     }
 
     const tagAttr = getByName('tag');

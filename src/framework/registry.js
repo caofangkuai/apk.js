@@ -47,6 +47,8 @@ import {
   resolveStateListColor,
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
+import { DRAWABLE_CLASSES, OUTLINE_CLASSES, drawableObject } from './drawables.js';
+import { OPENGL_CLASSES } from './opengl.js';
 
 export const FRAMEWORK_CLASSES = {};
 
@@ -730,6 +732,15 @@ function readRectF(vm, rect) {
   return [read('left'), read('top'), read('right'), read('bottom')];
 }
 
+function resolveBitmapPeer(vm, bitmap) {
+  if (!bitmap) return null;
+  const peer = bitmap.$peer || bitmap;
+  if (peer.image) return peer;
+  if (peer.bitmap?.image) return peer.bitmap;
+  if (bitmap.$peer?.bitmap?.image) return bitmap.$peer.bitmap;
+  return peer;
+}
+
 function toIntValue(vm, fieldPeer, args) {
   const [target] = args || [];
   const value = fieldPeer.isStatic
@@ -906,7 +917,7 @@ function buildFrameworkDefinitions(vm) {
         'getString(I[Ljava/lang/Object;)Ljava/lang/String;': (self, [resId, args], vm) => vm.resources.getString(resId >>> 0),
         'getText(I)Ljava/lang/CharSequence;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
         'getColor(I)I': (self, [resId], vm) => vm.resources.getColor(resId >>> 0),
-        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => vm.resources.getDrawable(resId >>> 0),
+        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, vm.resources.getDrawable(resId >>> 0)),
         'getApplicationContext()Landroid/content/Context;': (self, _args, vm) => {
           if (!vm.applicationObject && vm.contextObject) return vm.contextObject;
           return vm.applicationObject ?? vm.contextObject;
@@ -991,7 +1002,7 @@ function buildFrameworkDefinitions(vm) {
         },
         'getText(I)Ljava/lang/CharSequence;': (self, [resId], vm) => (self.resources || vm.resources).getString(resId >>> 0),
         'getColor(I)I': (self, [resId], vm) => (self.resources || vm.resources).getColor(resId >>> 0),
-        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => (self.resources || vm.resources).getDrawable(resId >>> 0),
+        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, (self.resources || vm.resources).getDrawable(resId >>> 0)),
         'getSystemService(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => vm.getSystemService?.(jsString(name)) ?? null,
         'getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;': (self, [name], vm) => {
           const prefs = vm.allocateRawObject('Landroid/content/SharedPreferences;');
@@ -2182,6 +2193,50 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/graphics/PorterDuffColorFilter;', {
+      super: 'Landroid/graphics/ColorFilter;',
+      ctor: class PorterDuffColorFilterPeer {
+        constructor(vm, object, color, mode) {
+          this.vm = vm;
+          this.object = object;
+          this.color = typeof color === 'number' ? color >>> 0 : 0;
+          this.mode = mode ?? null;
+          this.modeOrdinal = typeof mode === 'number' ? mode : (mode?.$peer?.ordinal ?? 5);
+        }
+      },
+      methods: {
+        '<init>(ILandroid/graphics/PorterDuff$Mode;)V': (self, [color, mode]) => {
+          self.color = toInt(color) >>> 0;
+          self.mode = mode ?? null;
+          self.modeOrdinal = typeof mode === 'number' ? mode : (mode?.$peer?.ordinal ?? 5);
+        },
+        'getColor()I': (self) => self.color | 0,
+        'getMode()Landroid/graphics/PorterDuff$Mode;': (self) => self.mode ?? null,
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          const peer = other?.$peer || other;
+          return !!peer && (peer.color >>> 0) === (self.color >>> 0) && (peer.modeOrdinal ?? 5) === (self.modeOrdinal ?? 5);
+        },
+        'hashCode()I': (self) => ((self.color | 0) * 31 + (self.modeOrdinal | 0)) | 0,
+      },
+    }),
+    nativeDef('Landroid/graphics/ColorFilter;', { super: 'Ljava/lang/Object;' }),
+    nativeDef('Landroid/graphics/ColorMatrixColorFilter;', {
+      super: 'Landroid/graphics/ColorFilter;',
+      ctor: class ColorMatrixColorFilterPeer {
+        constructor(vm, object, matrix) {
+          this.vm = vm;
+          this.object = object;
+          this.matrix = matrix ?? null;
+        }
+      },
+      methods: {
+        '<init>(Landroid/graphics/ColorMatrix;)V': (self, [matrix]) => { self.matrix = matrix ?? null; },
+        '<init>([F)V': (self, [matrix]) => { self.matrix = matrix ?? null; },
+      },
+    }),
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/PopupWindow;', {
       super: 'Ljava/lang/Object;',
       ctor: PopupWindowPeer,
@@ -2549,7 +2604,9 @@ function buildFrameworkDefinitions(vm) {
           const view = child?.$view || child;
           self.view?.measureChildWithMargins?.(view, wSpec | 0, wUsed | 0, hSpec | 0, hUsed | 0);
         },
-        'drawChild(Landroid/graphics/Canvas;Landroid/view/View;J)Z': (self, [canvas, child]) => {
+        'offsetChildrenTopAndBottom(I)V': (self, [offset]) => self.view?.offsetChildrenTopAndBottom?.(offset | 0),
+    'offsetChildrenLeftAndRight(I)V': (self, [offset]) => self.view?.offsetChildrenLeftAndRight?.(offset | 0),
+    'drawChild(Landroid/graphics/Canvas;Landroid/view/View;J)Z': (self, [canvas, child]) => {
           const hostCanvas = canvas?.$peer?.canvas || canvas;
           const hostChild = child?.$view || child?.$peer?.view || null;
           if (hostChild && hostCanvas && typeof hostChild.draw === 'function') {
@@ -3432,14 +3489,14 @@ function buildFrameworkDefinitions(vm) {
       ctor: viewPeerConstructor('Landroid/widget/ImageView;'),
       methods: {
         'setImageResource(I)V': (self, [resId]) => {
-          self.view.drawable = self.vm.resources.getDrawable(resId >>> 0);
+          self.view.drawable = drawableObject(self.vm, self.vm.resources.getDrawable(resId >>> 0));
           self.view.invalidate();
         },
         'setImageDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
           self.view.drawable = drawable;
           self.view.invalidate();
         },
-        'getDrawable()Landroid/graphics/drawable/Drawable;': (self) => self.view?.drawable ?? null,
+        'getDrawable()Landroid/graphics/drawable/Drawable;': (self) => drawableObject(self.vm, self.view?.drawable ?? null),
       },
     })
   );
@@ -4367,6 +4424,25 @@ function buildFrameworkDefinitions(vm) {
           self.paint.setStrokeCap(cap?.$peer?.ordinal ?? cap),
         'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) =>
           self.paint.setStyle(style?.$peer?.ordinal ?? style),
+        'setColorFilter(Landroid/graphics/ColorFilter;)V': (self, [filter]) => {
+          self.paint.setColorFilter(filter ?? null);
+        },
+        'getColorFilter()Landroid/graphics/ColorFilter;': (self) => self.paint.getColorFilter() ?? null,
+        'setShader(Landroid/graphics/Shader;)V': (self, [shader]) => {
+          self.paint.shader = shader ?? null;
+        },
+        'setDither(Z)V': () => undefined,
+        'setFilterBitmap(Z)V': () => undefined,
+        'setSubpixelText(Z)V': () => undefined,
+        'setFakeBoldText(Z)V': (self, [value]) => { self.paint.fontWeight = value ? 'bold' : 'normal'; },
+        'setTextAlign(Landroid/graphics/Paint$Align;)V': (self, [align]) => {
+          const ordinal = align?.$peer?.ordinal ?? align;
+          self.paint.textAlign = ['left', 'center', 'right'][ordinal | 0] || 'left';
+        },
+        'setLetterSpacing(F)V': (self, [spacing]) => { self.paint.letterSpacing = Number(spacing) || 0; },
+        'ascent()F': (self) => self.paint.getFontMetricsInt().ascent,
+        'descent()F': (self) => self.paint.getFontMetricsInt().descent,
+        'reset()V': (self) => { self.paint = new Paint(); },
         'measureText(Ljava/lang/String;)F': (self, [text]) => self.paint.measureText(jsString(text)),
         'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self) => self.paint.getFontMetrics(),
         'getFontMetricsInt()Landroid/graphics/Paint$FontMetricsInt;': (self, _args, vm) => {
@@ -4418,10 +4494,88 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       methods: {
         'drawColor(I)V': (self, [color]) => self.canvas?.drawColor(color),
+        'drawARGB(IIII)V': (self, [a, r, g, b]) =>
+          self.canvas?.drawColor((((toInt(a) & 0xff) << 24) | ((toInt(r) & 0xff) << 16) | ((toInt(g) & 0xff) << 8) | (toInt(b) & 0xff)) >>> 0),
         'drawText(Ljava/lang/String;FFLandroid/graphics/Paint;)V': (self, [text, x, y, paint]) =>
           self.canvas?.drawText(jsString(text), x, y, paint?.paint),
+        'drawText([CIIFFLandroid/graphics/Paint;)V': (self, [chars, index, count, x, y, paint]) => {
+          const data = chars?.$data || chars || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          self.canvas?.drawText(text, x, y, paint?.paint);
+        },
         'drawRect(FFFFLandroid/graphics/Paint;)V': (self, [l, t, r, b, paint]) =>
           self.canvas?.drawRect(l, t, r, b, paint?.paint),
+        'drawCircle(FFFLandroid/graphics/Paint;)V': (self, [cx, cy, radius, paint]) =>
+          self.canvas?.drawCircle?.(cx, cy, radius, paint?.paint),
+        'drawLine(FFFFLandroid/graphics/Paint;)V': (self, [x1, y1, x2, y2, paint]) =>
+          self.canvas?.drawLine?.(x1, y1, x2, y2, paint?.paint),
+        'drawOval(FFFFLandroid/graphics/Paint;)V': (self, [l, t, r, b, paint]) =>
+          self.canvas?.drawOval?.(l, t, r, b, paint?.paint),
+        'drawOval(Landroid/graphics/RectF;Landroid/graphics/Paint;)V': (self, [rect, paint], vm) => {
+          if (!rect) return;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.drawOval?.(l, t, r, b, paint?.paint);
+        },
+        'drawArc(FFFFFFZLandroid/graphics/Paint;)V': (self, [l, t, r, b, start, sweep, useCenter, paint]) =>
+          self.canvas?.drawArc?.(l, t, r, b, start, sweep, !!useCenter, paint?.paint),
+        'drawArc(Landroid/graphics/RectF;FFZLandroid/graphics/Paint;)V': (self, [rect, start, sweep, useCenter, paint], vm) => {
+          if (!rect) return;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.drawArc?.(l, t, r, b, start, sweep, !!useCenter, paint?.paint);
+        },
+        'drawPoint(FFLandroid/graphics/Paint;)V': (self, [x, y, paint]) =>
+          self.canvas?.drawPoint?.(x, y, paint?.paint),
+        'drawBitmap(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V': (self, [bitmap, left, top], vm) => {
+          const peer = resolveBitmapPeer(vm, bitmap);
+          if (!peer) return;
+          self.canvas?.drawBitmap?.(peer, left, top);
+        },
+        'drawBitmap(Landroid/graphics/Bitmap;Landroid/graphics/Rect;Landroid/graphics/RectF;Landroid/graphics/Paint;)V': (self, [bitmap, src, dst, paint], vm) => {
+          const peer = resolveBitmapPeer(vm, bitmap);
+          if (!peer || !dst) return;
+          self.canvas?.drawBitmapRect?.(peer, src, dst, paint?.paint);
+        },
+        'drawBitmap(Landroid/graphics/Bitmap;Landroid/graphics/Matrix;Landroid/graphics/Paint;)V': (self, [bitmap, matrix, paint], vm) => {
+          const peer = resolveBitmapPeer(vm, bitmap);
+          if (!peer) return;
+          self.canvas?.drawBitmap?.(peer, 0, 0);
+        },
+        'clipRect(FFFF)Z': (self, [l, t, r, b]) => {
+          self.canvas?.clipRect?.(l, t, r, b);
+          return true;
+        },
+        'clipRect(Landroid/graphics/Rect;)Z': (self, [rect]) => {
+          if (!rect) return false;
+          const peer = rect.$peer || rect;
+          self.canvas?.clipRect?.(peer.left | 0, peer.top | 0, peer.right | 0, peer.bottom | 0);
+          return true;
+        },
+        'clipRect(Landroid/graphics/RectF;)Z': (self, [rect], vm) => {
+          if (!rect) return false;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.clipRect?.(l, t, r, b);
+          return true;
+        },
+        'clipPath(Landroid/graphics/Path;)Z': (self, [path]) => {
+          const peer = path?.$peer || path;
+          self.canvas?.clipPath?.(peer?.commands || []);
+          return true;
+        },
+        'scale(FF)V': (self, [sx, sy]) => self.canvas?.scale?.(sx, sy),
+        'saveLayer(Landroid/graphics/RectF;Landroid/graphics/Paint;)I': (self, [bounds, paint], vm) => {
+          const rect = bounds ? readRectF(vm, bounds) : null;
+          self.canvas?.saveLayer?.(rect, paint?.paint);
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayerAlpha(Landroid/graphics/RectF;I)I': (self, [bounds, alpha]) => {
+          self.canvas?.saveLayer?.(null, { alpha: (toInt(alpha) & 0xff) / 255 });
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'drawPicture(Landroid/graphics/Picture;)V': () => undefined,
+        'getWidth()I': (self) => Math.round(self.canvas?.width || 0),
+        'getHeight()I': (self) => Math.round(self.canvas?.height || 0),
+        'getDensity()I': () => 160,
         'save()I': (self) => {
           self.canvas?.save();
           return (self.$saveDepth = (self.$saveDepth || 0) + 1);
@@ -5184,7 +5338,7 @@ function buildFrameworkDefinitions(vm) {
         },
         'getDimension(I)F': (self, [resId], vm) => vm.resources.getDimensionPixelSize(resId >>> 0),
         'getDimensionPixelSize(I)I': (self, [resId], vm) => vm.resources.getDimensionPixelSize(resId >>> 0),
-        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => vm.resources.getDrawable(resId >>> 0),
+        'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, vm.resources.getDrawable(resId >>> 0)),
         'getLayout(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getXml(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getValue(ILandroid/util/TypedValue;Z)V': (self, [resId, out], vm) => {
@@ -5307,6 +5461,9 @@ function buildFrameworkDefinitions(vm) {
     })
   );
 
+  defs.push(...Object.values(OPENGL_CLASSES));
+  defs.push(...Object.values(OUTLINE_CLASSES));
+  defs.push(...Object.values(DRAWABLE_CLASSES));
   defs.push(...coreGraphicDefs());
   defs.push(...cryptoDefs());
   defs.push(...settingsDefs());
@@ -6277,14 +6434,45 @@ function viewMethods() {
       if (self.view) self.view.willNotDraw = !!value;
     },
     'willNotDraw()Z': (self) => !!self.view?.willNotDraw,
-    'setBackgroundTintList(Landroid/content/res/ColorStateList;)V': () => undefined,
-    'getBackgroundTintList()Landroid/content/res/ColorStateList;': () => null,
-    'setBackgroundTintMode(Landroid/graphics/PorterDuff$Mode;)V': () => undefined,
+    'setBackgroundTintList(Landroid/content/res/ColorStateList;)V': (self, [list]) => {
+      const view = self.view;
+      if (!view) return;
+      view.backgroundTintList = list ?? null;
+      view.backgroundTint = typeof list === 'number' ? list >>> 0 : null;
+      const drawable = view.background;
+      const drawablePeer = drawable?.$peer;
+      if (drawablePeer && typeof drawablePeer === 'object') drawablePeer.tintList = list ?? null;
+      view.refreshDrawableState?.();
+      view.invalidate();
+    },
+    'getBackgroundTintList()Landroid/content/res/ColorStateList;': (self) => self.view?.backgroundTintList ?? null,
+    'setBackgroundTintMode(Landroid/graphics/PorterDuff$Mode;)V': (self, [mode]) => {
+      if (self.view) {
+        self.view.backgroundTintMode = mode ?? null;
+        self.view.invalidate?.();
+      }
+    },
     'setImageTintList(Landroid/content/res/ColorStateList;)V': () => undefined,
     'setImageTintMode(Landroid/graphics/PorterDuff$Mode;)V': () => undefined,
     'setCompoundDrawableTintList(Landroid/content/res/ColorStateList;)V': () => undefined,
     'setCompoundDrawableTintMode(Landroid/graphics/PorterDuff$Mode;)V': () => undefined,
-    'getBackgroundTintMode()Landroid/graphics/PorterDuff$Mode;': () => null,
+    'getBackgroundTintMode()Landroid/graphics/PorterDuff$Mode;': (self) => self.view?.backgroundTintMode ?? null,
+    'setForegroundTintList(Landroid/content/res/ColorStateList;)V': (self, [list]) => {
+      const view = self.view;
+      if (!view) return;
+      view.foregroundTintList = list ?? null;
+      const drawablePeer = view.foreground?.$peer;
+      if (drawablePeer && typeof drawablePeer === 'object') drawablePeer.tintList = list ?? null;
+      view.invalidate?.();
+    },
+    'getForegroundTintList()Landroid/content/res/ColorStateList;': (self) => self.view?.foregroundTintList ?? null,
+    'setForegroundTintMode(Landroid/graphics/PorterDuff$Mode;)V': (self, [mode]) => {
+      if (self.view) {
+        self.view.foregroundTintMode = mode ?? null;
+        self.view.invalidate?.();
+      }
+    },
+    'getForegroundTintMode()Landroid/graphics/PorterDuff$Mode;': (self) => self.view?.foregroundTintMode ?? null,
     'setId(I)V': (self, [id]) => {
       if (self.view) self.view.id = id >>> 0;
     },
@@ -6321,12 +6509,12 @@ function viewMethods() {
         self.view?.setBackgroundColor(id);
         return;
       }
-      const drawable = (self.resources || vm.resources)?.getDrawable(id);
+      const drawable = drawableObject(vm, (self.resources || vm.resources)?.getDrawable(id));
       if (drawable) self.view?.setBackground(drawable);
     },
-    'getBackground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getBackground() ?? null,
+    'getBackground()Landroid/graphics/drawable/Drawable;': (self) => drawableObject(self.vm, self.view?.getBackground() ?? null),
     'setForeground(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => self.view?.setForeground?.(drawable),
-    'getForeground()Landroid/graphics/drawable/Drawable;': (self) => self.view?.getForeground?.() ?? null,
+    'getForeground()Landroid/graphics/drawable/Drawable;': (self) => drawableObject(self.vm, self.view?.getForeground?.() ?? null),
     'setForegroundGravity(I)V': (self, [gravity]) => self.view?.setForegroundGravity?.(gravity | 0),
     'setPadding(IIII)V': (self, [l, t, r, b], vm) => {
       self.view?.setPadding(l | 0, t | 0, r | 0, b | 0);
@@ -6429,6 +6617,17 @@ function viewMethods() {
     'getY()F': (self) => self.view?.getY() ?? 0,
     'setZ(F)V': (self, [v]) => self.view?.setElevation(v),
     'getZ()F': (self) => self.view?.getZ() ?? 0,
+    'setOutlineProvider(Landroid/view/ViewOutlineProvider;)V': (self, [provider]) => {
+      if (!self.view) return;
+      self.view.outlineProvider = provider ?? null;
+      self.view.invalidate?.();
+    },
+    'getOutlineProvider()Landroid/view/ViewOutlineProvider;': (self) => self.view?.outlineProvider ?? null,
+    'invalidateOutline()V': (self) => self.view?.invalidate?.(),
+    'setClipToOutline(Z)V': (self, [value]) => {
+      if (self.view) self.view.clipToOutline = !!value;
+    },
+    'getClipToOutline()Z': (self) => (self.view?.clipToOutline ? 1 : 0),
     'setElevation(F)V': (self, [v]) => self.view?.setElevation(v),
     'getElevation()F': (self) => self.view?.getElevation() ?? 0,
     'setSelected(Z)V': (self, [v]) => self.view?.setSelected(!!v),
@@ -6437,6 +6636,18 @@ function viewMethods() {
     'isActivated()Z': (self) => self.view?.isActivated() ?? false,
     'setPressed(Z)V': (self, [v]) => self.view?.setPressed(!!v),
     'isPressed()Z': (self) => self.view?.isPressed() ?? false,
+    'refreshDrawableState()V': (self) => self.view?.refreshDrawableState?.(),
+    'drawableStateChanged()V': (self) => {
+      self.view?.refreshDrawableState?.();
+      self.view?.invalidate?.();
+    },
+    'getDrawableState()[I': (self, _args, vm) => {
+      const values = self.view?.drawableState?.() || [];
+      const array = vm.newArray('I', values.length);
+      values.forEach((value, index) => { array.$data[index] = value | 0; });
+      return array;
+    },
+    'isInEditMode()Z': () => 0,
     'setLongClickable(Z)V': (self, [v]) => self.view?.setLongClickable(!!v),
     'isLongClickable()Z': (self) => self.view?.isLongClickable() ?? false,
     'isClickable()Z': (self) => self.view?.isClickable() ?? false,
@@ -7267,7 +7478,7 @@ function makeTypedArrayPeer(vm, values, present = null) {
       }
       const drawable = vm.resources.getDrawable(resId);
       if (drawable && drawable.type === 'color') return wrapColorDrawable(vm, drawable.color);
-      return drawable;
+      return drawableObject(vm, drawable);
     },
     getString: (index) => {
       if (!isPresent(index)) return null;
