@@ -944,6 +944,7 @@ function buildFrameworkDefinitions(vm) {
           const key = jsString(name);
           return vm.getSystemService?.(key) ?? null;
         },
+        'getSystemService(Ljava/lang/Class;)Ljava/lang/Object;': (self, [clazz], vm) => vm.getSystemServiceByClass?.(clazz) ?? null,
         'getMainLooper()Landroid/os/Looper;': (self, _args, vm) => vm.mainLooper ?? null,
         'getString(I)Ljava/lang/String;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
         'getString(I[Ljava/lang/Object;)Ljava/lang/String;': (self, [resId, args], vm) => vm.resources.getString(resId >>> 0),

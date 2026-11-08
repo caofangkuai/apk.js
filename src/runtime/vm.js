@@ -168,6 +168,7 @@ export class JavaVM {
       'bluetooth': 'Landroid/bluetooth/BluetoothManager;',
       'storage': 'Landroid/os/storage/StorageManager;',
       'battery': 'Landroid/os/BatteryManager;',
+      'batterymanager': 'Landroid/os/BatteryManager;',
       'usb': 'Landroid/hardware/usb/UsbManager;',
     };
     const descriptor = descriptorByService[key];
