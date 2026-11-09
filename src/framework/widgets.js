@@ -173,7 +173,9 @@ export class TextView extends View {
   }
 
   measureText(text, size = this.textSize) {
-    return measureTextWidth(String(text ?? ''), size, this.fontSpec());
+    const value = String(text ?? '');
+    const spacing = (Number(this.letterSpacing) || 0) * size;
+    return measureTextWidth(value, size, this.fontSpec()) + (spacing && value.length > 1 ? spacing * (value.length - 1) : 0);
   }
 
   setTextSize(size) {
