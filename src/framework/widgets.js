@@ -136,6 +136,7 @@ export class TextView extends View {
     this.lineSpacingExtra = 0;
     this.lineSpacingMultiplier = 1;
     this.letterSpacing = 0;
+    this.textScaleX = 1;
     this.typeface = 'Noto Sans CJK SC';
     this.textStyle = 0;
     this.paddingLeft = 0;
@@ -175,7 +176,7 @@ export class TextView extends View {
   measureText(text, size = this.textSize) {
     const value = String(text ?? '');
     const spacing = (Number(this.letterSpacing) || 0) * size;
-    return measureTextWidth(value, size, this.fontSpec()) + (spacing && value.length > 1 ? spacing * (value.length - 1) : 0);
+    return measureTextWidth(value, size, this.fontSpec()) * (Number(this.textScaleX) || 1) + (spacing && value.length > 1 ? spacing * (value.length - 1) : 0);
   }
 
   setTextSize(size) {
@@ -340,6 +341,13 @@ export class TextView extends View {
     return this.setTextAllCaps(value);
   }
 
+  setTextScaleX(value) {
+    this.textScaleX = Number(value) || 1;
+    this.layoutDirty = true;
+    this.requestLayout();
+    return this;
+  }
+
   setLetterSpacing(value) {
     this.letterSpacing = Number(value) || 0;
     this.textPaint.letterSpacing = this.letterSpacing * this.textSize;
@@ -462,6 +470,7 @@ export class TextView extends View {
     const paint = this.textPaint;
     paint.textSize = this.textSize;
     paint.typeface = this.fontSpec();
+    paint.textScaleX = Number(this.textScaleX) || 1;
     if (this.textShadow) {
       paint.shadow = this.textShadow;
     } else {

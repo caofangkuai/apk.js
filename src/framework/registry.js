@@ -4580,6 +4580,8 @@ function buildFrameworkDefinitions(vm) {
           self.paint.textAlign = ['left', 'center', 'right'][ordinal | 0] || 'left';
         },
         'setLetterSpacing(F)V': (self, [spacing]) => { self.paint.letterSpacing = Number(spacing) || 0; },
+        'setTextScaleX(F)V': (self, [scale]) => { self.paint.textScaleX = Number(scale) || 1; },
+        'getTextScaleX()F': (self) => Number(self.paint?.textScaleX) || 1,
         'ascent()F': (self) => self.paint.getFontMetricsInt().ascent,
         'descent()F': (self) => self.paint.getFontMetricsInt().descent,
         'reset()V': (self) => { self.paint = new Paint(); },

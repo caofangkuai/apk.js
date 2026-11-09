@@ -8,6 +8,7 @@ export class Paint {
     this.textAlign = 'left';
     this.typeface = 'Noto Sans CJK SC';
     this.letterSpacing = 0;
+    this.textScaleX = 1;
     this.alpha = undefined;
     this.strokeJoin = null;
     this.strokeCap = null;
@@ -428,7 +429,14 @@ export class Canvas {
     ctx.save();
     applyPaint(ctx, paint);
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(String(text ?? ''), this.originX + x, this.originY + y);
+    const scaleX = Number(paint?.textScaleX) || 1;
+    if (scaleX === 1) {
+      ctx.fillText(String(text ?? ''), this.originX + x, this.originY + y);
+    } else {
+      ctx.translate(this.originX + x, this.originY + y);
+      ctx.scale(scaleX, 1);
+      ctx.fillText(String(text ?? ''), 0, 0);
+    }
     ctx.restore();
   }
 
