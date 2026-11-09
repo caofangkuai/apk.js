@@ -27,7 +27,9 @@ canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width, height });
 const engine = new EmulatorEngine({ onLog: () => {}, width, height, density: 1 });
 engine.attachCanvas(canvas);
 const apk = await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(apkPath)));
+const startAt = performance.now();
 await engine.start(apk);
+const startMs = Number((performance.now() - startAt).toFixed(1));
 const screen = engine.screen;
 await new Promise((resolve) => setTimeout(resolve, 800));
 const samples = [];
@@ -41,6 +43,7 @@ samples.sort((a, b) => a - b);
 const sum = samples.reduce((total, value) => total + value, 0);
 const result = {
   frames,
+  startMs,
   avgMs: Number((sum / frames).toFixed(3)),
   p50Ms: Number(samples[Math.floor(frames * 0.5)].toFixed(3)),
   p95Ms: Number(samples[Math.floor(frames * 0.95)].toFixed(3)),
