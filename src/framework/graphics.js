@@ -82,7 +82,8 @@ export class Paint {
   }
 
   measureText(text) {
-    return measureTextWidth(String(text ?? ''), this.textSize, this.typeface);
+    const value = String(text ?? '');
+    return measureTextWidth(value, this.textSize, this.typeface) * (Number(this.textScaleX) || 1);
   }
 
   getFontMetrics() {
