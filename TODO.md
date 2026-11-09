@@ -22,6 +22,7 @@
 - [ ] `AnimatedVectorDrawable` 属性动画
 - [ ] `ListView` 回收与局部布局
 - [ ] elevation overlay 与深色主题
+- [ ] `PopupWindow`、`AlertDialog` 的布局与绘制
 - [ ] `TextInputLayout` 的浮动标签动画
 - [ ] `BottomSheetDialog` 的拖拽行为
 - [ ] `ViewPager2` 与 `ViewPager` 的滚动惯性对齐
