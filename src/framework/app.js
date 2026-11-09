@@ -120,6 +120,11 @@ export class ActivityHost {
 
   finish() {
     this.finished = true;
+    const stack = this.vm.activityStack;
+    if (Array.isArray(stack)) {
+      const index = stack.indexOf(this);
+      if (index >= 0) stack.splice(index, 1);
+    }
     this.vm.onActivityFinished?.(this);
   }
 

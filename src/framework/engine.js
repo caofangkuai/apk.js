@@ -298,7 +298,11 @@ export class EmulatorEngine {
       throw error;
     }
     this.activity = activity;
-    vm.onActivityFinished = () => this.onFinished();
+    vm.onActivityFinished = (peer) => {
+      const stack = vm.activityStack || [];
+      const activeMain = !peer || peer?.object === vm.activity;
+      if (stack.length === 0 && activeMain) this.onFinished();
+    };
 
     const activityPeer = vm.registry.getPeer(activity, descriptor);
     vm.seedActivityTitle?.(activityPeer, descriptor);
