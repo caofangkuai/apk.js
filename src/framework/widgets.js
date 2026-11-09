@@ -167,6 +167,15 @@ export class TextView extends View {
     return this.text;
   }
 
+  fontSpec() {
+    const style = this.textStyle | 0;
+    return (style & 2 ? 'italic ' : '') + (style & 1 ? 'bold ' : '') + (this.typeface || 'Noto Sans CJK SC');
+  }
+
+  measureText(text, size = this.textSize) {
+    return measureTextWidth(String(text ?? ''), size, this.fontSpec());
+  }
+
   setTextSize(size) {
     this.textSize = Number(size) || 0;
     this.textPaint.textSize = this.textSize;
@@ -297,14 +306,14 @@ export class TextView extends View {
   ellipsizeLine(text, maxWidth, force = false) {
     if (!text && !force) return text;
     if (this.ellipsize === null || this.ellipsize === undefined) return text;
-    if (!force && measureTextWidth(text, this.textSize, this.typeface) <= maxWidth) return text;
+    if (!force && this.measureText(text) <= maxWidth) return text;
     const ellipsis = '\u2026';
     const chars = Array.from(text);
     let width = 0;
-    const ellipsisWidth = measureTextWidth(ellipsis, this.textSize, this.typeface);
+    const ellipsisWidth = this.measureText(ellipsis);
     let out = '';
     for (const char of chars) {
-      const charWidth = measureTextWidth(char, this.textSize, this.typeface);
+      const charWidth = this.measureText(char);
       if (width + charWidth + ellipsisWidth > maxWidth) break;
       out += char;
       width += charWidth;
@@ -406,7 +415,7 @@ export class TextView extends View {
     if (globalThis.__TXT && maxWidth > 100) console.error('TXLAY maxW=' + maxWidth + ' padL=' + this.paddingLeft + ' padR=' + this.paddingRight + ' avail=' + available + ' size=' + this.textSize + ' text=' + JSON.stringify(String(this.text).slice(0,20)));
     if (!this.layoutDirty && this.lastLayoutWidth === available) return;
     this.lastLayoutWidth = available;
-    let lines = this.singleLine ? [display.replace(/\n/g, ' ')] : wrapText(display, this.textSize, available, this.typeface);
+    let lines = this.singleLine ? [display.replace(/\n/g, ' ')] : wrapText(display, this.textSize, available, this.fontSpec());
     if (this.maxLines > 0 && lines.length > this.maxLines) {
       lines = lines.slice(0, this.maxLines);
       const lastIndex = lines.length - 1;
@@ -422,7 +431,7 @@ export class TextView extends View {
     const compoundRight = this.compoundWidth([2]);
     const compoundPadding = this.compoundPadding();
     const desiredWidth = Math.ceil(
-      measureTextWidth(display, this.textSize, this.typeface)
+      this.measureText(display)
       + compoundPadding.left + compoundPadding.right + compoundLeft + compoundRight,
     );
     const textMetrics = this.textLineMetrics();
@@ -450,7 +459,7 @@ export class TextView extends View {
     const display = this.textAllCaps ? this.text.toUpperCase() : this.text;
     const paint = this.textPaint;
     paint.textSize = this.textSize;
-    paint.typeface = this.typeface;
+    paint.typeface = this.fontSpec();
     if (this.textShadow) {
       paint.shadow = this.textShadow;
     } else {
@@ -499,7 +508,7 @@ export class TextView extends View {
     const baseRight = width - compoundPadding.right - compoundRightDrawable;
     for (let i = 0; i < contentLines.length; i++) {
       const line = contentLines[i];
-      const lineWidth = measureTextWidth(line, this.textSize, this.typeface);
+      const lineWidth = this.measureText(line);
       let x = baseLeft;
       if ((gravity & 0x07) === 0x01) {
         x = baseLeft + (baseRight - baseLeft - lineWidth) / 2;

@@ -7456,6 +7456,20 @@ function applyTextAppearance(self, styleId) {
   if (typeof color === 'number' && typeof view.setTextColor === 'function') {
     view.setTextColor(color >>> 0);
   }
+  const style = attrs.get(0x01010097);
+  if (style !== undefined && typeof view === 'object') {
+    view.textStyle = Number(style) | 0;
+    view.layoutDirty = true;
+  }
+  const allCaps = attrs.get(0x010103df);
+  if (allCaps !== undefined && typeof view.setTextAllCaps === 'function') {
+    view.setTextAllCaps(!!allCaps);
+  }
+  const family = attrs.get(0x010103ac);
+  if (family !== undefined && typeof family === 'string') {
+    view.typeface = family;
+    view.layoutDirty = true;
+  }
 }
 
 export function loadThemeFromStyleId(vm, styleId) {
