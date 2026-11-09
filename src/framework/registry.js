@@ -3461,6 +3461,40 @@ function buildFrameworkDefinitions(vm) {
   }
 
   defs.push(
+    nativeDef('Landroid/os/Trace;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'beginSection(Ljava/lang/String;)V': () => undefined,
+        'endSection()V': () => undefined,
+        'beginAsyncSection(Ljava/lang/String;I)V': () => undefined,
+        'endAsyncSection(Ljava/lang/String;I)V': () => undefined,
+        'setCounter(Ljava/lang/String;I)V': () => undefined,
+      },
+    }),
+    nativeDef('Landroid/widget/EdgeEffect;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class EdgeEffectPeer {
+        constructor() { this.finished = true; this.color = -1; }
+      },
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setSize(II)V': () => undefined,
+        'finish()V': (self) => { self.finished = true; },
+        'isFinished()Z': () => 1,
+        'draw(Landroid/graphics/Canvas;)Z': () => 0,
+        'getMaxHeight()I': () => 0,
+        'onPull(F)V': () => undefined,
+        'onPull(FF)V': () => undefined,
+        'onRelease()V': () => undefined,
+        'onAbsorb(I)V': () => undefined,
+        'getColor()I': (self) => self.color | 0,
+        'setColor(I)V': (self, [color]) => { self.color = color | 0; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Scroller;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -4513,6 +4547,7 @@ function buildFrameworkDefinitions(vm) {
           self.paint.setStrokeCap(cap?.$peer?.ordinal ?? cap),
         'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) =>
           self.paint.setStyle(style?.$peer?.ordinal ?? style),
+        'setColorFilter(Landroid/graphics/ColorFilter;Landroid/graphics/PorterDuff$Mode;)V': (self, [filter]) => { self.paint.colorFilter = filter ?? null; },
         'setColorFilter(Landroid/graphics/ColorFilter;)V': (self, [filter]) => {
           self.paint.setColorFilter(filter ?? null);
         },

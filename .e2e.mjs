@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ executablePath: '/root/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell', args: ['--no-sandbox','--disable-gpu'] });
+const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+const errors=[]; page.on('pageerror',e=>errors.push(e.message)); page.on('console',m=>{if(m.type()==='error')errors.push(m.text().slice(0,120));});
+await page.goto('http://127.0.0.1:8123/playground.html');
+await page.setInputFiles('#apk-file','/tmp/devinfo.apk');
+await page.waitForTimeout(6000);
+const stats=await page.evaluate(()=>{const c=document.querySelector('canvas');if(!c)return null;const ctx=c.getContext('2d');const d=ctx.getImageData(0,0,c.width,c.height).data;const colors=new Set();let dark=0;for(let i=0;i<d.length;i+=4*97){colors.add((d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4));if(d[i]+d[i+1]+d[i+2]<360)dark++;}return{w:c.width,h:c.height,colors:colors.size,dark};});
+await page.screenshot({path:'image-debug/browser-playground.png',fullPage:true});
+console.log('STATS',JSON.stringify(stats),'ERR',errors.slice(0,3));
+await browser.close();

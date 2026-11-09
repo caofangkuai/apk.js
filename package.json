@@ -20,7 +20,8 @@
     "serve:dev": "python3 -m http.server 8080",
     "test:drawables": "node tests/drawables.mjs",
     "setup:fonts": "bash tools/setup-fonts.sh",
-    "check:refs": "node tools/check-refs.mjs"
+    "check:refs": "node tools/check-refs.mjs",
+    "check:browser": "node tools/browser-smoke.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"
