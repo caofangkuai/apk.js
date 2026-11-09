@@ -19,6 +19,10 @@ if (!apkPath) {
   console.error('用法: node tools/render-apk.mjs <apk 路径> [输出名]');
   process.exit(1);
 }
+if (!fs.existsSync(apkPath)) {
+  console.error('APK 不存在: ' + apkPath);
+  process.exit(1);
+}
 const outputName = process.argv[3] || path.basename(apkPath).replace(/\.apk$/i, '');
 const width = Number(process.env.RENDER_WIDTH || 720);
 const height = Number(process.env.RENDER_HEIGHT || 1520);
@@ -27,6 +31,9 @@ const density = Number(process.env.RENDER_DENSITY || 2);
 const outputDir = path.join(root, 'image-debug');
 fs.mkdirSync(outputDir, { recursive: true });
 
+if (!fs.existsSync('/etc/fonts/fonts.conf') && !fs.existsSync('/usr/share/fonts/opentype/noto-cjk')) {
+  console.warn('提示: 未找到 CJK 字体，渲染可能出现豆腐块；可运行 npm run setup:fonts');
+}
 const canvas = Canvas.createCanvas(width, height);
 canvas.style = {};
 canvas.clientWidth = width;
