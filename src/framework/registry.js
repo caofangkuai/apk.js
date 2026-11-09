@@ -2276,6 +2276,9 @@ function buildFrameworkDefinitions(vm) {
           self.height = height | 0;
           self.focusable = !!focusable;
         },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self) => {
+          self.object.$layoutParams = { width: -2, height: -2, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
+        },
         '<init>(II)V': (self, [width, height]) => {
           self.width = width | 0;
           self.height = height | 0;
@@ -4457,8 +4460,63 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/view/accessibility/AccessibilityNodeInfo$AccessibilityAction;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class AccessibilityActionPeer {
+        constructor(id, label) { this.id = id | 0; this.label = label ?? null; }
+      },
+      methods: {
+        '<init>(ILjava/lang/CharSequence;)V': (self, [id, label]) => { self.id = id | 0; self.label = label ?? null; },
+        'getId()I': (self) => self.id | 0,
+        'getLabel()Ljava/lang/CharSequence;': (self) => self.label ?? null,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/provider/Settings$Global;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;)I': (_self, [_resolver, key]) => {
+          const values = { adb_enabled: 0, development_settings_enabled: 0, device_provisioned: 1, stay_on_while_plugged_in: 0 };
+          return values[jsString(key)] ?? 0;
+        },
+        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;I)I': (_self, [_resolver, key, fallback]) => {
+          const values = { adb_enabled: 0, development_settings_enabled: 0, device_provisioned: 1, stay_on_while_plugged_in: 0 };
+          return values[jsString(key)] ?? (fallback | 0);
+        },
+        'getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;': (_self, [_resolver, key]) => {
+          const values = { device_name: 'apk.js' };
+          return values[jsString(key)] ?? null;
+        },
+        'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': () => true,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/PointerIcon;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['TYPE_DEFAULT:I', 1000], ['TYPE_HAND:I', 1002], ['TYPE_ARROW:I', 1000],
+        ['TYPE_TEXT:I', 1008], ['TYPE_CROSSHAIR:I', 1001],
+      ]),
+      staticMethods: {
+        'getSystemIcon(Landroid/content/Context;I)Landroid/view/PointerIcon;': (_self, [type]) => ({ $descriptor: 'Landroid/view/PointerIcon;', type: type | 0 }),
+        'getDefaultIcon(Landroid/content/Context;)Landroid/view/PointerIcon;': () => ({ $descriptor: 'Landroid/view/PointerIcon;', type: 1000 }),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/graphics/Typeface;', {
       super: 'Ljava/lang/Object;',
+      methods: {
+        'getStyle()I': (self) => self.style | 0,
+        'getWeight()I': (self) => ((self.style | 0) & 1 ? 700 : 400),
+        'isBold()Z': (self) => ((self.style | 0) & 1 ? 1 : 0),
+        'isItalic()Z': (self) => ((self.style | 0) & 2 ? 1 : 0),
+      },
       staticFields: new Map([
         ['DEFAULT:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: null, style: 0 }],
         ['DEFAULT_BOLD:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: null, style: 1 }],
@@ -4982,6 +5040,14 @@ function buildFrameworkDefinitions(vm) {
         'isIdentity()Z': (self) => {
           const m = self.matrix || [];
           return (m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0) ? 1 : 0;
+        },
+        'invert(Landroid/graphics/Matrix;)Z': (self, [target]) => {
+          const [a, b, c, d, e, f] = self.matrix;
+          const det = a * d - b * c;
+          if (!det) return false;
+          const inverse = [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
+          if (target?.$peer) target.$peer.matrix = inverse;
+          return true;
         },
         'mapRect(Landroid/graphics/RectF;)Z': (self, [rect], vm) => {
           if (!rect) return false;
@@ -6973,6 +7039,10 @@ function viewMethods() {
     'setMinimumWidth(I)V': (self, [width]) => self.view?.setMinimumWidth(width),
     'setMinimumHeight(I)V': (self, [height]) => self.view?.setMinimumHeight(height),
     'getMinimumWidth()I': (self) => self.view?.getMinimumWidth() ?? 0,
+    'getSuggestedMinimumWidth()I': (self) => self.view?.getSuggestedMinimumWidth?.() ?? self.view?.getMinimumWidth?.() ?? 0,
+    'getSuggestedMinimumHeight()I': (self) => self.view?.getSuggestedMinimumHeight?.() ?? self.view?.getMinimumHeight?.() ?? 0,
+    'saveAttributeDataForStyleable(Landroid/content/Context;[ILandroid/util/AttributeSet;Landroid/content/res/TypedArray;II)V': () => undefined,
+    'setPointerIcon(Landroid/view/PointerIcon;)V': () => undefined,
     'getMinimumHeight()I': (self) => self.view?.getMinimumHeight() ?? 0,
     'getScrollX()I': (self) => self.view?.getScrollX() ?? 0,
     'getScrollY()I': (self) => self.view?.getScrollY() ?? 0,

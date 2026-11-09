@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：312
-- 方法/构造函数键（静态统计）：3028
+- 注册的 native 类：315
+- 方法/构造函数键（静态统计）：3047
 
 ## Native 类清单
 
@@ -114,6 +114,7 @@
 | `Landroid/os/SystemProperties;` | registry.js |
 | `Landroid/os/Trace;` | registry.js |
 | `Landroid/preference/PreferenceManager;` | java-core.js |
+| `Landroid/provider/Settings$Global;` | registry.js |
 | `Landroid/system/Os;` | registry.js |
 | `Landroid/system/StructUtsname;` | registry.js |
 | `Landroid/telephony/TelephonyManager;` | registry.js |
@@ -132,6 +133,7 @@
 | `Landroid/util/TypedValue;` | registry.js |
 | `Landroid/util/Xml;` | registry.js |
 | `Landroid/view/accessibility/AccessibilityManager;` | registry.js |
+| `Landroid/view/accessibility/AccessibilityNodeInfo$AccessibilityAction;` | registry.js |
 | `Landroid/view/animation/Interpolator;` | java-core.js |
 | `Landroid/view/animation/LinearInterpolator;` | java-core.js |
 | `Landroid/view/Display;` | registry.js |
@@ -148,6 +150,7 @@
 | `Landroid/view/MenuInflater;` | registry.js |
 | `Landroid/view/MenuItem;` | registry.js |
 | `Landroid/view/MotionEvent;` | registry.js |
+| `Landroid/view/PointerIcon;` | registry.js |
 | `Landroid/view/VelocityTracker;` | registry.js |
 | `Landroid/view/View;` | registry.js |
 | `Landroid/view/View$MeasureSpec;` | registry.js |
