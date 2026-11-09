@@ -4634,6 +4634,26 @@ function buildFrameworkDefinitions(vm) {
           if (measured?.$data?.length) measured.$data[0] = numberToFloatBits(width);
           return measureForwards ? count : value.length - count;
         },
+        'measureText(Ljava/lang/CharSequence;II)F': (self, [text, start, end]) => self.paint.measureText(jsString(text).slice(start | 0, end | 0)),
+        'getTextWidths(Ljava/lang/CharSequence;II[F)I': (self, [text, start, end, widths]) => {
+          const value = jsString(text).slice(start | 0, end | 0);
+          if (!widths?.$data) return 0;
+          let count = 0;
+          for (let i = 0; i < value.length && i < widths.$data.length; i++) {
+            widths.$data[i] = numberToFloatBits(self.paint.measureText(value[i]));
+            count++;
+          }
+          return count;
+        },
+        'getTextBounds(Ljava/lang/CharSequence;IILandroid/graphics/Rect;)V': (self, [text, start, end, rect]) => {
+          if (!rect) return;
+          const value = jsString(text).slice(start | 0, end | 0);
+          const width = Math.ceil(self.paint.measureText(value));
+          rect.$fields?.set('Landroid/graphics/Rect;->left:I', 0);
+          rect.$fields?.set('Landroid/graphics/Rect;->top:I', Math.round(-self.paint.textSize));
+          rect.$fields?.set('Landroid/graphics/Rect;->right:I', width);
+          rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', 0);
+        },
         'getTextBounds(Ljava/lang/String;IILandroid/graphics/Rect;)V': (self, [text, start, end, rect]) => {
           if (!rect) return;
           const value = jsString(text).slice(start | 0, end | 0);
