@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：315
-- 方法/构造函数键（静态统计）：3047
+- 注册的 native 类：317
+- 方法/构造函数键（静态统计）：3087
 
 ## Native 类清单
 
@@ -324,4 +324,6 @@
 | `Ljavax/microedition/khronos/egl/EGL10;` | opengl.js |
 | `Ljavax/microedition/khronos/opengles/GL;` | opengl.js |
 | `Ljavax/microedition/khronos/opengles/GL10;` | opengl.js |
+| `Lorg/json/JSONArray;` | registry.js |
+| `Lorg/json/JSONObject;` | registry.js |
 | `Lorg/xmlpull/v1/XmlPullParser;` | registry.js |

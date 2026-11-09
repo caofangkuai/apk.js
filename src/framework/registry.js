@@ -615,6 +615,26 @@ function adoptLayoutParams(vm, self, params) {
   return params;
 }
 
+function jsonBox(vm, value) {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return jsonMake(vm, 'Lorg/json/JSONArray;', 'items', value);
+  if (typeof value === 'object') return jsonMake(vm, 'Lorg/json/JSONObject;', 'map', value);
+  return value;
+}
+function jsonMake(vm, descriptor, field, value) {
+  if (value === null || value === undefined) return null;
+  const object = vm.allocateRawObject(descriptor);
+  object.$peer = { [field]: field === 'items' ? (Array.isArray(value) ? value : []) : (value && typeof value === 'object' ? value : Object.create(null)) };
+  return object;
+}
+function jsonUnbox(vm, value) {
+  if (value && typeof value === 'object') {
+    if (value.$peer?.items) return value.$peer.items;
+    if (value.$peer?.map) return value.$peer.map;
+  }
+  return value;
+}
+
 export function nativeClass(descriptor, options) {
   return new NativeClassDef(descriptor, options);
 }
@@ -4530,6 +4550,92 @@ function buildFrameworkDefinitions(vm) {
         'create(Landroid/graphics/Typeface;IZ)Landroid/graphics/Typeface;': (_self, [base, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: base?.family ?? null, style: style | 0 }),
         'create(Ljava/lang/String;ILandroid/graphics/Typeface;)Landroid/graphics/Typeface;': (_self, [family, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: family ?? null, style: style | 0 }),
         'defaultFromStyle(I)Landroid/graphics/Typeface;': (_self, [style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: null, style: style | 0 }),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Lorg/json/JSONArray;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class JSONArrayPeer {
+        constructor() { this.items = []; }
+      },
+      methods: {
+        '<init>()V': (self) => { self.items = []; },
+        '<init>(Ljava/lang/String;)V': (self, [text]) => {
+          try { const value = JSON.parse(jsString(text)); self.items = Array.isArray(value) ? value : []; } catch { self.items = []; }
+        },
+        '<init>(Ljava/util/Collection;)V': (self, [collection]) => {
+          self.items = collection?.$data || collection?.items || (Array.isArray(collection) ? collection : []);
+        },
+        'length()I': (self) => (self.items || []).length,
+        'get(I)Ljava/lang/Object;': (self, [index], vm) => jsonBox(vm, (self.items || [])[index | 0]),
+        'getString(I)Ljava/lang/String;': (self, [index]) => String((self.items || [])[index | 0] ?? ''),
+        'optString(I)Ljava/lang/String;': (self, [index]) => String((self.items || [])[index | 0] ?? ''),
+        'optString(ILjava/lang/String;)Ljava/lang/String;': (self, [index, fallback]) => {
+          const value = (self.items || [])[index | 0];
+          return value === undefined || value === null ? jsString(fallback) : String(value);
+        },
+        'getInt(I)I': (self, [index]) => Number((self.items || [])[index | 0]) | 0,
+        'optInt(I)I': (self, [index]) => Number((self.items || [])[index | 0]) | 0,
+        'getLong(I)J': (self, [index]) => BigInt(Math.trunc(Number((self.items || [])[index | 0]) || 0)),
+        'getDouble(I)D': (self, [index]) => Number((self.items || [])[index | 0]) || 0,
+        'getBoolean(I)Z': (self, [index]) => ((self.items || [])[index | 0] ? 1 : 0),
+        'isNull(I)Z': (self, [index]) => ((self.items || [])[index | 0] == null ? 1 : 0),
+        'put(Ljava/lang/Object;)Lorg/json/JSONArray;': (self, [value], vm) => { self.items.push(jsonUnbox(vm, value)); return self.$object ?? self; },
+        'getJSONObject(I)Lorg/json/JSONObject;': (self, [index], vm) => jsonMake(vm, 'Lorg/json/JSONObject;', 'map', (self.items || [])[index | 0]),
+        'getJSONArray(I)Lorg/json/JSONArray;': (self, [index], vm) => jsonMake(vm, 'Lorg/json/JSONArray;', 'items', (self.items || [])[index | 0]),
+        'toString()Ljava/lang/String;': (self) => JSON.stringify(self.items || []),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Lorg/json/JSONObject;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class JSONObjectPeer {
+        constructor() { this.map = Object.create(null); }
+      },
+      methods: {
+        '<init>()V': (self) => { self.map = Object.create(null); },
+        '<init>(Ljava/lang/String;)V': (self, [text]) => {
+          try { const value = JSON.parse(jsString(text)); self.map = value && typeof value === 'object' && !Array.isArray(value) ? value : Object.create(null); } catch { self.map = Object.create(null); }
+        },
+        'has(Ljava/lang/String;)Z': (self, [key]) => (Object.prototype.hasOwnProperty.call(self.map || {}, jsString(key)) ? 1 : 0),
+        'isNull(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] == null ? 1 : 0),
+        'get(Ljava/lang/String;)Ljava/lang/Object;': (self, [key], vm) => jsonBox(vm, (self.map || {})[jsString(key)]),
+        'getString(Ljava/lang/String;)Ljava/lang/String;': (self, [key]) => String((self.map || {})[jsString(key)] ?? ''),
+        'optString(Ljava/lang/String;)Ljava/lang/String;': (self, [key]) => String((self.map || {})[jsString(key)] ?? ''),
+        'optString(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [key, fallback]) => {
+          const value = (self.map || {})[jsString(key)];
+          return value === undefined || value === null ? jsString(fallback) : String(value);
+        },
+        'getInt(Ljava/lang/String;)I': (self, [key]) => Number((self.map || {})[jsString(key)]) | 0,
+        'optInt(Ljava/lang/String;)I': (self, [key]) => Number((self.map || {})[jsString(key)]) | 0,
+        'optInt(Ljava/lang/String;I)I': (self, [key, fallback]) => {
+          const value = Number((self.map || {})[jsString(key)]);
+          return Number.isFinite(value) ? value | 0 : fallback | 0;
+        },
+        'getLong(Ljava/lang/String;)J': (self, [key]) => BigInt(Math.trunc(Number((self.map || {})[jsString(key)]) || 0)),
+        'getDouble(Ljava/lang/String;)D': (self, [key]) => Number((self.map || {})[jsString(key)]) || 0,
+        'getBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
+        'optBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
+        'length()I': (self) => Object.keys(self.map || {}).length,
+        'put(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;': (self, [key, value], vm) => {
+          self.map[jsString(key)] = jsonUnbox(vm, value);
+          return self.$object ?? self;
+        },
+        'getJSONObject(Ljava/lang/String;)Lorg/json/JSONObject;': (self, [key], vm) => jsonMake(vm, 'Lorg/json/JSONObject;', 'map', (self.map || {})[jsString(key)]),
+        'optJSONObject(Ljava/lang/String;)Lorg/json/JSONObject;': (self, [key], vm) => {
+          const value = (self.map || {})[jsString(key)];
+          return value ? jsonMake(vm, 'Lorg/json/JSONObject;', 'map', value) : null;
+        },
+        'getJSONArray(Ljava/lang/String;)Lorg/json/JSONArray;': (self, [key], vm) => jsonMake(vm, 'Lorg/json/JSONArray;', 'items', (self.map || {})[jsString(key)]),
+        'optJSONArray(Ljava/lang/String;)Lorg/json/JSONArray;': (self, [key], vm) => {
+          const value = (self.map || {})[jsString(key)];
+          return Array.isArray(value) ? jsonMake(vm, 'Lorg/json/JSONArray;', 'items', value) : null;
+        },
+        'toString()Ljava/lang/String;': (self) => JSON.stringify(self.map || {}),
       },
     })
   );
