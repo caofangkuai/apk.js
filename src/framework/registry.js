@@ -4610,6 +4610,30 @@ function buildFrameworkDefinitions(vm) {
         'reset()V': (self) => { self.paint = new Paint(); },
         'measureText(Ljava/lang/String;)F': (self, [text]) => self.paint.measureText(jsString(text)),
         'measureText(Ljava/lang/CharSequence;)F': (self, [text]) => self.paint.measureText(jsString(text)),
+        'getTextWidths(Ljava/lang/String;[F)I': (self, [text, widths]) => {
+          const value = jsString(text);
+          if (!widths?.$data) return 0;
+          let count = 0;
+          for (let i = 0; i < value.length && i < widths.$data.length; i++) {
+            widths.$data[i] = numberToFloatBits(self.paint.measureText(value[i]));
+            count++;
+          }
+          return count;
+        },
+        'breakText(Ljava/lang/String;ZF[F)I': (self, [text, measureForwards, maxWidth, measured]) => {
+          const value = jsString(text);
+          const limit = Number(maxWidth) || 0;
+          let width = 0;
+          let count = 0;
+          for (const char of value) {
+            const next = width + self.paint.measureText(char);
+            if (next > limit) break;
+            width = next;
+            count++;
+          }
+          if (measured?.$data?.length) measured.$data[0] = numberToFloatBits(width);
+          return measureForwards ? count : value.length - count;
+        },
         'getTextBounds(Ljava/lang/String;IILandroid/graphics/Rect;)V': (self, [text, start, end, rect]) => {
           if (!rect) return;
           const value = jsString(text).slice(start | 0, end | 0);
