@@ -4650,18 +4650,20 @@ function buildFrameworkDefinitions(vm) {
           const value = jsString(text).slice(start | 0, end | 0);
           const width = Math.ceil(self.paint.measureText(value));
           rect.$fields?.set('Landroid/graphics/Rect;->left:I', 0);
-          rect.$fields?.set('Landroid/graphics/Rect;->top:I', Math.round(-self.paint.textSize));
+          const metrics = self.paint.getFontMetrics();
+          rect.$fields?.set('Landroid/graphics/Rect;->top:I', Math.ceil(metrics.top));
           rect.$fields?.set('Landroid/graphics/Rect;->right:I', width);
-          rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', 0);
+          rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', Math.ceil(metrics.bottom));
         },
         'getTextBounds(Ljava/lang/String;IILandroid/graphics/Rect;)V': (self, [text, start, end, rect]) => {
           if (!rect) return;
           const value = jsString(text).slice(start | 0, end | 0);
           const width = Math.ceil(self.paint.measureText(value));
           rect.$fields?.set('Landroid/graphics/Rect;->left:I', 0);
-          rect.$fields?.set('Landroid/graphics/Rect;->top:I', Math.round(-self.paint.textSize));
+          const metrics = self.paint.getFontMetrics();
+          rect.$fields?.set('Landroid/graphics/Rect;->top:I', Math.ceil(metrics.top));
           rect.$fields?.set('Landroid/graphics/Rect;->right:I', width);
-          rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', 0);
+          rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', Math.ceil(metrics.bottom));
         },
         'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self, _args, vm) => {
           const metrics = self.paint.getFontMetrics();
