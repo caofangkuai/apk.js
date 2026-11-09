@@ -66,6 +66,8 @@ const RESOLVED_CLASSES = {
 };
 
 function findNestedLayoutParamsClass(vm, parentDescriptor) {
+  if (!vm.__layoutParamsClassCache) vm.__layoutParamsClassCache = new Map();
+  if (vm.__layoutParamsClassCache.has(parentDescriptor)) return vm.__layoutParamsClassCache.get(parentDescriptor);
   const targets = ['Landroid/view/ViewGroup$LayoutParams;', 'Landroid/view/ViewGroup$MarginLayoutParams;'];
   let best = null;
   let bestDepth = -1;
@@ -95,6 +97,7 @@ function findNestedLayoutParamsClass(vm, parentDescriptor) {
       }
     }
   }
+  vm.__layoutParamsClassCache.set(parentDescriptor, best);
   return best;
 }
 
