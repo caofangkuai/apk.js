@@ -4643,7 +4643,23 @@ function buildFrameworkDefinitions(vm) {
           rect.$fields?.set('Landroid/graphics/Rect;->right:I', width);
           rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', 0);
         },
-        'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self) => self.paint.getFontMetrics(),
+        'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self, _args, vm) => {
+          const metrics = self.paint.getFontMetrics();
+          const object = vm.allocateRawObject('Landroid/graphics/Paint$FontMetrics;');
+          for (const [key, value] of Object.entries(metrics)) {
+            object.$fields.set('Landroid/graphics/Paint$FontMetrics;->' + key + ':F', numberToFloatBits(Number(value) || 0));
+          }
+          return object;
+        },
+        'getFontMetrics(Landroid/graphics/Paint$FontMetrics;)F': (self, [target], vm) => {
+          const metrics = self.paint.getFontMetrics();
+          if (target) {
+            for (const [key, value] of Object.entries(metrics)) {
+              vm.setField(target, { classDesc: 'Landroid/graphics/Paint$FontMetrics;', name: key, type: 'F' }, numberToFloatBits(Number(value) || 0));
+            }
+          }
+          return metrics.descent - metrics.ascent;
+        },
         'getFontMetricsInt()Landroid/graphics/Paint$FontMetricsInt;': (self, _args, vm) => {
           const metrics = self.paint.getFontMetricsInt();
           const object = vm.allocateRawObject('Landroid/graphics/Paint$FontMetricsInt;');
