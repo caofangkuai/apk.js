@@ -4682,6 +4682,23 @@ function buildFrameworkDefinitions(vm) {
         'getInt(I)I': (self, [index]) => Number((self.items || [])[index | 0]) | 0,
         'optInt(I)I': (self, [index]) => Number((self.items || [])[index | 0]) | 0,
         'getLong(I)J': (self, [index]) => BigInt(Math.trunc(Number((self.items || [])[index | 0]) || 0)),
+        'optLong(I)J': (self, [index]) => BigInt(Math.trunc(Number((self.items || [])[index | 0]) || 0)),
+        'optLong(IJ)J': (self, [index, fallback]) => {
+          const value = Number((self.items || [])[index | 0]);
+          return Number.isFinite(value) ? BigInt(Math.trunc(value)) : toLong(fallback);
+        },
+        'optDouble(I)D': (self, [index]) => Number((self.items || [])[index | 0]) || 0,
+        'optDouble(ID)D': (self, [index, fallback]) => {
+          const value = Number((self.items || [])[index | 0]);
+          return Number.isFinite(value) ? value : (Number(fallback) || 0);
+        },
+        'optBoolean(I)Z': (self, [index]) => ((self.items || [])[index | 0] ? 1 : 0),
+        'optBoolean(IZ)Z': (self, [index, fallback]) => {
+          const value = (self.items || [])[index | 0];
+          return value === undefined ? (fallback ? 1 : 0) : (value ? 1 : 0);
+        },
+        'remove(I)Ljava/lang/Object;': (self, [index], vm) => jsonBox(vm, (self.items || []).splice(index | 0, 1)[0]),
+        'clear()V': (self) => { self.items = []; },
         'getDouble(I)D': (self, [index]) => Number((self.items || [])[index | 0]) || 0,
         'getBoolean(I)Z': (self, [index]) => ((self.items || [])[index | 0] ? 1 : 0),
         'isNull(I)Z': (self, [index]) => ((self.items || [])[index | 0] == null ? 1 : 0),
@@ -4720,6 +4737,25 @@ function buildFrameworkDefinitions(vm) {
           return Number.isFinite(value) ? value | 0 : fallback | 0;
         },
         'getLong(Ljava/lang/String;)J': (self, [key]) => BigInt(Math.trunc(Number((self.map || {})[jsString(key)]) || 0)),
+        'optLong(Ljava/lang/String;)J': (self, [key]) => BigInt(Math.trunc(Number((self.map || {})[jsString(key)]) || 0)),
+        'optLong(Ljava/lang/String;J)J': (self, [key, fallback]) => {
+          const value = Number((self.map || {})[jsString(key)]);
+          return Number.isFinite(value) ? BigInt(Math.trunc(value)) : toLong(fallback);
+        },
+        'optDouble(Ljava/lang/String;)D': (self, [key]) => Number((self.map || {})[jsString(key)]) || 0,
+        'optDouble(Ljava/lang/String;D)D': (self, [key, fallback]) => {
+          const value = Number((self.map || {})[jsString(key)]);
+          return Number.isFinite(value) ? value : (Number(fallback) || 0);
+        },
+        'optBoolean(Ljava/lang/String;Z)Z': (self, [key, fallback]) => {
+          const value = (self.map || {})[jsString(key)];
+          return value === undefined ? (fallback ? 1 : 0) : (value ? 1 : 0);
+        },
+        'remove(Ljava/lang/String;)Ljava/lang/Object;': (self, [key], vm) => {
+          const value = (self.map || {})[jsString(key)];
+          delete (self.map || {})[jsString(key)];
+          return jsonBox(vm, value);
+        },
         'getDouble(Ljava/lang/String;)D': (self, [key]) => Number((self.map || {})[jsString(key)]) || 0,
         'getBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
         'optBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
