@@ -2296,9 +2296,7 @@ function buildFrameworkDefinitions(vm) {
           self.height = height | 0;
           self.focusable = !!focusable;
         },
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self) => {
-          self.object.$layoutParams = { width: -2, height: -2, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
-        },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
         '<init>(II)V': (self, [width, height]) => {
           self.width = width | 0;
           self.height = height | 0;
@@ -4433,6 +4431,9 @@ function buildFrameworkDefinitions(vm) {
         set bottomMargin(v) { this.object.$layoutParams.bottomMargin = v | 0; }
       },
       methods: {
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self) => {
+          self.object.$layoutParams = { width: -2, height: -2, leftMargin: 0, topMargin: 0, rightMargin: 0, bottomMargin: 0 };
+        },
         '<init>(II)V': (self, [width, height]) => {
           const params = self.object.$layoutParams || {};
           params.width = width | 0;
@@ -4719,6 +4720,12 @@ function buildFrameworkDefinitions(vm) {
       },
       methods: {
         '<init>()V': (self) => {
+          self.paint = new Paint();
+        },
+        '<init>(I)V': (self) => {
+          self.paint = new Paint();
+        },
+        '<init>(Landroid/graphics/Paint;)V': (self) => {
           self.paint = new Paint();
         },
         'setColor(I)V': (self, [color], vm) => {
@@ -5136,6 +5143,16 @@ function buildFrameworkDefinitions(vm) {
         'postRotate(F)V': (self, [degrees]) => {
           const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
           self.matrix = multiplyMatrices(self.matrix, [c, s, -s, c, 0, 0]);
+        },
+        'preRotate(F)Z': (self, [degrees]) => {
+          const angle = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(angle); const s = Math.sin(angle);
+          self.matrix = multiplyMatrices([c, s, -s, c, 0, 0], self.matrix);
+          return true;
+        },
+        'postRotate(F)Z': (self, [degrees]) => {
+          const angle = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(angle); const s = Math.sin(angle);
+          self.matrix = multiplyMatrices(self.matrix, [c, s, -s, c, 0, 0]);
+          return true;
         },
         'preRotate(F)V': (self, [degrees]) => {
           const r = (Number(degrees) || 0) * Math.PI / 180; const c = Math.cos(r); const s = Math.sin(r);
