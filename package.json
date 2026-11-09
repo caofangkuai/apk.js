@@ -22,7 +22,8 @@
     "setup:fonts": "bash tools/setup-fonts.sh",
     "check:refs": "node tools/check-refs.mjs",
     "check:browser": "node tools/browser-smoke.mjs",
-    "check:features": "node tools/browser-features.mjs"
+    "check:features": "node tools/browser-features.mjs",
+    "diff:image": "node tools/image-diff.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"

@@ -33,8 +33,8 @@
 
 - [ ] `tests/debug/` 下约 400 个历史脚本，保留与清理分开处理
 - [x] 增加 CI 配置，跑 `build` + `test:all` + `site`
-- [ ] `render-apk.mjs` 支持批量目录与基准图对比
-- [ ] 出图增加像素差异报告
+- [x] 出图增加像素差异报告（`npm run diff:image`）
+- [ ] `render-apk.mjs` 支持批量目录
 
 ### 文档
 
