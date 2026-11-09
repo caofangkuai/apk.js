@@ -3461,6 +3461,21 @@ function buildFrameworkDefinitions(vm) {
   }
 
   defs.push(
+    nativeDef('Landroid/view/accessibility/AccessibilityManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'isEnabled()Z': () => 0,
+        'isTouchExplorationEnabled()Z': () => 0,
+        'isRequestFromAccessibilityTool()Z': () => 0,
+        'getRecommendedTimeoutMillis(I)I': (_self, [original]) => original | 0,
+        'getEnabledAccessibilityServiceList(I)Ljava/util/List;': (_self, _args, vm) => makeList(vm, []),
+        'addAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': () => false,
+        'removeAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': () => false,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/os/Trace;', {
       super: 'Ljava/lang/Object;',
       staticMethods: {

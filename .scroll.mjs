@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const browser=await chromium.launch({executablePath:'/root/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell',args:['--no-sandbox','--disable-gpu']});
+const page=await browser.newPage({viewport:{width:1000,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.goto('http://127.0.0.1:8123/playground.html');await page.setInputFiles('#apk-file','/tmp/devinfo.apk');await page.waitForTimeout(5000);
+const box=await page.locator('canvas').first().boundingBox();
+const snap=()=>page.evaluate(()=>{const c=document.querySelector('canvas');const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let dark=0,hash=2166136261;for(let i=0;i<d.length;i+=4*53){hash=Math.imul(hash^d[i]^(d[i+1]<<8),16777619)>>>0;if(d[i]+d[i+1]+d[i+2]<360)dark++;}return{dark,hash};});
+await page.mouse.click(box.x+22,box.y+28);await page.waitForTimeout(700);console.log('open',await snap());
+await page.mouse.move(box.x+140,box.y+450);await page.mouse.wheel(0,500);await page.waitForTimeout(700);console.log('scrolled',await snap());
+await page.mouse.click(box.x+140,box.y+450);await page.waitForTimeout(2000);console.log('after-item',await snap());
+await page.screenshot({path:'/tmp/drawer-scroll.png',fullPage:true});console.log('err',errors.slice(0,2));await browser.close();
