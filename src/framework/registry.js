@@ -4672,6 +4672,11 @@ function buildFrameworkDefinitions(vm) {
           self.items = collection?.$data || collection?.items || (Array.isArray(collection) ? collection : []);
         },
         'length()I': (self) => (self.items || []).length,
+        'iterator()Ljava/util/Iterator;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/Iterator;');
+          object.$peer = { cursor: 0, snapshot: [...(self.items || [])] };
+          return object;
+        },
         'get(I)Ljava/lang/Object;': (self, [index], vm) => jsonBox(vm, (self.items || [])[index | 0]),
         'getString(I)Ljava/lang/String;': (self, [index]) => String((self.items || [])[index | 0] ?? ''),
         'optString(I)Ljava/lang/String;': (self, [index]) => String((self.items || [])[index | 0] ?? ''),
@@ -4760,6 +4765,12 @@ function buildFrameworkDefinitions(vm) {
         'getBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
         'optBoolean(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] ? 1 : 0),
         'length()I': (self) => Object.keys(self.map || {}).length,
+        'keys()Ljava/util/Iterator;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/Iterator;');
+          object.$peer = { cursor: 0, snapshot: Object.keys(self.map || {}) };
+          return object;
+        },
+        'names()Lorg/json/JSONArray;': (self, _args, vm) => jsonMake(vm, 'Lorg/json/JSONArray;', 'items', Object.keys(self.map || {})),
         'put(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;': (self, [key, value], vm) => {
           self.map[jsString(key)] = jsonUnbox(vm, value);
           return self.$object ?? self;
