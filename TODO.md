@@ -20,9 +20,8 @@
 
 - [ ] MaterialShapeDrawable 三段渐变阴影
 - [ ] `AnimatedVectorDrawable` 属性动画
-- [ ] `ListView` 回收与局部布局，RecyclerView 回归样例
+- [ ] `ListView` 回收与局部布局
 - [ ] elevation overlay 与深色主题
-- [ ] `PopupWindow`、`AlertDialog` 的布局与绘制
 - [ ] `TextInputLayout` 的浮动标签动画
 - [ ] `BottomSheetDialog` 的拖拽行为
 - [ ] `ViewPager2` 与 `ViewPager` 的滚动惯性对齐
@@ -32,7 +31,7 @@
 ### 工具链
 
 - [ ] `tests/debug/` 下约 400 个历史脚本，保留与清理分开处理
-- [ ] 增加 CI 配置，跑 `build` + `test:all` + `site`
+- [x] 增加 CI 配置，跑 `build` + `test:all` + `site`
 - [ ] `render-apk.mjs` 支持批量目录与基准图对比
 - [ ] 出图增加像素差异报告
 
@@ -49,6 +48,16 @@
 
 ## 已完成
 
+- [x] 浏览器 E2E：`npm run check:browser` / `check:features`（Playwright）
+- [x] 真实字体测量（node 共享测量画布）与 bold/italic/letterSpacing
+- [x] DisplayMetrics 密度链路、TabLayout 48dp、Toolbar 导航按钮 56dp
+- [x] View 最小尺寸与 MATCH_PARENT 二趟测量
+- [x] AOSP TextView 行距/基线/includeFontPadding
+- [x] FrameLayout/LinearLayout baseline 与权重修正
+- [x] NinePatch npTc 偏移与多段拉伸修正
+- [x] Matrix/Canvas.concat/clipPath host
+- [x] ArrayList 集合构造、BatteryManager/USB/Trace/EdgeEffect/Accessibility host
+- [x] 抽屉菜单点击（拦截态冒泡到可点击父项）
 - [x] DEX 覆写 `draw(Canvas)` 支持与 View canvas 解包
 - [x] Paint Shader / LinearGradient / RadialGradient / SweepGradient host
 - [x] NinePatch `npTc` 解析与九宫格绘制
