@@ -35,6 +35,9 @@ jobs:
       - name: Check forbidden class references
         run: npm run check:refs
 
+      - name: Check framework coverage
+        run: npm run check:coverage
+
       - name: Run regression tests
         run: npm run test:all
 

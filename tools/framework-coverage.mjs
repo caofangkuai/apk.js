@@ -34,9 +34,25 @@ const output = `# Framework Coverage
 | --- | --- |
 ${rows.join('\n')}
 `;
-const zhOutput = output.replace('# Framework Coverage', '# Framework 覆盖矩阵').replace('> 本文件由', '> 本文件由');
-for (const target of [path.join(root, 'docs/framework-coverage.md'), path.join(root, 'docs/zh/framework-coverage.md')]) {
+const zhOutput = output.replace('# Framework Coverage', '# Framework 覆盖矩阵');
+const targets = [
+  [path.join(root, 'docs/framework-coverage.md'), output],
+  [path.join(root, 'docs/zh/framework-coverage.md'), zhOutput],
+];
+if (process.argv.includes('--check')) {
+  let stale = false;
+  for (const [target, content] of targets) {
+    if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== content) {
+      console.error('覆盖矩阵已过期:', path.relative(root, target));
+      stale = true;
+    }
+  }
+  if (stale) process.exit(1);
+  console.log('framework coverage 已是最新');
+  process.exit(0);
+}
+for (const [target, content] of targets) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, target.includes('/zh/') ? zhOutput : output);
+  fs.writeFileSync(target, content);
 }
 console.log(`已生成 framework coverage：${classes.size} 个类，${methodKeys} 个方法键`);
