@@ -49,6 +49,9 @@
 
 ## 已完成
 
+- [x] 渲染性能基准 `npm run bench:render`
+- [x] PNG 像素差异报告 `npm run diff:image`
+- [x] APK 批量渲染 `npm run render:batch`
 - [x] 真实字体测量（node 共享测量画布）与 bold/italic/letterSpacing
 - [x] DisplayMetrics 密度链路、TabLayout 48dp、Toolbar 导航按钮 56dp
 - [x] View 最小尺寸与 MATCH_PARENT 二趟测量

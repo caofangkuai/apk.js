@@ -140,10 +140,10 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，基线 HEAD `0a77108`；2026-11-09 六轮改动已推送（用户未要求 commit/push）。
-- 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`。
+- 分支 `main`，最新 HEAD `651adfd`；2026-11-09 多轮改动已推送。
+- 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
-- 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`。
+- 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`、`npm run check:coverage`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
 
 ### 本轮已完成（2026-11-09 第七轮：host 补全）
