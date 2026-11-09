@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const JSZip = require('jszip');
 const { default: Canvas } = await import('canvas');
 const { loadApkFiles, EmulatorEngine } = await import('../src/framework/engine.js');
+globalThis.__APKJS_MEASURE_CANVAS = Canvas.createCanvas(8, 8);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const apkPath = process.argv[2];

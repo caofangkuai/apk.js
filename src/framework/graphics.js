@@ -580,6 +580,9 @@ function measureContext() {
     if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
       const canvas = document.createElement('canvas');
       textMeasureContext = canvas.getContext ? canvas.getContext('2d') : null;
+    } else if (globalThis.__APKJS_MEASURE_CANVAS) {
+      const candidate = globalThis.__APKJS_MEASURE_CANVAS;
+      textMeasureContext = candidate.getContext ? candidate.getContext('2d') : candidate;
     }
   } catch (_error) {
     textMeasureContext = null;
