@@ -21,8 +21,20 @@ function toPackageDescriptor(name, packageName = '') {
   return `L${full.replace(/\./g, '/')};`;
 }
 
-export async function loadApkFiles(zip) {
+export async function loadApkFiles(zip, limits = {}) {
   const files = zip.files;
+  const maxEntries = Number(limits.maxEntries) || 50000;
+  const maxTotalSize = Number(limits.maxTotalSize) || 256 * 1024 * 1024;
+  let totalSize = 0;
+  let entryCount = 0;
+  for (const [name, entry] of Object.entries(files)) {
+    if (entry.dir) continue;
+    entryCount += 1;
+    if (entryCount > maxEntries) throw new Error('APK 条目过多，已拒绝解压');
+    const size = Number(entry?._data?.uncompressedSize);
+    if (Number.isFinite(size) && size > 0) totalSize += size;
+    if (totalSize > maxTotalSize) throw new Error('APK 解压后体积超过上限，已拒绝解压');
+  }
   const assetFiles = new Map();
   const resourceBytes = new Map();
   for (const [name, entry] of Object.entries(files)) {

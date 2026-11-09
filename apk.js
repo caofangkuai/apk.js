@@ -95,7 +95,7 @@ export class ApkSimulator {
     if (await hasNativeLibs(zip)) {
       throw new Error('APK 含原生库（lib/），无法模拟');
     }
-    const apk = await loadApkFiles(zip);
+    const apk = await loadApkFiles(zip, { maxTotalSize: Math.max(this.device.maxApkSize * 4, 256 * 1024 * 1024), maxEntries: 50000 });
     return this.start(apk);
   }
 
