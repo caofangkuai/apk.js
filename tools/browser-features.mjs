@@ -56,7 +56,10 @@ for (const [name, x] of [['常规', 54], ['芯片', 126], ['系统', 198], ['SCR
 for (const [name, y] of [['相机', 320], ['电池', 368], ['温度', 416], ['传感器', 464], ['分区', 560]]) {
   await tap(22, 28, 500); await tap(144, y, 1500); await check('page-' + name);
 }
-await tap(338, 28, 500); await tap(250, 80, 1200); await check('menu-info');
+const menuOpened = await (async () => { await tap(338, 28, 500); return snapshot(); })();
+await tap(250, 80, 1200);
+const menuPage = await check('menu-info');
+if (menuOpened.hash === menuPage.hash) errors.push('菜单点击未切换页面');
 await page.screenshot({ path: path.join(root, 'image-debug/browser-features.png'), fullPage: true });
 await browser.close();
 server.close();
