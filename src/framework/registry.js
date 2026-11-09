@@ -2011,6 +2011,10 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       ctor: ViewConfigurationPeer,
       methods: {
+        'getScaledHorizontalScrollFactor()F': () => 1.0,
+        'getScaledVerticalScrollFactor()F': () => 1.0,
+        'getScaledTouchSlop()I': () => 8,
+        'getScaledMinimumScalingSpan()I': () => 12,
         'getScaledTouchSlop()I': (self) => self.touchSlop ?? 8,
         'getScaledDoubleTapSlop()I': (self) => self.doubleTapSlop ?? 100,
         'getScaledMinimumFlingVelocity()I': () => 50,
@@ -4593,6 +4597,27 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/hardware/camera2/CameraManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getCameraIdList()[Ljava/lang/String;': (_self, _args, vm) => vm.newArray('Ljava/lang/String;', 0),
+        'registerAvailabilityCallback(Ljava/util/concurrent/Executor;Landroid/hardware/camera2/CameraManager$AvailabilityCallback;)V': () => undefined,
+        'unregisterAvailabilityCallback(Landroid/hardware/camera2/CameraManager$AvailabilityCallback;)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/graphics/PorterDuffXfermode;', {
+      super: 'Landroid/graphics/Xfermode;',
+      ctor: class PorterDuffXfermodePeer { constructor(mode) { this.mode = mode ?? null; } },
+      methods: {
+        '<init>(Landroid/graphics/PorterDuff$Mode;)V': (self, [mode]) => { self.mode = mode ?? null; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/PointerIcon;', {
       super: 'Ljava/lang/Object;',
       staticFields: new Map([
@@ -4852,6 +4877,8 @@ function buildFrameworkDefinitions(vm) {
           return typeface ?? null;
         },
         'getTypeface()Landroid/graphics/Typeface;': (self) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: self.paint?.typeface || null, style: 0 }),
+        'setXfermode(Landroid/graphics/Xfermode;)Landroid/graphics/Xfermode;': (self, [xfermode]) => { self.paint.xfermode = xfermode ?? null; return xfermode ?? null; },
+        'getXfermode()Landroid/graphics/Xfermode;': (self) => self.paint?.xfermode ?? null,
         'getTextScaleX()F': (self) => Number(self.paint?.textScaleX) || 1,
         'ascent()F': (self) => self.paint.getFontMetricsInt().ascent,
         'descent()F': (self) => self.paint.getFontMetricsInt().descent,
@@ -5994,6 +6021,7 @@ function buildFrameworkDefinitions(vm) {
         },
         'getDimension(I)F': (self, [resId], vm) => vm.resources.getDimensionPixelSize(resId >>> 0),
         'getDimensionPixelSize(I)I': (self, [resId], vm) => vm.resources.getDimensionPixelSize(resId >>> 0),
+        'getDimensionPixelOffset(I)I': (self, [resId], vm) => Math.round(vm.resources.getDimensionPixelSize(resId >>> 0)),
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, vm.resources.getDrawable(resId >>> 0)),
         'getLayout(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getXml(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
@@ -7251,6 +7279,8 @@ function viewMethods() {
     'getSuggestedMinimumHeight()I': (self) => self.view?.getSuggestedMinimumHeight?.() ?? self.view?.getMinimumHeight?.() ?? 0,
     'saveAttributeDataForStyleable(Landroid/content/Context;[ILandroid/util/AttributeSet;Landroid/content/res/TypedArray;II)V': () => undefined,
     'setPointerIcon(Landroid/view/PointerIcon;)V': () => undefined,
+    'getImportantForAutofill()I': () => 0,
+    'setImportantForAutofill(I)V': () => undefined,
     'getMinimumHeight()I': (self) => self.view?.getMinimumHeight() ?? 0,
     'getScrollX()I': (self) => self.view?.getScrollX() ?? 0,
     'getScrollY()I': (self) => self.view?.getScrollY() ?? 0,

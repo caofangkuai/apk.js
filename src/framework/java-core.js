@@ -2120,6 +2120,8 @@ function animatorDef(descriptor) {
       },
       'getDuration()J': (self) => toLong(self.duration ?? 300),
       'setStartDelay(J)V': () => undefined,
+      'setRepeatCount(I)V': (self, [count]) => { self.repeatCount = count | 0; },
+      'setRepeatMode(I)V': (self, [mode]) => { self.repeatMode = mode | 0; },
       'getStartDelay()J': () => 0n,
       'setInterpolator(Landroid/animation/TimeInterpolator;)V': () => undefined,
       'addListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
