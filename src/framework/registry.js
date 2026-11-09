@@ -1036,6 +1036,8 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       methods: {
         'getResources()Landroid/content/res/Resources;': (self, _args, vm) => self.resources || vm.resources,
+        'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [id], vm) => (vm.resources || self.resources)?.getColorStateList?.(id >>> 0) ?? null,
+        'checkPermission(Ljava/lang/String;II)I': () => 0,
         'getAssets()Landroid/content/res/AssetManager;': (self, _args, vm) => (self.resources || vm.resources)?.getAssets(),
         'getApplicationContext()Landroid/content/Context;': (self, _args, vm) => self.contextObject || self,
         'getPackageName()Ljava/lang/String;': (self, _args, vm) => vm.packageName,
@@ -2494,6 +2496,8 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/view/ViewGroup;'),
       methods: {
+        'setChildrenDrawingOrderEnabled(Z)V': () => undefined,
+        'onScrollChanged(IIII)V': () => undefined,
         'removeCallbacks(Ljava/lang/Runnable;)Z': () => true,
         'setScrollContainer(Z)V': () => undefined,
         'getSuggestedMinimumWidth()I': (self) => self.view?.getSuggestedMinimumWidth?.() ?? self.view?.getMinimumWidth?.() ?? 0,
@@ -4618,6 +4622,31 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/os/Process;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'myPid()I': () => 4242,
+        'myTid()I': () => 4242,
+        'myUid()I': () => 10000,
+        'getElapsedCpuTime()J': () => BigInt(Date.now()),
+        'getThreadPriority(I)I': () => 0,
+        'setThreadPriority(I)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/hardware/Camera;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'getNumberOfCameras()I': () => 0,
+        'open()Landroid/hardware/Camera;': () => null,
+        'open(I)Landroid/hardware/Camera;': () => null,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/view/PointerIcon;', {
       super: 'Ljava/lang/Object;',
       staticFields: new Map([
@@ -4900,6 +4929,7 @@ function buildFrameworkDefinitions(vm) {
         'setStyle(Landroid/graphics/Paint$Style;)V': (self, [style]) =>
           self.paint.setStyle(style?.$peer?.ordinal ?? style),
         'setColorFilter(Landroid/graphics/ColorFilter;Landroid/graphics/PorterDuff$Mode;)V': (self, [filter]) => { self.paint.colorFilter = filter ?? null; },
+        'setColorFilter(Landroid/graphics/ColorFilter;)Landroid/graphics/ColorFilter;': (self, [filter]) => { self.paint.colorFilter = filter ?? null; return filter ?? null; },
         'setColorFilter(Landroid/graphics/ColorFilter;)V': (self, [filter]) => {
           self.paint.setColorFilter(filter ?? null);
         },
@@ -7326,6 +7356,17 @@ function viewMethods() {
     'getSuggestedMinimumHeight()I': (self) => self.view?.getSuggestedMinimumHeight?.() ?? self.view?.getMinimumHeight?.() ?? 0,
     'saveAttributeDataForStyleable(Landroid/content/Context;[ILandroid/util/AttributeSet;Landroid/content/res/TypedArray;II)V': () => undefined,
     'setPointerIcon(Landroid/view/PointerIcon;)V': () => undefined,
+    'bringToFront()V': (self) => {
+      const parent = self.view?.parent;
+      if (!parent || !Array.isArray(parent.children)) return;
+      const index = parent.children.indexOf(self.view);
+      if (index >= 0 && index < parent.children.length - 1) {
+        parent.children.splice(index, 1);
+        parent.children.push(self.view);
+        parent.$zOrder = null;
+        parent.invalidate?.();
+      }
+    },
     'getImportantForAutofill()I': () => 0,
     'setImportantForAutofill(I)V': () => undefined,
     'getMinimumHeight()I': (self) => self.view?.getMinimumHeight() ?? 0,

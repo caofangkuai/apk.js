@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：323
-- 方法/构造函数键（静态统计）：3168
+- 注册的 native 类：325
+- 方法/构造函数键（静态统计）：3183
 
 ## Native 类清单
 
@@ -89,6 +89,7 @@
 | `Landroid/graphics/Shader$TileMode;` | drawables.js |
 | `Landroid/graphics/SweepGradient;` | drawables.js |
 | `Landroid/graphics/Typeface;` | registry.js |
+| `Landroid/hardware/Camera;` | registry.js |
 | `Landroid/hardware/camera2/CameraManager;` | registry.js |
 | `Landroid/hardware/Sensor;` | registry.js |
 | `Landroid/hardware/SensorManager;` | registry.js |
@@ -110,6 +111,7 @@
 | `Landroid/os/Looper;` | registry.js |
 | `Landroid/os/Message;` | registry.js |
 | `Landroid/os/MessageQueue;` | registry.js |
+| `Landroid/os/Process;` | registry.js |
 | `Landroid/os/StatFs;` | java-core.js |
 | `Landroid/os/storage/StorageManager;` | java-core.js |
 | `Landroid/os/storage/StorageVolume;` | java-core.js |
