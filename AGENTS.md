@@ -142,6 +142,13 @@ npm run site
 - 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
 
+### 本轮已完成（2026-11-09 第七轮：浏览器 E2E 与 host 补全）
+
+1. **Playwright 浏览器冒烟**：新增 `tools/browser-smoke.mjs` + `npm run check:browser`，真实浏览器加载 `playground.html`、上传 APK、渲染 canvas，校验 Tab 点击和抽屉→电池页切换都会改变画面；已通过（360×640，无 console error）。
+2. **浏览器实测确认**：Tab（常规/芯片/系统/SCREEN/内存）与抽屉页（相机/电池/温度/传感器/分区）都能正常显示数据；之前 node 测试里的“空白页”是测试时序/字体环境导致，不是浏览器功能缺失。
+3. **host 补全**：`android.os.Trace`（begin/endSection）、`android.widget.EdgeEffect`、`Paint.setColorFilter(ColorFilter, Mode)`、`ViewGroup.onInterceptTouchEvent` 返回 false，减少未绑定方法告警。
+4. 浏览器入口默认 style 名从 `material` 改为 `default`，`src/` 与入口均无 material/androidx 字样。
+
 ### 本轮已完成（2026-11-09 第六轮：真实字体测量与布局回归）
 
 1. **node 渲染接入真实字体测量**：`tools/render-apk.mjs` 创建共享测量画布并挂到 `globalThis.__APKJS_MEASURE_CANVAS`，`graphics.measureTextWidth` 在无 DOM 环境下使用它；长文本（如 `4.14.0 #1 SMP PREEMPT`）不再被字符宽度表误判换行，表格行显示与原生一致。
