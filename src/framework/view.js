@@ -733,6 +733,7 @@ export class View {
 
   setElevation(value) {
     this.elevation = Number(value) || 0;
+    if (this.parent) this.parent.$zOrder = null;
     this.invalidate();
     return this;
   }
@@ -1901,6 +1902,7 @@ export class ViewGroup extends View {
     super(context);
     this.clipChildren = true;
     this.clipToPadding = true;
+    this.$zOrder = null;
   }
 
   addView(child, indexOrParams, params) {
@@ -1914,6 +1916,7 @@ export class ViewGroup extends View {
       child.layoutParams = this.generateDefaultLayoutParams();
     }
     this.children.splice(index, 0, child);
+    this.$zOrder = null;
     if (typeof child.onAttachedToWindow === 'function') child.onAttachedToWindow();
     dispatchDexAttachedToWindow(child);
     this.requestLayout();
@@ -1925,6 +1928,7 @@ export class ViewGroup extends View {
     const index = this.children.indexOf(child);
     if (index >= 0) {
       this.children.splice(index, 1);
+      this.$zOrder = null;
       child.parent = null;
       if (typeof child.onDetachedFromWindow === 'function') child.onDetachedFromWindow();
       this.requestLayout();
@@ -2028,14 +2032,24 @@ export class ViewGroup extends View {
       canvas.save();
       canvas.translate(-scrollX, -scrollY);
     }
-    const hasZ = this.children.some((child) => (Number(child.z) || 0) !== 0 || (Number(child.elevation) || 0) !== 0);
-    const order = hasZ
-      ? [...this.children].map((child, index) => ({ child, index })).sort((a, b) => {
-          const az = Number(a.child.z) || Number(a.child.elevation) || 0;
-          const bz = Number(b.child.z) || Number(b.child.elevation) || 0;
-          return az === bz ? a.index - b.index : az - bz;
-        }).map((entry) => entry.child)
-      : this.children;
+    let hasZ = false;
+    for (const child of this.children) {
+      if ((Number(child.z) || 0) !== 0 || (Number(child.elevation) || 0) !== 0) { hasZ = true; break; }
+    }
+    let order = this.children;
+    if (hasZ) {
+      if (!this.$zOrder || this.$zOrder.length !== this.children.length) {
+        this.$zOrder = this.children
+          .map((child, index) => ({ child, index }))
+          .sort((a, b) => {
+            const az = Number(a.child.z) || Number(a.child.elevation) || 0;
+            const bz = Number(b.child.z) || Number(b.child.elevation) || 0;
+            return az === bz ? a.index - b.index : az - bz;
+          })
+          .map((entry) => entry.child);
+      }
+      order = this.$zOrder;
+    }
     for (const child of order) child.draw(canvas);
     if (scrolled) canvas.restore();
     if (this.clipChildren) canvas.restore();
