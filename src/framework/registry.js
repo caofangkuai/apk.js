@@ -4735,6 +4735,14 @@ function buildFrameworkDefinitions(vm) {
           self.canvas?.drawColor((((toInt(a) & 0xff) << 24) | ((toInt(r) & 0xff) << 16) | ((toInt(g) & 0xff) << 8) | (toInt(b) & 0xff)) >>> 0),
         'drawText(Ljava/lang/String;FFLandroid/graphics/Paint;)V': (self, [text, x, y, paint]) =>
           self.canvas?.drawText(jsString(text), x, y, paint?.paint),
+        'drawText(Ljava/lang/CharSequence;IIFFLandroid/graphics/Paint;)V': (self, [text, start, end, x, y, paint]) =>
+          self.canvas.drawText(jsString(text).slice(start | 0, end | 0), x, y, paint),
+        'drawTextRun(Ljava/lang/CharSequence;IIIIFFZLandroid/graphics/Paint;)V': (self, [text, start, end, _contextStart, _contextEnd, x, y, _rtl, paint]) =>
+          self.canvas.drawText(jsString(text).slice(start | 0, end | 0), x, y, paint),
+        'drawTextRun([CIIIIFFZLandroid/graphics/Paint;)V': (self, [chars, index, count, _contextIndex, _contextCount, x, y, _rtl, paint]) => {
+          const value = Array.from(chars?.$data || chars || []).slice(index | 0, (index | 0) + (count | 0)).map((code) => String.fromCharCode(code)).join('');
+          self.canvas.drawText(value, x, y, paint);
+        },
         'drawText([CIIFFLandroid/graphics/Paint;)V': (self, [chars, index, count, x, y, paint]) => {
           const data = chars?.$data || chars || [];
           let text = '';
