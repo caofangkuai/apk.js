@@ -1089,11 +1089,6 @@ export class View {
   }
 
   findViewById(id) {
-    if (globalThis.__DBG_FVID) {
-      const ids=[]; const walk=(v)=>{ if(v.id!==undefined&&v.id!==null) ids.push((v.id>>>0).toString(16)+':'+(v.$descriptor||v.constructor?.name)); for(const c of v.children||[]) walk(c); };
-      walk(this);
-      console.error('FVID req=0x'+(id>>>0).toString(16)+' root='+(this.$descriptor||this.constructor?.name)+' ids='+ids.slice(0,20).join(','));
-    }
     if (this.id === id) return this;
     for (const child of this.children) {
       const found = child.findViewById(id);
@@ -1169,7 +1164,6 @@ export class View {
       );
       return true;
     } catch (e) {
-      if (globalThis.__DBG_ARG) console.error('MEASURE_ERR', descriptor, String(e.message).slice(0,80));
       return false;
     } finally {
       this.$jsMeasureHandled = false;
@@ -1245,7 +1239,6 @@ export class View {
       for (const child of this.children) delete child.$relayoutBase;
       return true;
     } catch (e) {
-      if (globalThis.__DBG_ARG) console.error('LAYOUT_ERR', descriptor, String(e.message).slice(0,100));
       return false;
     } finally {
       this.$jsLayoutHandled = false;

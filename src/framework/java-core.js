@@ -415,7 +415,6 @@ export const JAVA_CORE_CLASSES = {
           || (!!rv && !!ov && rv === ov)
           || (!!self?.$object && self.$object === other)
           || (!!other?.$object && self === other.$object);
-        if (globalThis.__DBG_EQ) console.error('OBJ_EQ', 'viewEq=' + (rv && ov && rv === ov), 'r=' + r);
         return r;
       },
       'hashCode()I': (self) => hashCode(self),
@@ -4909,7 +4908,6 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     },
     'listFiles()[Ljava/io/File;': (self, _args, vm) => {
       const names = VIRTUAL_FS.list(self.path);
-      if (globalThis.__DBG_FLAG) console.error('LISTF ' + self.path + ' -> ' + JSON.stringify(names));
       if (!vm) return names;
       const array = vm.newArray('[Ljava/io/File;', names.length, null);
       names.forEach((name, index) => { array.$data[index] = wrapFilePath(vm, joinPaths(self.path, name)); });

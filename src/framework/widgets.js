@@ -423,7 +423,6 @@ export class TextView extends View {
     const display = content.length ? content : (this.hintText || '');
     const compound = this.compoundPadding();
     const available = Math.max(1, maxWidth - compound.left - compound.right);
-    if (globalThis.__TXT && maxWidth > 100) console.error('TXLAY maxW=' + maxWidth + ' padL=' + this.paddingLeft + ' padR=' + this.paddingRight + ' avail=' + available + ' size=' + this.textSize + ' text=' + JSON.stringify(String(this.text).slice(0,20)));
     if (!this.layoutDirty && this.lastLayoutWidth === available) return;
     this.lastLayoutWidth = available;
     let lines = this.singleLine ? [display.replace(/\n/g, ' ')] : wrapText(display, this.textSize, available, this.fontSpec());
@@ -463,7 +462,6 @@ export class TextView extends View {
   }
 
   onDraw(canvas) {
-    if (globalThis.__TXT) console.error('TXDRAW left=' + this.left + ' top=' + this.top + ' w=' + this.getWidth() + ' h=' + this.getHeight() + ' text=' + JSON.stringify(String(this.text).slice(0,20)));
     const width = this.getWidth();
     const height = this.getHeight();
     this.ensureTextLayout(width);

@@ -479,7 +479,6 @@ export class JavaVM {
   }
 
   presentActivity(activityObject, descriptor, intentObject) {
-    if (globalThis.__DBG_PA) console.error('PRESENT', descriptor);
     const peer = this.registry.getPeer(activityObject, descriptor);
     if (!peer) return null;
     this.seedActivityTitle(peer, descriptor);
@@ -495,7 +494,6 @@ export class JavaVM {
     ];
     for (const [name, proto, args] of lifecycles) {
       const resolution = this.findVirtual(descriptor, name, proto);
-      if (globalThis.__DBG_PA) console.error('  PA', name, '->', resolution ? resolution.kind : 'null');
       if (!resolution) continue;
       try {
         this.invoke(
@@ -505,7 +503,6 @@ export class JavaVM {
           'virtual'
         );
       } catch (err) {
-        if (globalThis.__DBG_PA) console.error('  PA-THROW', name, err && err.message);
         throw err;
       }
     }
@@ -652,9 +649,6 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
-    if (globalThis.__DBG_FR && ref.name === 'a' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0 && ref.proto.descriptor.indexOf('ViewGroup') >= 0) {
-      console.error('INV_OCV ref=' + ref.classDesc + ' sig=' + ref.proto.descriptor + ' mode=' + mode + ' recv=' + (receiver === null ? 'null' : 'obj'));
-    }
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
     this.invocationCount++;
     if (!this._invokeStats) this._invokeStats = new Map();
@@ -685,8 +679,6 @@ export class JavaVM {
       default: {
         if ((receiver === null || receiver === undefined) && ref.name !== '<init>' && ref.name !== '<clinit>') {
           if (DBG.npe) console.error('NPE530', ref.name, ref.classDesc, 'pc=' + this.currentPc, 'from', (this.methodStack||[]).slice(-3).join('<-'));
-          if (globalThis.__DBG_ARG && ref.name === 'getDisplayMetrics') console.error('GDM_NPE from', (this.methodStack||[]).slice(-5).join('<-'), 'recvReg=', receiver === undefined ? 'undef' : String(receiver), 'pc=', this.currentPc, 'caller=', currentMethod ? (currentMethod.classDesc + '.' + currentMethod.name + currentMethod.proto.descriptor) : 'none');
-          if (globalThis.__DBG_NPE_RV) console.error('NPE_CALL', ref.name, ref.classDesc, 'stack=' + (this.methodStack||[]).slice(-8).join('<'));
         this.throwException('Ljava/lang/NullPointerException;', `调用 ${ref.name} 时对象为空`);
         }
         let receiverDescriptor = receiver === null ? ref.classDesc : this.registry.classNameOf(receiver);
@@ -698,9 +690,6 @@ export class JavaVM {
         }
         break;
       }
-    }
-    if (globalThis.__DBG_FR && ref.name === 'a' && ref.proto && ref.proto.descriptor && ref.proto.descriptor.indexOf('LayoutInflater') >= 0 && ref.proto.descriptor.indexOf('ViewGroup') >= 0) {
-      console.error('RES_OCV -> ' + (resolution ? resolution.kind + ':' + (resolution.method ? resolution.method.classDesc : resolution.def?.descriptor) : 'NULL'));
     }
     if (!resolution) {
       const signature = `${descriptorToName(ref.classDesc)}.${ref.name}${ref.proto.descriptor}`;
@@ -748,7 +737,6 @@ export class JavaVM {
     if (!isStatic) {
       if (receiver === null || receiver === undefined) {
         if (DBG.npe) console.error('NPE', ref.name, 'ref=' + (ref.classDesc || '?'), 'args=' + (args?.length || 0), 'pc=' + this.currentPc, 'from', (this.methodStack||[]).slice(-8).join(' <- '));
-        if (globalThis.__DBG_NPE_RV) console.error('NPE_CALL', ref.name, ref.classDesc, 'stack=' + (this.methodStack||[]).slice(-8).join('<'));
         this.throwException('Ljava/lang/NullPointerException;', `调用 ${ref.name} 时对象为空`);
       }
       if (isJavaObject(receiver)) {

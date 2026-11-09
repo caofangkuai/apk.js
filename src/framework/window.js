@@ -328,7 +328,7 @@ export class DecorView extends ViewGroup {
       const params = child.layoutParams || { width: -1, height: -1 };
       const childWidthSpec = getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, params.width);
       const childHeightSpec = getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, params.height);
-      try { child.measure(childWidthSpec, childHeightSpec); } catch (e) { if (globalThis.__DBG_ARG) console.error('MEASURE_ERR', child.$descriptor, String(e.message).slice(0,60)); }
+      try { child.measure(childWidthSpec, childHeightSpec); } catch (e) {}
     }
     this.setMeasuredDimension(width, height);
   }
@@ -336,12 +336,9 @@ export class DecorView extends ViewGroup {
   onLayout(changed, left, top, right, bottom) {
     const width = right - left;
     const height = bottom - top;
-    if (globalThis.__DBG_ARG) console.error('DECOR_LAYOUT', left, top, right, bottom, 'children=' + this.children.length);
     for (const child of this.children) {
-      if (globalThis.__DBG_ARG) console.error('  DECOR_CHILD', child.$descriptor, 'hasLayout=' + (typeof child.layout), 'vis=' + child.visibility);
       if (child.visibility === VISIBILITY.GONE) continue;
       child.layout(0, 0, width, height);
-      if (globalThis.__DBG_ARG) console.error('  DECOR_AFTER', child.$descriptor, child.left, child.right);
     }
   }
 

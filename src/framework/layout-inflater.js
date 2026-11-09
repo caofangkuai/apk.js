@@ -272,7 +272,6 @@ export class LayoutInflater {
   }
 
   inflate(resId, root = null, attachToRoot = false) {
-    if (globalThis.__DBG_CV) console.error('INFLATE_CALL res=0x' + (resId>>>0).toString(16) + ' root=' + (root?.$descriptor || (root && root.constructor?.name) || 'null') + ' attach=' + attachToRoot);
     const xml = this.resources.getLayout(resId);
     const node = xml.root.children.find((c) => c.type === 'element');
     if (!node) throw new Error('布局 XML 无根节点');
@@ -781,7 +780,6 @@ function resolveThemeSize(themeValue, resources, density) {
 function toLayoutSize(attr, resources, density) {
   let value = attr.value;
   const themeAttrs = resources?.vm?.themeAttributes;
-  if (globalThis.__DBG_TLS) console.error('TLS name=' + attr.name + ' dt=' + attr.dataType + ' data=0x' + (attr.data>>>0).toString(16) + ' hasTheme=' + !!themeAttrs + ' actBar=' + JSON.stringify(themeAttrs?.actionBarSize) + ' vm=' + !!resources?.vm);
   if (themeAttrs && (attr.dataType === 0x01 || attr.dataType === 0x02) && (attr.data >>> 0) > 0) {
     const entry = resources.table?.getEntry(attr.data >>> 0);
     const key = entry?.key || attr.name;

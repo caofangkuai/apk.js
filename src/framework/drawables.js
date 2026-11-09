@@ -1308,9 +1308,6 @@ function baseDrawableMethods() {
     },
     'getBounds()Landroid/graphics/Rect;': (self) => {
       const rect = ensureRectObject(self);
-      if (!rect && globalThis.__DBG_BOUNDS) {
-        console.error('GB-NULL kind=' + self?.kind + ' obj=' + (self?.$object?.$dexClass?.descriptor || self?.$object?.$nativeClass) + ' vm=' + !!self?.vm + ' selfDesc=' + (self?.$dexClass?.descriptor || self?.$nativeClass || self?.$descriptor) + ' ctor=' + self?.constructor?.name + ' keys=' + (self && typeof self === 'object' ? Object.keys(self).slice(0,6).join(',') : typeof self));
-      }
       writeBoundsToRect(self, rect);
       return rect;
     },

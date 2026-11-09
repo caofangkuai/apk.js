@@ -192,7 +192,6 @@ const SHELL_LS_LINE = (name) => `lrwxrwxrwx 1 root root 16 2026-01-01 00:00 ${na
 
 function runShellCommand(command) {
   const text = String(command || '').trim();
-  if (globalThis.__DBG_SH) console.error('SH: ' + text);
   if (text.startsWith('ls ')) {
     const raw = text.slice(3).trim().replace(/^-{1,2}[a-zA-Z]+\s+/, '').trim();
     if (!raw) return '';
@@ -2504,7 +2503,6 @@ function buildFrameworkDefinitions(vm) {
         'getSuggestedMinimumHeight()I': (self) => self.view?.getSuggestedMinimumHeight?.() ?? self.view?.getMinimumHeight?.() ?? 0,
         'addView(Landroid/view/View;)V': (self, [view]) => {
           const child = view?.$view || view;
-          if (globalThis.__DBG_AV) console.error('AV1 parent=', self?.descriptor || (self?.view && (self.view.$descriptor || self.view.constructor?.name)), 'child=', child && (child.$descriptor || child.constructor?.name));
           if (child && self.view) {
             const existing = child.$layoutParamsObject;
             if (existing && existing.$fields) {
@@ -2772,7 +2770,6 @@ function buildFrameworkDefinitions(vm) {
           const inflater = new LayoutInflater(self.vm.contextObject);
           inflater.vm = self.vm;
           const result = inflater.inflate(resId, unwrapView(root) || null, !!attach);
-          if (globalThis.__DBG_INF2) { const dump=(v,d)=>{ if(d>3)return; console.error('  '.repeat(d)+'TREE '+(v.id>>>0).toString(16)+' '+(v.$descriptor||v.constructor?.name)+' kids='+(v.children?.length||0)); for(const c of v.children||[]) dump(c,d+1); }; console.error('INFLATE_RES',(resId>>>0).toString(16)); if(result) dump(result,0); }
           return viewObject(self.vm, result);
         },
         'setFactory(Landroid/view/LayoutInflater$Factory;)V': (self, [factory]) => {
@@ -7153,7 +7150,6 @@ function viewMethods() {
   return {
     'onMeasure(II)V': (self, [widthSpec, heightSpec]) => {
       const view = self.view;
-      if (globalThis.__DBG_MS) { const sm=(x)=>[(x>>>30)&3,(x&0x3fffffff)]; console.error('HOST_OM cls=' + (self.object?.$nativeClass || view?.$descriptor || view?.constructor?.name) + ' hspec=' + JSON.stringify(sm(heightSpec|0))); }
       if (!view) return;
       const vm = self.vm;
       const object = self.object;
@@ -7315,10 +7311,10 @@ function viewMethods() {
       syncDexViewField(self, vm, 'mMeasuredWidthAndState', 'I', w | 0);
       syncDexViewField(self, vm, 'mMeasuredHeightAndState', 'I', h | 0);
     },
-    'getWidth()I': (self) => { const v = self.view?.getWidth() ?? 0; if (globalThis.__DBG_ARG && !v) console.error('GW0', self.object?.$nativeClass || self.view?.$descriptor || '?'); return v; },
+    'getWidth()I': (self) => self.view?.getWidth() ?? 0,
     'getHeight()I': (self) => self.view?.getHeight() ?? 0,
     'getMeasuredWidth()I': (self) => self.view?.getMeasuredWidth() ?? 0,
-    'getMeasuredHeight()I': (self) => { const v = self.view?.getMeasuredHeight() ?? 0; if (globalThis.__DBG_ARG && !v) console.error('GMH0', self.object?.$nativeClass || self.view?.$descriptor || '?', 'hasView=' + !!self.view); return v; },
+    'getMeasuredHeight()I': (self) => self.view?.getMeasuredHeight() ?? 0,
     'getLeft()I': (self) => self.view?.getLeft() ?? 0,
     'getTop()I': (self) => self.view?.getTop() ?? 0,
     'getRight()I': (self) => self.view?.getRight() ?? 0,
@@ -7327,9 +7323,6 @@ function viewMethods() {
     'getResources()Landroid/content/res/Resources;': (self) => self.vm.resources,
     'findViewById(I)Landroid/view/View;': (self, [id], vm) => {
       const found = findView(self.view, id >>> 0);
-      if (globalThis.__DBG_FV2) { const ids=[]; const walk=(v)=>{ if(v.id!==undefined&&v.id!==null) ids.push((v.id>>>0).toString(16)+':'+(v.$descriptor||v.constructor?.name)); for(const c of v.children||[]) walk(c); }; if(self.view) walk(self.view); console.error('FV2TREE ' + ids.slice(0,30).join(',')); }
-      if (globalThis.__DBG_FV2) console.error('FV2 id=0x'+(id>>>0).toString(16)+' peer='+(self?.constructor?.name)+' keys='+Object.keys(self||{}).join(',')+' objcls='+(self?.object?.$nativeClass)+' dex='+(self?.object?.$dexClass?.descriptor||self?.$dexClass?.descriptor)+' rt='+(self?.object?.$runtimeClass?.descriptor)+' hasViewField='+!!self?.object?.$view+' viewcls='+(self.view?.constructor?.name)+' viewId=0x'+(self.view?.id>>>0).toString(16)+' viewDesc='+self.view?.$descriptor+' same='+(self.view===self.object?.$view)+' -> '+(found?(found.$descriptor||found.constructor?.name):'null'));
-      if (globalThis.__DBG_MTS) console.error('ACT_FINDVIEW id=' + (id >>> 0) + ' -> ' + (found ? (found.$descriptor || found.constructor?.name) : 'null'));
       return found ? viewObject(vm, found) : null;
     },
     'requestLayout()V': (self) => self.view?.requestLayout(),
