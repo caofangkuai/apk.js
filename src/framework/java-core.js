@@ -1393,7 +1393,17 @@ export const JAVA_CORE_CLASSES = {
     ctor: peerClass(function () {
       this.items = [];
     }, { items: [] }),
-    methods: listMethods(),
+    methods: Object.assign(listMethods(), {
+      '<init>(I)V': (self, [capacity]) => { self.items = new Array(Math.max(0, toInt(capacity) | 0)).fill(undefined); self.items.length = 0; },
+      '<init>(Ljava/util/Collection;)V': (self, [collection]) => {
+        const source = collection?.$peer?.items || collection?.items || collection?.$data || [];
+        self.items = Array.from(source);
+      },
+      '<init>(Ljava/lang/Iterable;)V': (self, [iterable]) => {
+        const source = iterable?.$peer?.items || iterable?.items || iterable?.$data || [];
+        self.items = Array.from(source);
+      },
+    }),
   }),
   'Ljava/util/HashMap;': nativeDef('Ljava/util/HashMap;', {
     super: 'Ljava/lang/Object;',
