@@ -34,9 +34,6 @@ npm run test:drawables
 # 全部回归一起跑（test + check + test:parse + test:drawables）
 npm run test:all
 
-# 浏览器 E2E（需要 APK + Playwright Chromium）
-npm run check:browser -- /path/to/app.apk
-npm run check:features -- /path/to/app.apk
 
 # 把真实 APK 渲染成 PNG，输出到 image-debug/
 npm run render -- /path/to/app.apk 输出名
@@ -146,12 +143,11 @@ npm run site
 - 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
 
-### 本轮已完成（2026-11-09 第七轮：浏览器 E2E 与 host 补全）
+### 本轮已完成（2026-11-09 第七轮：host 补全）
 
-1. **Playwright 浏览器冒烟**：新增 `tools/browser-smoke.mjs` + `npm run check:browser`，以及 `tools/browser-features.mjs` + `npm run check:features`。真实浏览器加载 `playground.html`、上传 APK、渲染 canvas；冒烟校验 Tab 与抽屉→电池页，功能回归覆盖 5 个 Tab、相机/电池/温度/传感器/分区、信息中心，12 步全部通过、无 console error。
-2. **浏览器实测确认**：Tab（常规/芯片/系统/SCREEN/内存）与抽屉页（相机/电池/温度/传感器/分区）都能正常显示数据；之前 node 测试里的“空白页”是测试时序/字体环境导致，不是浏览器功能缺失。
-3. **host 补全**：`android.os.Trace`（begin/endSection）、`android.widget.EdgeEffect`、`Paint.setColorFilter(ColorFilter, Mode)`、`ViewGroup.onInterceptTouchEvent` 返回 false，减少未绑定方法告警。
-4. 浏览器入口默认 style 名从 `material` 改为 `default`，`src/` 与入口均无 material/androidx 字样。
+1. host 补全：`android.os.Trace`、`android.widget.EdgeEffect`、`Paint.setColorFilter(ColorFilter, Mode)`、`ViewGroup.onInterceptTouchEvent`。
+2. 浏览器入口默认 style 名改为 `default`，`src/` 与入口均无 material/androidx 字样。
+3. 浏览器 E2E 工具与 Playwright 依赖已按用户要求移除。
 
 ### 本轮已完成（2026-11-09 第六轮：真实字体测量与布局回归）
 

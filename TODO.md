@@ -49,7 +49,6 @@
 
 ## 已完成
 
-- [x] 浏览器 E2E：`npm run check:browser` / `check:features`（Playwright）
 - [x] 真实字体测量（node 共享测量画布）与 bold/italic/letterSpacing
 - [x] DisplayMetrics 密度链路、TabLayout 48dp、Toolbar 导航按钮 56dp
 - [x] View 最小尺寸与 MATCH_PARENT 二趟测量

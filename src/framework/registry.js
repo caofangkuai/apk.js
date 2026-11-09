@@ -7370,6 +7370,15 @@ const DEFAULT_THEME_ATTRIBUTES = {
   textColorPrimary: 0xde000000 >>> 0,
   textColorSecondary: 0x8a000000 >>> 0,
   textColorTertiary: 0x61000000 >>> 0,
+  textColorPrimaryInverse: 0xffffffff >>> 0,
+  textColorSecondaryInverse: 0xb3ffffff >>> 0,
+  colorPrimaryVariant: 0xff303f9f >>> 0,
+  colorSecondaryVariant: 0xffc51162 >>> 0,
+  colorSurfaceVariant: 0xffe7e0ec >>> 0,
+  colorOnSurfaceVariant: 0x8a000000 >>> 0,
+  windowBackground: 0xffffffff >>> 0,
+  statusBarColor: 0x00000000 >>> 0,
+  navigationBarColor: 0xff000000 >>> 0,
 };
 
 function multiplyMatrices(a, b) {
