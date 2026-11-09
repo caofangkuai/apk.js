@@ -3190,6 +3190,9 @@ function buildFrameworkDefinitions(vm) {
         'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines?.(Number(lines)),
         'setAllCaps(Z)V': (self, [value]) => self.view?.setTextAllCaps(!!value),
         'getTextSize()F': (self) => self.view?.getTextSize() ?? 0,
+        'getCurrentTextColor()I': (self) => self.view?.textColor ?? 0,
+        'getTypeface()Landroid/graphics/Typeface;': (self) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: self.view?.typeface || null, style: self.view?.textStyle | 0 }),
+        'getTextColors()Landroid/content/res/ColorStateList;': (self) => self.view?.$textColorStateList ?? null,
         'getCurrentTextColor()I': (self) => self.view?.getCurrentTextColor() ?? 0,
         'getPaint()Landroid/text/TextPaint;': (self, _args, vm) => {
           if (!self.textPaint) {
