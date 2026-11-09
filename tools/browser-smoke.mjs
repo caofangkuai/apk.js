@@ -57,6 +57,15 @@ if (box) {
   await page.waitForTimeout(800);
 }
 const after = await snapshot();
+let drawerChanged = false;
+if (box) {
+  await page.mouse.click(box.x + box.width * 0.08, box.y + box.height * 0.08);
+  await page.waitForTimeout(600);
+  const opened = await snapshot();
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.55);
+  await page.waitForTimeout(2500);
+  drawerChanged = (await snapshot()) !== opened;
+}
 const stats = await page.evaluate(() => {
   const canvas = document.querySelector('canvas');
   if (!canvas) return null;
@@ -73,6 +82,6 @@ fs.mkdirSync(path.join(root, 'image-debug'), { recursive: true });
 await page.screenshot({ path: path.join(root, 'image-debug/browser-smoke.png'), fullPage: true });
 await browser.close();
 server.close();
-const ok = stats && stats.dark > 20 && stats.colors > 3 && errors.length === 0 && before !== after;
-console.log(ok ? 'browser smoke OK' : 'browser smoke FAILED', stats, 'tabChanged=' + (before !== after), errors.slice(0, 5));
+const ok = stats && stats.dark > 20 && stats.colors > 3 && errors.length === 0 && before !== after && drawerChanged;
+console.log(ok ? 'browser smoke OK' : 'browser smoke FAILED', stats, 'tabChanged=' + (before !== after) + ' drawerChanged=' + drawerChanged, errors.slice(0, 5));
 process.exit(ok ? 0 : 1);
