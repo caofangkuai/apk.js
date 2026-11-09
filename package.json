@@ -24,7 +24,8 @@
     "diff:image": "node tools/image-diff.mjs",
     "render:batch": "node tools/render-batch.mjs",
     "docs:coverage": "node tools/framework-coverage.mjs",
-    "check:coverage": "node tools/framework-coverage.mjs --check"
+    "check:coverage": "node tools/framework-coverage.mjs --check",
+    "bench:render": "node tools/bench-render.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"
