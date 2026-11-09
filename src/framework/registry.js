@@ -7354,6 +7354,23 @@ const DEFAULT_THEME_ATTRIBUTES = {
   colorAccent: 0xff3f51b5 >>> 0,
   colorPrimary: 0xff3f51b5 >>> 0,
   colorPrimaryDark: 0xff303f9f >>> 0,
+  colorAccent: 0xffff4081 >>> 0,
+  colorSecondary: 0xffff4081 >>> 0,
+  colorOnPrimary: 0xffffffff >>> 0,
+  colorOnSecondary: 0xffffffff >>> 0,
+  colorSurface: 0xffffffff >>> 0,
+  colorOnSurface: 0xff000000 >>> 0,
+  colorBackground: 0xffffffff >>> 0,
+  colorOnBackground: 0xff000000 >>> 0,
+  colorError: 0xffb00020 >>> 0,
+  colorOnError: 0xffffffff >>> 0,
+  colorOutline: 0xff79747e >>> 0,
+  colorControlNormal: 0x8a000000 >>> 0,
+  colorControlActivated: 0xff3f51b5 >>> 0,
+  colorControlHighlight: 0x1f000000 >>> 0,
+  textColorPrimary: 0xde000000 >>> 0,
+  textColorSecondary: 0x8a000000 >>> 0,
+  textColorTertiary: 0x61000000 >>> 0,
 };
 
 function multiplyMatrices(a, b) {
