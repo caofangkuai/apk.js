@@ -574,6 +574,7 @@ let textMeasureContext;
 let textMeasureProbed = false;
 const textMeasureCache = new Map();
 const TEXT_MEASURE_CACHE_LIMIT = 4096;
+let lastMeasureFont = '';
 
 function measureContext() {
   if (textMeasureProbed) return textMeasureContext;
@@ -594,13 +595,17 @@ function measureContext() {
 
 export function measureTextWidth(text, textSize, typeface = 'Noto Sans CJK SC') {
   if (!text) return 0;
-  const cacheKey = `${Number(textSize) || 14}\u0000${typeface}\u0000${text}`;
-  const cached = textMeasureCache.get(cacheKey);
-  if (cached !== undefined) return cached;
+  const cacheable = text.length <= 512;
+  const cacheKey = cacheable ? `${Number(textSize) || 14}\u0000${typeface}\u0000${text}` : '';
+  if (cacheable) {
+    const cached = textMeasureCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+  }
   const ctx = measureContext();
   if (ctx) {
     try {
-      ctx.font = (Number(textSize) || 14) + 'px ' + (typeface || 'Noto Sans CJK SC');
+      const fontSpec = (Number(textSize) || 14) + 'px ' + (typeface || 'Noto Sans CJK SC');
+      if (fontSpec !== lastMeasureFont) { ctx.font = fontSpec; lastMeasureFont = fontSpec; }
       const measured = ctx.measureText(String(text)).width;
       if (Number.isFinite(measured) && measured > 0) return measured;
     } catch (_error) {
@@ -618,8 +623,10 @@ export function measureTextWidth(text, textSize, typeface = 'Noto Sans CJK SC') 
     else if (/[0-9]/.test(char)) width += textSize * 0.56;
     else width += textSize * 0.55;
   }
-  if (textMeasureCache.size > TEXT_MEASURE_CACHE_LIMIT) textMeasureCache.clear();
-  textMeasureCache.set(cacheKey, width);
+  if (cacheable) {
+    if (textMeasureCache.size > TEXT_MEASURE_CACHE_LIMIT) textMeasureCache.clear();
+    textMeasureCache.set(cacheKey, width);
+  }
   return width;
 }
 
