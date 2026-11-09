@@ -42,6 +42,21 @@ page.on('console', (message) => { if (message.type() === 'error') errors.push(me
 await page.goto(`http://127.0.0.1:${port}/playground.html`);
 await page.setInputFiles('#apk-file', apkPath);
 await page.waitForTimeout(6000);
+const canvasHandle = page.locator('canvas').first();
+const box = await canvasHandle.boundingBox();
+const snapshot = async () => page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let hash = 2166136261;
+  for (let i = 0; i < d.length; i += 4 * 53) hash = Math.imul(hash ^ d[i] ^ (d[i+1] << 8), 16777619) >>> 0;
+  return hash;
+});
+const before = await snapshot();
+if (box) {
+  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.16);
+  await page.waitForTimeout(800);
+}
+const after = await snapshot();
 const stats = await page.evaluate(() => {
   const canvas = document.querySelector('canvas');
   if (!canvas) return null;
@@ -58,6 +73,6 @@ fs.mkdirSync(path.join(root, 'image-debug'), { recursive: true });
 await page.screenshot({ path: path.join(root, 'image-debug/browser-smoke.png'), fullPage: true });
 await browser.close();
 server.close();
-const ok = stats && stats.dark > 20 && stats.colors > 3 && errors.length === 0;
-console.log(ok ? 'browser smoke OK' : 'browser smoke FAILED', stats, errors.slice(0, 5));
+const ok = stats && stats.dark > 20 && stats.colors > 3 && errors.length === 0 && before !== after;
+console.log(ok ? 'browser smoke OK' : 'browser smoke FAILED', stats, 'tabChanged=' + (before !== after), errors.slice(0, 5));
 process.exit(ok ? 0 : 1);
