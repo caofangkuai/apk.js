@@ -2018,13 +2018,25 @@ export class ViewGroup extends View {
     const scrolled = !!(scrollX || scrollY);
     if (this.clipChildren) {
       canvas.save();
-      canvas.clipRect(0, 0, this.getWidth(), this.getHeight());
+      const left = this.clipToPadding ? this.paddingLeft : 0;
+      const top = this.clipToPadding ? this.paddingTop : 0;
+      const right = this.clipToPadding ? this.getWidth() - this.paddingRight : this.getWidth();
+      const bottom = this.clipToPadding ? this.getHeight() - this.paddingBottom : this.getHeight();
+      canvas.clipRect(left, top, right, bottom);
     }
     if (scrolled) {
       canvas.save();
       canvas.translate(-scrollX, -scrollY);
     }
-    for (const child of this.children) child.draw(canvas);
+    const hasZ = this.children.some((child) => (Number(child.z) || 0) !== 0 || (Number(child.elevation) || 0) !== 0);
+    const order = hasZ
+      ? [...this.children].map((child, index) => ({ child, index })).sort((a, b) => {
+          const az = Number(a.child.z) || Number(a.child.elevation) || 0;
+          const bz = Number(b.child.z) || Number(b.child.elevation) || 0;
+          return az === bz ? a.index - b.index : az - bz;
+        }).map((entry) => entry.child)
+      : this.children;
+    for (const child of order) child.draw(canvas);
     if (scrolled) canvas.restore();
     if (this.clipChildren) canvas.restore();
   }
