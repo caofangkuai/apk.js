@@ -38,7 +38,7 @@
 
 ### 文档
 
-- [ ] 补一份「Framework 覆盖矩阵」文档，逐类列出支持的方法
+- [x] Framework 覆盖矩阵（`npm run docs:coverage` 生成 `docs/framework-coverage.md`）
 - [ ] 文档站接入搜索（`vitepress-plugin-search` 或本地索引）
 - [ ] 增加录屏式 GIF 演示，放进 README
 
