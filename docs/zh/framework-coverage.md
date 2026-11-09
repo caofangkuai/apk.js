@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：317
-- 方法/构造函数键（静态统计）：3100
+- 注册的 native 类：320
+- 方法/构造函数键（静态统计）：3125
 
 ## Native 类清单
 
@@ -78,6 +78,7 @@
 | `Landroid/graphics/Paint$Style;` | registry.js |
 | `Landroid/graphics/Path;` | registry.js |
 | `Landroid/graphics/Point;` | registry.js |
+| `Landroid/graphics/PointF;` | registry.js |
 | `Landroid/graphics/PorterDuff$Mode;` | registry.js |
 | `Landroid/graphics/PorterDuffColorFilter;` | registry.js |
 | `Landroid/graphics/RadialGradient;` | drawables.js |
@@ -153,6 +154,7 @@
 | `Landroid/view/PointerIcon;` | registry.js |
 | `Landroid/view/VelocityTracker;` | registry.js |
 | `Landroid/view/View;` | registry.js |
+| `Landroid/view/View$AccessibilityDelegate;` | registry.js |
 | `Landroid/view/View$MeasureSpec;` | registry.js |
 | `Landroid/view/View$OnClickListener;` | registry.js |
 | `Landroid/view/View$OnLongClickListener;` | registry.js |
@@ -277,6 +279,7 @@
 | `Ljava/util/ArrayDeque;` | java-core.js |
 | `Ljava/util/ArrayList;` | java-core.js |
 | `Ljava/util/Arrays;` | java-core.js |
+| `Ljava/util/BitSet;` | registry.js |
 | `Ljava/util/Collection;` | java-core.js |
 | `Ljava/util/Collections;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicBoolean;` | java-core.js |

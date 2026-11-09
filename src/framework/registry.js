@@ -4456,6 +4456,10 @@ function buildFrameworkDefinitions(vm) {
             ...source,
           };
         },
+        'getMarginStart()I': (self) => (self.object.$layoutParams?.leftMargin | 0),
+        'getMarginEnd()I': (self) => (self.object.$layoutParams?.rightMargin | 0),
+        'setMarginStart(I)V': (self, [value]) => { self.object.$layoutParams.leftMargin = value | 0; },
+        'setMarginEnd(I)V': (self, [value]) => { self.object.$layoutParams.rightMargin = value | 0; },
         'setMargins(IIII)V': (self, [l, t, r, b]) => {
           const params = self.object.$layoutParams || {};
           params.leftMargin = l | 0;
@@ -4511,6 +4515,57 @@ function buildFrameworkDefinitions(vm) {
           return values[jsString(key)] ?? null;
         },
         'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': () => true,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/View$AccessibilityDelegate;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>()V': () => undefined,
+        'sendAccessibilityEvent(Landroid/view/View;I)V': () => undefined,
+        'sendAccessibilityEventUnchecked(Landroid/view/View;Landroid/view/accessibility/AccessibilityEvent;)V': () => undefined,
+        'performAccessibilityAction(Landroid/view/View;ILandroid/os/Bundle;)Z': () => false,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/graphics/PointF;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class PointFPeer { constructor() { this.x = 0; this.y = 0; } },
+      methods: {
+        '<init>()V': (self) => { self.x = 0; self.y = 0; },
+        '<init>(FF)V': (self, [x, y]) => { self.x = numberToFloatBits(Number(x) || 0); self.y = numberToFloatBits(Number(y) || 0); },
+        '<init>(Landroid/graphics/PointF;)V': (self, [other]) => { self.x = other?.$peer?.x ?? 0; self.y = other?.$peer?.y ?? 0; },
+        'set(FF)V': (self, [x, y]) => { self.x = numberToFloatBits(Number(x) || 0); self.y = numberToFloatBits(Number(y) || 0); },
+        'set(Landroid/graphics/PointF;)V': (self, [other]) => { self.x = Number(other?.$peer?.x) || 0; self.y = Number(other?.$peer?.y) || 0; },
+        'length()F': (self) => Math.hypot(floatBitsToNumber(self.x | 0), floatBitsToNumber(self.y | 0)),
+      },
+      instanceFields: new Map([['x:F', 0], ['y:F', 0]]),
+    })
+  );
+
+  defs.push(
+    nativeDef('Ljava/util/BitSet;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class BitSetPeer { constructor() { this.bits = new Set(); } },
+      methods: {
+        '<init>()V': (self) => { self.bits = new Set(); },
+        '<init>(I)V': (self) => { self.bits = new Set(); },
+        'set(I)V': (self, [index]) => { self.bits.add(index | 0); },
+        'set(IZ)V': (self, [index, value]) => { if (value) self.bits.add(index | 0); else self.bits.delete(index | 0); },
+        'clear(I)V': (self, [index]) => { self.bits.delete(index | 0); },
+        'get(I)Z': (self, [index]) => (self.bits.has(index | 0) ? 1 : 0),
+        'cardinality()I': (self) => self.bits.size,
+        'isEmpty()Z': (self) => (self.bits.size ? 0 : 1),
+        'nextSetBit(I)I': (self, [from]) => {
+          let best = -1;
+          for (const index of self.bits) if (index >= (from | 0) && (best < 0 || index < best)) best = index;
+          return best;
+        },
+        'toString()Ljava/lang/String;': (self) => '{' + [...self.bits].sort((a, b) => a - b).join(', ') + '}',
       },
     })
   );
@@ -5377,6 +5432,10 @@ function buildFrameworkDefinitions(vm) {
               cmd.bottom = Math.max(top, bottom);
             }
           }
+        },
+        'op(Landroid/graphics/Path;Landroid/graphics/Path$Op;)Z': (self, [other]) => {
+          if (other?.commands) self.commands.push(...other.commands);
+          return true;
         },
         'op(Landroid/graphics/Path;Landroid/graphics/Path;Landroid/graphics/Path$Op;)Z': (self, [other1, other2]) => {
           const first = (other1?.$peer || other1)?.commands || [];
