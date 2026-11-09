@@ -299,9 +299,12 @@ export class EmulatorEngine {
     }
     this.activity = activity;
     vm.onActivityFinished = (peer) => {
-      const stack = vm.activityStack || [];
-      const activeMain = !peer || peer?.object === vm.activity;
-      if (stack.length === 0 && activeMain) this.onFinished();
+      const notify = () => {
+        const stack = vm.activityStack || [];
+        const activeMain = !peer || peer?.object === vm.activity;
+        if (stack.length === 0 && activeMain && (!peer || peer.finished !== false)) this.onFinished();
+      };
+      setTimeout(notify, 0);
     };
 
     const activityPeer = vm.registry.getPeer(activity, descriptor);
