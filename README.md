@@ -192,6 +192,15 @@ npm run test:all
 `npm test` parses `samples/hello-dex.apk`, builds the view tree, then simulates a counter tap, focusing the editor and echoing keyboard input, dynamic view insertion, progress advancement, a shape-backed button tap, reading `Build` info, a reflection call, and a `startActivity` jump to a second `Activity` with argument checks.
 
 The scripts in `tests/debug/` are older exploratory probes from development. They are not part of the regression suite.
+Browser E2E (requires an APK and a local Playwright Chromium):
+
+```bash
+npm run check:browser -- /path/to/app.apk
+npm run check:features -- /path/to/app.apk
+```
+
+`check:browser` verifies the rendered canvas, tab clicks and drawer navigation; `check:features` covers five tabs, drawer pages and the overflow menu, and exits non-zero on failure.
+
 
 ## Building the sample APK
 

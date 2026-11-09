@@ -192,6 +192,15 @@ npm run test:all
 `npm test` 会解析 `samples/hello-dex.apk`、构建 View 树，然后依次模拟：点击计数按钮、聚焦编辑框并用键盘输入回显、动态添加视图、推进进度条、点击形状背景按钮、读取 `Build` 信息、跑一次反射调用、`startActivity` 跳到第二个 Activity 并校验传参，最后检查各项事件回调是否生效。
 
 `tests/debug/` 里的脚本是开发期留下的探索性探针，不属于回归测试。
+浏览器 E2E（需要 APK 与本机 Playwright Chromium）：
+
+```bash
+npm run check:browser -- /path/to/app.apk
+npm run check:features -- /path/to/app.apk
+```
+
+`check:browser` 校验加载后的 canvas、Tab 点击与抽屉切换；`check:features` 覆盖 5 个 Tab、抽屉页面与溢出菜单，失败时返回非零退出码。
+
 
 ## 构建示例 APK
 
