@@ -933,6 +933,7 @@ export const JAVA_CORE_CLASSES = {
       'valueOf(Z)Ljava/lang/String;': (_self, [value]) => (value ? 'true' : 'false'),
       'valueOf(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value)),
       'valueOf(Ljava/lang/Object;)Ljava/lang/String;': (_self, [value]) => (value === null ? 'null' : jsString(value)),
+      'format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [locale, format, args]) => formatJavaString(format, args),
       'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args]) => {
         const values = isJavaArray(args) ? args.$data : [];
         let index = 0;
@@ -5339,4 +5340,20 @@ function makeRegexMatcher(vm, regex, input) {
   const object = vm.allocateRawObject('Ljava/util/regex/Matcher;');
   object.$peer = { regex: regex || '', input: input ?? '', cursor: 0, last: null };
   return object;
+}
+
+function formatJavaString(format, args) {
+  const values = isJavaArray(args) ? args.$data : [];
+  let index = 0;
+  return jsString(format).replace(/%([0-9]+\$)?([sdifxX%])/g, (match, positional, type) => {
+    if (type === '%') return '%';
+    const at = positional ? parseInt(positional, 10) - 1 : index++;
+    const value = values[at];
+    if (type === 'd') return String(toInt(value));
+    if (type === 'f') return (Number(value) || 0).toFixed(2);
+    if (type === 'x') return toInt(value).toString(16);
+    if (type === 'X') return toInt(value).toString(16).toUpperCase();
+    if (type === 'i') return String(toInt(value));
+    return value === null || value === undefined ? 'null' : jsString(value);
+  });
 }

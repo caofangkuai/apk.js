@@ -2490,6 +2490,10 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/view/ViewGroup;'),
       methods: {
+        'removeCallbacks(Ljava/lang/Runnable;)Z': () => true,
+        'setScrollContainer(Z)V': () => undefined,
+        'getSuggestedMinimumWidth()I': (self) => self.view?.getSuggestedMinimumWidth?.() ?? self.view?.getMinimumWidth?.() ?? 0,
+        'getSuggestedMinimumHeight()I': (self) => self.view?.getSuggestedMinimumHeight?.() ?? self.view?.getMinimumHeight?.() ?? 0,
         'addView(Landroid/view/View;)V': (self, [view]) => {
           const child = view?.$view || view;
           if (globalThis.__DBG_AV) console.error('AV1 parent=', self?.descriptor || (self?.view && (self.view.$descriptor || self.view.constructor?.name)), 'child=', child && (child.$descriptor || child.constructor?.name));
@@ -3384,6 +3388,7 @@ function buildFrameworkDefinitions(vm) {
       methods: {
         'setChecked(Z)V': (self, [value]) => { if (self.view) self.view.checked = !!value; },
         'isChecked()Z': (self) => (self.view?.checked ? 1 : 0),
+        'setDuplicateParentStateEnabled(Z)V': () => undefined,
         'setCheckMarkDrawable(Landroid/graphics/drawable/Drawable;)V': () => undefined,
       },
     })
@@ -4566,6 +4571,23 @@ function buildFrameworkDefinitions(vm) {
           return best;
         },
         'toString()Ljava/lang/String;': (self) => '{' + [...self.bits].sort((a, b) => a - b).join(', ') + '}',
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/view/animation/DecelerateInterpolator;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class DecelerateInterpolatorPeer { constructor(factor = 1) { this.factor = Number(factor) || 1; } },
+      methods: {
+        '<init>()V': (self) => { self.factor = 1; },
+        '<init>(F)V': (self, [factor]) => { self.factor = Number(factor) || 1; },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'getInterpolation(F)F': (self, [input]) => {
+          const value = Math.max(0, Math.min(1, Number(input) || 0));
+          const factor = Number(self.factor) || 1;
+          return 1 - Math.pow(1 - value, 2 * factor);
+        },
       },
     })
   );
@@ -6566,6 +6588,10 @@ function coreGraphicDefs() {
         'set(IIII)V': (self, [l, t, r, b]) => {
           self.rect = self.rect || new Rect();
           self.rect.set(l | 0, t | 0, r | 0, b | 0);
+        },
+        'setEmpty()V': (self) => {
+          self.rect = self.rect || new Rect();
+          self.rect.set(0, 0, 0, 0);
         },
         'set(Landroid/graphics/Rect;)V': (self, [other]) => {
           self.rect = self.rect || new Rect();

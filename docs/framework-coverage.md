@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：320
-- 方法/构造函数键（静态统计）：3125
+- 注册的 native 类：321
+- 方法/构造函数键（静态统计）：3136
 
 ## Native 类清单
 
@@ -135,6 +135,7 @@
 | `Landroid/util/Xml;` | registry.js |
 | `Landroid/view/accessibility/AccessibilityManager;` | registry.js |
 | `Landroid/view/accessibility/AccessibilityNodeInfo$AccessibilityAction;` | registry.js |
+| `Landroid/view/animation/DecelerateInterpolator;` | registry.js |
 | `Landroid/view/animation/Interpolator;` | java-core.js |
 | `Landroid/view/animation/LinearInterpolator;` | java-core.js |
 | `Landroid/view/Display;` | registry.js |
