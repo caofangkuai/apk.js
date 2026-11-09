@@ -4665,6 +4665,10 @@ function buildFrameworkDefinitions(vm) {
           rect.$fields?.set('Landroid/graphics/Rect;->right:I', width);
           rect.$fields?.set('Landroid/graphics/Rect;->bottom:I', Math.ceil(metrics.bottom));
         },
+        'getFontSpacing()F': (self) => {
+          const metrics = self.paint.getFontMetrics();
+          return metrics.descent - metrics.ascent + metrics.leading;
+        },
         'getFontMetrics()Landroid/graphics/Paint$FontMetrics;': (self, _args, vm) => {
           const metrics = self.paint.getFontMetrics();
           const object = vm.allocateRawObject('Landroid/graphics/Paint$FontMetrics;');
