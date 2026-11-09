@@ -4,7 +4,7 @@ const DEFAULT_DEVICE = {
   width: 360,
   height: 640,
   dpr: undefined,
-  style: 'material',
+  style: 'default',
   maxApkSize: 50 * 1024 * 1024,
 };
 
