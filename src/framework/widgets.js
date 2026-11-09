@@ -137,6 +137,7 @@ export class TextView extends View {
     this.lineSpacingMultiplier = 1;
     this.letterSpacing = 0;
     this.textScaleX = 1;
+    this.textSkewX = 0;
     this.typeface = 'Noto Sans CJK SC';
     this.textStyle = 0;
     this.paddingLeft = 0;
@@ -471,6 +472,7 @@ export class TextView extends View {
     paint.textSize = this.textSize;
     paint.typeface = this.fontSpec();
     paint.textScaleX = Number(this.textScaleX) || 1;
+    paint.textSkewX = Number(this.textSkewX) || 0;
     if (this.textShadow) {
       paint.shadow = this.textShadow;
     } else {

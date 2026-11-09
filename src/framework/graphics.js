@@ -9,6 +9,7 @@ export class Paint {
     this.typeface = 'Noto Sans CJK SC';
     this.letterSpacing = 0;
     this.textScaleX = 1;
+    this.textSkewX = 0;
     this.alpha = undefined;
     this.strokeJoin = null;
     this.strokeCap = null;
@@ -430,11 +431,12 @@ export class Canvas {
     applyPaint(ctx, paint);
     ctx.textBaseline = 'alphabetic';
     const scaleX = Number(paint?.textScaleX) || 1;
-    if (scaleX === 1) {
+    const skewX = Number(paint?.textSkewX) || 0;
+    if (scaleX === 1 && skewX === 0) {
       ctx.fillText(String(text ?? ''), this.originX + x, this.originY + y);
     } else {
       ctx.translate(this.originX + x, this.originY + y);
-      ctx.scale(scaleX, 1);
+      ctx.transform(scaleX, 0, skewX, 1, 0, 0);
       ctx.fillText(String(text ?? ''), 0, 0);
     }
     ctx.restore();
