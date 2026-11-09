@@ -4596,6 +4596,11 @@ function buildFrameworkDefinitions(vm) {
         'setLetterSpacing(F)V': (self, [spacing]) => { self.paint.letterSpacing = Number(spacing) || 0; },
         'setTextScaleX(F)V': (self, [scale]) => { self.paint.textScaleX = Number(scale) || 1; },
         'setTextSkewX(F)V': (self, [skew]) => { self.paint.textSkewX = Number(skew) || 0; },
+        'setTypeface(Landroid/graphics/Typeface;)Landroid/graphics/Typeface;': (self, [typeface]) => {
+          self.paint.typeface = typeface?.family || 'Noto Sans CJK SC';
+          return typeface ?? null;
+        },
+        'getTypeface()Landroid/graphics/Typeface;': (self) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: self.paint?.typeface || null, style: 0 }),
         'getTextScaleX()F': (self) => Number(self.paint?.textScaleX) || 1,
         'ascent()F': (self) => self.paint.getFontMetricsInt().ascent,
         'descent()F': (self) => self.paint.getFontMetricsInt().descent,
