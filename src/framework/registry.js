@@ -7351,7 +7351,6 @@ const DEFAULT_THEME_ATTRIBUTES = {
   actionBarSize: 56,
   actionBarStyle: 0,
   background: 0,
-  colorAccent: 0xff3f51b5 >>> 0,
   colorPrimary: 0xff3f51b5 >>> 0,
   colorPrimaryDark: 0xff303f9f >>> 0,
   colorAccent: 0xffff4081 >>> 0,
