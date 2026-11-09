@@ -3168,10 +3168,22 @@ function buildFrameworkDefinitions(vm) {
         'setLinkTextColor(Landroid/content/res/ColorStateList;)V': () => undefined,
         'setTextLocales(Landroid/os/LocaleList;)V': () => undefined,
         'setFontVariationSettings(Ljava/lang/String;)Z': () => true,
-        'setTypeface(Landroid/graphics/Typeface;)V': () => undefined,
-        'setTypeface(Landroid/graphics/Typeface;I)V': () => undefined,
-        'setTypeface(Landroid/graphics/Typeface;)Landroid/widget/TextView;': (self) => self.object,
-        'setTypeface(Landroid/graphics/Typeface;I)Landroid/widget/TextView;': (self) => self.object,
+        'setTypeface(Landroid/graphics/Typeface;)V': (self, [typeface]) => {
+          if (!self.view) return;
+          self.view.setTypeface?.(typeface?.family || null, Number(typeface?.style) || 0);
+        },
+        'setTypeface(Landroid/graphics/Typeface;I)V': (self, [typeface, style]) => {
+          if (!self.view) return;
+          self.view.setTypeface?.(typeface?.family || null, style | 0);
+        },
+        'setTypeface(Landroid/graphics/Typeface;)Landroid/widget/TextView;': (self, [typeface]) => {
+          if (self.view) self.view.setTypeface?.(typeface?.family || null, Number(typeface?.style) || 0);
+          return self.object;
+        },
+        'setTypeface(Landroid/graphics/Typeface;I)Landroid/widget/TextView;': (self, [typeface, style]) => {
+          if (self.view) self.view.setTypeface?.(typeface?.family || null, style | 0);
+          return self.object;
+        },
         'append(Ljava/lang/CharSequence;)V': (self, [text]) => self.view?.append(jsString(text)),
         'setSingleLine()V': (self) => self.view?.setSingleLine(true),
         'setSingleLine(Z)V': (self, [value]) => self.view?.setSingleLine(!!value),
@@ -4445,16 +4457,18 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/graphics/Typeface;', {
       super: 'Ljava/lang/Object;',
       staticFields: new Map([
-        ['DEFAULT:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;' }],
-        ['DEFAULT_BOLD:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;' }],
-        ['MONOSPACE:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;' }],
+        ['DEFAULT:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: null, style: 0 }],
+        ['DEFAULT_BOLD:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: null, style: 1 }],
+        ['MONOSPACE:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: 'monospace', style: 0 }],
+        ['SERIF:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: 'serif', style: 0 }],
+        ['SANS_SERIF:Landroid/graphics/Typeface;', { $descriptor: 'Landroid/graphics/Typeface;', family: null, style: 0 }],
       ]),
       staticMethods: {
-        'create(Ljava/lang/String;I)Landroid/graphics/Typeface;': () => ({ $descriptor: 'Landroid/graphics/Typeface;' }),
-        'create(Landroid/graphics/Typeface;I)Landroid/graphics/Typeface;': () => ({ $descriptor: 'Landroid/graphics/Typeface;' }),
-        'create(Landroid/graphics/Typeface;IZ)Landroid/graphics/Typeface;': () => ({ $descriptor: 'Landroid/graphics/Typeface;' }),
-        'create(Ljava/lang/String;ILandroid/graphics/Typeface;)Landroid/graphics/Typeface;': () => ({ $descriptor: 'Landroid/graphics/Typeface;' }),
-        'defaultFromStyle(I)Landroid/graphics/Typeface;': () => ({ $descriptor: 'Landroid/graphics/Typeface;' }),
+        'create(Ljava/lang/String;I)Landroid/graphics/Typeface;': (_self, [family, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: family ?? null, style: style | 0 }),
+        'create(Landroid/graphics/Typeface;I)Landroid/graphics/Typeface;': (_self, [base, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: base?.family ?? null, style: style | 0 }),
+        'create(Landroid/graphics/Typeface;IZ)Landroid/graphics/Typeface;': (_self, [base, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: base?.family ?? null, style: style | 0 }),
+        'create(Ljava/lang/String;ILandroid/graphics/Typeface;)Landroid/graphics/Typeface;': (_self, [family, style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: family ?? null, style: style | 0 }),
+        'defaultFromStyle(I)Landroid/graphics/Typeface;': (_self, [style]) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: null, style: style | 0 }),
       },
     })
   );
