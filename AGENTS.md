@@ -136,11 +136,18 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，基线 HEAD `0a77108`；2026-11-08 五轮改动均未提交（用户未要求 commit/push）。
+- 分支 `main`，基线 HEAD `0a77108`；2026-11-09 六轮改动已推送（用户未要求 commit/push）。
 - 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
 - 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
+
+### 本轮已完成（2026-11-09 第六轮：真实字体测量与布局回归）
+
+1. **node 渲染接入真实字体测量**：`tools/render-apk.mjs` 创建共享测量画布并挂到 `globalThis.__APKJS_MEASURE_CANVAS`，`graphics.measureTextWidth` 在无 DOM 环境下使用它；长文本（如 `4.14.0 #1 SMP PREEMPT`）不再被字符宽度表误判换行，表格行显示与原生一致。
+2. **ArrayList 集合构造**：补 `ArrayList(Collection/Iterable)`，避免 `new ArrayList(list)` 时数据丢失。
+3. **抽屉点击**：拦截态触摸向可点击父项冒泡，`NavigationMenuItemView` 能收到点击并关闭抽屉。
+4. **BatteryManager**：补 `batterymanager` 服务别名与 Class 重载，电池页不再空指针。
 
 ### 本轮已完成（2026-11-08 第五轮：AOSP 控件绘制对齐）
 
