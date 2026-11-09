@@ -65,12 +65,16 @@ export class ApkSimulator {
     return canvas;
   }
 
-  async loadFromFile(file) {
-    if (!file) throw new Error('缺少 APK 文件');
-    if (file.size > this.device.maxApkSize) {
+  assertSize(size) {
+    if (Number(size) > this.device.maxApkSize) {
       const limit = (this.device.maxApkSize / 1024 / 1024).toFixed(0);
       throw new Error(`APK 超过大小上限（${limit}MB）`);
     }
+  }
+
+  async loadFromFile(file) {
+    if (!file) throw new Error('缺少 APK 文件');
+    this.assertSize(file.size);
     const zip = await getJSZip().loadAsync(await file.arrayBuffer());
     return this.loadFromZip(zip);
   }
@@ -79,10 +83,7 @@ export class ApkSimulator {
     const response = await fetch(url, options);
     if (!response.ok) throw new Error(`下载 APK 失败：HTTP ${response.status}`);
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > this.device.maxApkSize) {
-      const limit = (this.device.maxApkSize / 1024 / 1024).toFixed(0);
-      throw new Error(`APK 超过大小上限（${limit}MB）`);
-    }
+    this.assertSize(buffer.byteLength);
     const zip = await getJSZip().loadAsync(buffer);
     return this.loadFromZip(zip);
   }
@@ -99,6 +100,8 @@ export class ApkSimulator {
   }
 
   async loadFromArrayBuffer(buffer) {
+    if (!buffer || typeof buffer.byteLength !== 'number') throw new Error('缺少 APK 数据');
+    this.assertSize(buffer.byteLength);
     const zip = await getJSZip().loadAsync(buffer);
     return this.loadFromZip(zip);
   }
