@@ -3735,6 +3735,26 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/NumberPicker;', {
+      super: 'Landroid/widget/LinearLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/NumberPicker;', 'Landroid/widget/LinearLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setMinValue(I)V': (self, [value]) => { self.minValue = value | 0; },
+        'setMaxValue(I)V': (self, [value]) => { self.maxValue = value | 0; },
+        'getMinValue()I': (self) => self.minValue | 0,
+        'getMaxValue()I': (self) => self.maxValue | 0,
+        'setValue(I)V': (self, [value]) => { self.value = value | 0; },
+        'getValue()I': (self) => self.value | 0,
+        'setWrapSelectorWheel(Z)V': (self, [value]) => { self.wrapSelector = !!value; },
+        'setFormatter(Landroid/widget/NumberPicker$Formatter;)V': (self, [formatter]) => { self.formatter = formatter; },
+        'setOnValueChangedListener(Landroid/widget/NumberPicker$OnValueChangeListener;)V': (self, [listener]) => { self.valueListener = listener; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/TextClock;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/TextClock;', 'Landroid/widget/TextView;'),
