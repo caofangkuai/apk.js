@@ -4382,6 +4382,18 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ImageButton;', {
+      super: 'Landroid/widget/ImageView;',
+      ctor: viewPeerConstructor('Landroid/widget/ImageButton;', 'Landroid/widget/ImageView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ToggleButton;', {
       super: 'Landroid/widget/CompoundButton;',
       ctor: viewPeerConstructor('Landroid/widget/ToggleButton;', 'Landroid/widget/CompoundButton;'),
