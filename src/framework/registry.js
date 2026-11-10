@@ -4199,6 +4199,69 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/CheckBox;', {
+      super: 'Landroid/widget/CompoundButton;',
+      ctor: viewPeerConstructor('Landroid/widget/CheckBox;', 'Landroid/widget/CompoundButton;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/RadioButton;', {
+      super: 'Landroid/widget/CompoundButton;',
+      ctor: viewPeerConstructor('Landroid/widget/RadioButton;', 'Landroid/widget/CompoundButton;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'performClick()Z': (self, _args, vm) => {
+          if (!self.view) return false;
+          self.view.checked = true;
+          self.view.invalidate?.();
+          const group = self.view.parent;
+          if (group) {
+            group.checkedId = self.view.id | 0;
+            const peer = group.$javaObject;
+            const listener = peer?.selectionListener || group.selectionListener;
+            try { vm.invokeInterface(listener, 'onCheckedChanged', '(Landroid/widget/RadioGroup;I)V', [peer ?? null, group.checkedId]); } catch (_) {}
+          }
+          return true;
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/RadioGroup;', {
+      super: 'Landroid/widget/LinearLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/RadioGroup;', 'Landroid/widget/LinearLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setOnCheckedChangeListener(Landroid/widget/RadioGroup$OnCheckedChangeListener;)V': (self, [listener]) => { self.selectionListener = listener; if (self.view) self.view.selectionListener = listener; },
+        'getCheckedRadioButtonId()I': (self) => (self.view?.checkedId | 0),
+        'check(I)V': (self, [id], vm) => {
+          if (!self.view) return;
+          self.view.checkedId = id | 0;
+          for (const child of self.view.children || []) {
+            if ((child.id | 0) === (id | 0)) child.checked = true;
+          }
+          try { vm.invokeInterface(self.selectionListener, 'onCheckedChanged', '(Landroid/widget/RadioGroup;I)V', [self.$object ?? self, id | 0]); } catch (_) {}
+        },
+        'clearCheck()V': (self) => {
+          if (!self.view) return;
+          self.view.checkedId = -1;
+          for (const child of self.view.children || []) child.checked = false;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Spinner;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Spinner;', 'Landroid/widget/TextView;'),
