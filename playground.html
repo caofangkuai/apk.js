@@ -419,6 +419,7 @@
         <div class="toolbar-row">
           <button id="pick-btn" class="btn btn-primary" type="button">选择 APK</button>
           <button id="sample-btn" class="btn btn-ghost" type="button">运行示例</button>
+          <button id="screenshot-btn" class="btn btn-ghost" type="button" disabled>保存截图</button>
         </div>
         <input id="apk-file" type="file" accept=".apk,application/vnd.android.package-archive" />
       </section>
@@ -496,6 +497,7 @@
     const statActivities = document.getElementById('stat-activities');
     const statLogs = document.getElementById('stat-logs');
     const sampleBtn = document.getElementById('sample-btn');
+    const screenshotBtn = document.getElementById('screenshot-btn');
 
     let logCount = 0;
     let cleared = false;
@@ -544,6 +546,19 @@
       });
 
       sampleBtn && (sampleBtn.disabled = false);
+      screenshotBtn?.addEventListener('click', () => {
+        try {
+          const url = sim.capture('image/png');
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = 'apkjs-screen.png';
+          link.click();
+          setStatus('截图已保存', 'info');
+        } catch (error) {
+          setStatus('截图失败：' + error.message, 'error');
+        }
+      });
+      screenshotBtn && (screenshotBtn.disabled = false);
 
       const observer = new MutationObserver(() => {
         const kind = statusEl.dataset.kind;
