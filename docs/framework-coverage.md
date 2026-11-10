@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：350
-- 方法/构造函数键（静态统计）：3403
+- 注册的 native 类：352
+- 方法/构造函数键（静态统计）：3422
 
 ## Native 类清单
 
@@ -197,6 +197,7 @@
 | `Landroid/widget/CheckedTextView;` | registry.js |
 | `Landroid/widget/Chronometer;` | registry.js |
 | `Landroid/widget/CompoundButton;` | registry.js |
+| `Landroid/widget/DatePicker;` | registry.js |
 | `Landroid/widget/EdgeEffect;` | registry.js |
 | `Landroid/widget/EditText;` | registry.js |
 | `Landroid/widget/FrameLayout;` | registry.js |
@@ -232,6 +233,7 @@
 | `Landroid/widget/TableRow;` | registry.js |
 | `Landroid/widget/TextSwitcher;` | registry.js |
 | `Landroid/widget/TextView;` | registry.js |
+| `Landroid/widget/TimePicker;` | registry.js |
 | `Landroid/widget/Toast;` | registry.js |
 | `Landroid/widget/Toast$Length;` | registry.js |
 | `Landroid/widget/ToggleButton;` | registry.js |

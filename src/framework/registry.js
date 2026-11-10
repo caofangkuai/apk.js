@@ -4384,6 +4384,43 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/DatePicker;', {
+      super: 'Landroid/widget/FrameLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/DatePicker;', 'Landroid/widget/FrameLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setOnDateChangedListener(Landroid/widget/DatePicker$OnDateChangedListener;)V': (self, [listener]) => { self.dateListener = listener; },
+        'updateDate(III)V': (self, [year, month, day]) => { self.year = year | 0; self.month = month | 0; self.day = day | 0; },
+        'getYear()I': (self) => self.year | 0,
+        'getMonth()I': (self) => self.month | 0,
+        'getDayOfMonth()I': (self) => self.day | 0,
+        'setEnabled(Z)V': (self, [value]) => { if (self.view) self.view.enabled = !!value; },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/TimePicker;', {
+      super: 'Landroid/widget/FrameLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/TimePicker;', 'Landroid/widget/FrameLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setOnTimeChangedListener(Landroid/widget/TimePicker$OnTimeChangedListener;)V': (self, [listener]) => { self.timeListener = listener; },
+        'setCurrentHour(Ljava/lang/Integer;)V': (self, [hour]) => { self.hour = Number(hour) || 0; },
+        'setCurrentMinute(Ljava/lang/Integer;)V': (self, [minute]) => { self.minute = Number(minute) || 0; },
+        'getCurrentHour()Ljava/lang/Integer;': (self) => self.hour | 0,
+        'getCurrentMinute()Ljava/lang/Integer;': (self) => self.minute | 0,
+        'setIs24HourView(Ljava/lang/Boolean;)V': (self, [value]) => { self.is24Hour = !!value; },
+        'is24HourView()Z': (self) => (self.is24Hour ? 1 : 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Gallery;', {
       super: 'Landroid/widget/Spinner;',
       ctor: viewPeerConstructor('Landroid/widget/Gallery;', 'Landroid/widget/Spinner;'),
