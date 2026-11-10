@@ -215,6 +215,22 @@ try {
   console.log('dialog host failed:', error.message);
 }
 
+// Widget host smoke: ToggleButton / SeekBar
+try {
+  const toggle = vm.instantiate('Landroid/widget/ToggleButton;', [engine.activity]);
+  vm.invokeByName('setTextOn', '(Ljava/lang/CharSequence;)V', toggle, ['ON']);
+  vm.invokeByName('setTextOff', '(Ljava/lang/CharSequence;)V', toggle, ['OFF']);
+  vm.invokeByName('setChecked', '(Z)V', toggle, [true]);
+  const toggleText = vm.invokeByName('getText', '()Ljava/lang/CharSequence;', toggle, []);
+  const seek = vm.instantiate('Landroid/widget/SeekBar;', [engine.activity]);
+  const before = vm.invokeByName('getProgress', '()I', seek, []);
+  vm.invokeByName('performClick', '()Z', seek, []);
+  const after = vm.invokeByName('getProgress', '()I', seek, []);
+  console.log('widget hosts:', { toggleText, seekProgress: [before, after] });
+} catch (error) {
+  console.log('widget hosts failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
