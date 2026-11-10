@@ -3933,6 +3933,9 @@ function buildFrameworkDefinitions(vm) {
         'findViewById(I)Landroid/view/View;': (self, [id]) => self.contentView?.findViewById?.(id) ?? null,
         'setOnDismissListener(Landroid/content/DialogInterface$OnDismissListener;)V': (self, [listener]) => { self.dismissListener = listener; },
         'getWindow()Landroid/view/Window;': (self, _args, vm) => dialogEnsureWindow(self, vm),
+        'setOnShowListener(Landroid/content/DialogInterface$OnShowListener;)V': (self, [listener]) => { self.showListener = listener; },
+        'setOnCancelListener(Landroid/content/DialogInterface$OnCancelListener;)V': (self, [listener]) => { self.cancelListener = listener; },
+        'setOnKeyListener(Landroid/content/DialogInterface$OnKeyListener;)V': (self, [listener]) => { self.keyListener = listener; },
       },
     })
   );
@@ -3963,6 +3966,10 @@ function buildFrameworkDefinitions(vm) {
         'setPositiveButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.positiveText = jsString(text); self.positiveListener = listener; return self.$object ?? self; },
         'setNegativeButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.negativeText = jsString(text); self.negativeListener = listener; return self.$object ?? self; },
         'setCancelable(Z)Landroid/app/AlertDialog$Builder;': (self, [value]) => { self.cancelable = !!value; return self.$object ?? self; },
+        'setNeutralButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.neutralText = jsString(text); self.neutralListener = listener; return self.$object ?? self; },
+        'setView(Landroid/view/View;)Landroid/app/AlertDialog$Builder;': (self, [view]) => { self.contentView = view ?? null; return self.$object ?? self; },
+        'setIcon(I)Landroid/app/AlertDialog$Builder;': (self) => self.$object ?? self,
+        'setIcon(Landroid/graphics/drawable/Drawable;)Landroid/app/AlertDialog$Builder;': (self) => self.$object ?? self,
         'create()Landroid/app/AlertDialog;': (self, _args, vm) => {
           const dialog = vm.allocateRawObject('Landroid/app/AlertDialog;');
           dialog.$peer = { ...self, vm, showing: false };
