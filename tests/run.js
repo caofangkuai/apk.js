@@ -316,6 +316,16 @@ try {
   console.log('date/expandable smoke failed:', error.message);
 }
 
+// SearchView smoke
+try {
+  const search = vm.instantiate('Landroid/widget/SearchView;', [engine.activity]);
+  if (!search.$peer) vm.registry.getPeer(search, 'Landroid/widget/SearchView;');
+  vm.invokeByName('setQuery', '(Ljava/lang/CharSequence;Z)V', search, ['hello', false]);
+  console.log('searchview smoke:', { query: String(vm.invokeByName('getQuery', '()Ljava/lang/CharSequence;', search, [])) });
+} catch (error) {
+  console.log('searchview smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
