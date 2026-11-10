@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：343
-- 方法/构造函数键（静态统计）：3361
+- 注册的 native 类：346
+- 方法/构造函数键（静态统计）：3375
 
 ## Native 类清单
 
@@ -202,6 +202,7 @@
 | `Landroid/widget/FrameLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/GridLayout;` | registry.js |
 | `Landroid/widget/HorizontalScrollView;` | registry.js |
+| `Landroid/widget/ImageSwitcher;` | registry.js |
 | `Landroid/widget/ImageView;` | registry.js |
 | `Landroid/widget/LinearLayout;` | registry.js |
 | `Landroid/widget/LinearLayout$LayoutParams;` | registry.js |
@@ -225,6 +226,7 @@
 | `Landroid/widget/Switch;` | registry.js |
 | `Landroid/widget/TableLayout;` | registry.js |
 | `Landroid/widget/TableRow;` | registry.js |
+| `Landroid/widget/TextSwitcher;` | registry.js |
 | `Landroid/widget/TextView;` | registry.js |
 | `Landroid/widget/Toast;` | registry.js |
 | `Landroid/widget/Toast$Length;` | registry.js |
@@ -232,6 +234,7 @@
 | `Landroid/widget/ViewAnimator;` | registry.js |
 | `Landroid/widget/ViewFlipper;` | registry.js |
 | `Landroid/widget/ViewStub;` | registry.js |
+| `Landroid/widget/ViewSwitcher;` | registry.js |
 | `Ljava/io/BufferedReader;` | java-core.js |
 | `Ljava/io/Closeable;` | java-core.js |
 | `Ljava/io/File;` | java-core.js |

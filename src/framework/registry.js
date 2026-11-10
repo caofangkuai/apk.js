@@ -3564,6 +3564,50 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ViewSwitcher;', {
+      super: 'Landroid/widget/ViewAnimator;',
+      ctor: viewPeerConstructor('Landroid/widget/ViewSwitcher;', 'Landroid/widget/ViewAnimator;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setFactory(Landroid/widget/ViewSwitcher$ViewFactory;)V': (self, [factory]) => { self.factory = factory; },
+        'getNextView()Landroid/view/View;': (self, _args, vm) => {
+          const view = self.view?.children?.[((self.displayedChild | 0) + 1) % Math.max(1, self.view.children.length)];
+          return view ? viewObject(vm, view) : null;
+        },
+        'reset()V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/TextSwitcher;', {
+      super: 'Landroid/widget/ViewSwitcher;',
+      ctor: viewPeerConstructor('Landroid/widget/TextSwitcher;', 'Landroid/widget/ViewSwitcher;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.children?.[self.displayedChild | 0]?.setText?.(jsString(text)); },
+        'setCurrentText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.children?.[self.displayedChild | 0]?.setText?.(jsString(text)); },
+        'getText()Ljava/lang/CharSequence;': (self) => self.view?.children?.[self.displayedChild | 0]?.getText?.() ?? '',
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/ImageSwitcher;', {
+      super: 'Landroid/widget/ViewSwitcher;',
+      ctor: viewPeerConstructor('Landroid/widget/ImageSwitcher;', 'Landroid/widget/ViewSwitcher;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setImageResource(I)V': (self, [resId]) => { self.view?.children?.[self.displayedChild | 0]?.setImageResource?.(resId >>> 0); },
+        'setImageDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => { self.view?.children?.[self.displayedChild | 0]?.setImageDrawable?.(drawable); },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ViewAnimator;', {
       super: 'Landroid/widget/FrameLayout;',
       ctor: viewPeerConstructor('Landroid/widget/ViewAnimator;', 'Landroid/widget/FrameLayout;'),
