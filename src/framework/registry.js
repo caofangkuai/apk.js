@@ -4382,6 +4382,24 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/GridView;', {
+      super: 'Landroid/widget/ListView;',
+      ctor: viewPeerConstructor('Landroid/widget/GridView;', 'Landroid/widget/ListView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setNumColumns(I)V': (self, [columns]) => { self.numColumns = columns | 0; if (self.view) self.view.numColumns = columns | 0; self.view?.requestLayout?.(); },
+        'getNumColumns()I': (self) => self.numColumns | 0,
+        'setHorizontalSpacing(I)V': (self, [value]) => { self.horizontalSpacing = value | 0; },
+        'setVerticalSpacing(I)V': (self, [value]) => { self.verticalSpacing = value | 0; },
+        'setStretchMode(I)V': (self, [value]) => { self.stretchMode = value | 0; },
+        'getStretchMode()I': (self) => self.stretchMode | 0,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ImageButton;', {
       super: 'Landroid/widget/ImageView;',
       ctor: viewPeerConstructor('Landroid/widget/ImageButton;', 'Landroid/widget/ImageView;'),
