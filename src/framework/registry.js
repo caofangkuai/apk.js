@@ -3564,6 +3564,18 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/Space;', {
+      super: 'Landroid/view/View;',
+      ctor: viewPeerConstructor('Landroid/widget/Space;', 'Landroid/view/View;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ViewStub;', {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/ViewStub;'),
