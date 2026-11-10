@@ -81,7 +81,17 @@ export class ApkSimulator {
   }
 
   async loadFromUrl(url, options = {}) {
-    const response = await fetch(url, options);
+    const controller = options.signal ? null : new AbortController();
+    const timer = controller ? setTimeout(() => controller.abort(), 60000) : null;
+    let response;
+    try {
+      response = await fetch(url, { ...options, signal: options.signal || controller.signal });
+    } catch (error) {
+      const reason = error?.name === 'AbortError' ? '请求超时' : '网络错误或 CORS 限制';
+      throw new Error(`下载 APK 失败：${reason}`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     if (!response.ok) throw new Error(`下载 APK 失败：HTTP ${response.status}`);
     const buffer = await response.arrayBuffer();
     this.assertSize(buffer.byteLength);
