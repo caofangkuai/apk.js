@@ -2991,6 +2991,12 @@ function buildFrameworkDefinitions(vm) {
         vm?.requestLayout?.();
       },
       'setContentView(I)V': (self, [layoutId], vm) => {
+        if (self.dialog) {
+          const inflater = new LayoutInflater(vm.contextObject);
+          inflater.vm = vm;
+          self.dialog.contentView = inflater.inflate(layoutId >>> 0);
+          return;
+        }
         if (!self.window || !vm?.resources) return;
         const view = vm.resources.getLayout?.(layoutId >>> 0, vm.contextObject);
         if (!view) return;
