@@ -231,6 +231,22 @@ try {
   console.log('widget hosts failed:', error.message);
 }
 
+// RadioGroup smoke
+try {
+  const group = vm.instantiate('Landroid/widget/RadioGroup;', [engine.activity]);
+  const first = vm.instantiate('Landroid/widget/RadioButton;', [engine.activity]);
+  const second = vm.instantiate('Landroid/widget/RadioButton;', [engine.activity]);
+  vm.invokeByName('setId', '(I)V', first, [101]);
+  vm.invokeByName('setId', '(I)V', second, [102]);
+  vm.invokeByName('addView', '(Landroid/view/View;)V', group, [first]);
+  vm.invokeByName('addView', '(Landroid/view/View;)V', group, [second]);
+  vm.invokeByName('check', '(I)V', group, [102]);
+  const checked = vm.invokeByName('getCheckedRadioButtonId', '()I', group, []);
+  console.log('radio group:', { checked });
+} catch (error) {
+  console.log('radio group failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
