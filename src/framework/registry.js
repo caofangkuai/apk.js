@@ -210,6 +210,12 @@ function runShellCommand(command) {
     const value = readFsText(target);
     return value ?? '';
   }
+  if (text === 'mount' || text.startsWith('mount ')) {
+    return readFsText('/proc/mounts').trim().split('\n').map((line) => {
+      const [device, mountPoint, fsType, options] = line.split(/\s+/);
+      return `${device} on ${mountPoint} type ${fsType} (${options})`;
+    }).join('\n');
+  }
   if (text.startsWith('getprop')) {
     const key = text.replace(/^getprop\s*/, '').replace(/["']/g, '').trim();
     if (!key) {
