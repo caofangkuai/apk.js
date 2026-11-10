@@ -66,6 +66,12 @@ const tapButton = async (needle) => {
   await tap(x, y);
 };
 await pump(400);
+const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+let painted = 0;
+for (let i = 0; i < pixels.length; i += 4) {
+  if (pixels[i] < 245 || pixels[i + 1] < 245 || pixels[i + 2] < 245) painted++;
+}
+assert.ok(painted > 1000, 'Activity 画面几乎为空');
 await tapButton('点我执行 DEX 逻辑');
 assert.ok(text().includes('已点击 1 次'), '触摸未触发点击回调');
 assert.ok(engine.screen.overlays.length > 0, 'Toast overlay 未显示');
