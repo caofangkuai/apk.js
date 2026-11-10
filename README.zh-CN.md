@@ -188,6 +188,7 @@ npm run check
 
 # 一次跑完上面两项
 npm run diagnose -- /path/to/app.apk
+npm run test:ui
 npm run test:all
 ```
 
