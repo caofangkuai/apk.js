@@ -1485,3 +1485,21 @@ export class TimePicker extends View {
     ctx.restore();
   }
 }
+
+export class DatePicker extends TextView {
+  constructor(context = null) {
+    super(context);
+    this.year = 1970;
+    this.month = 0;
+    this.day = 1;
+    this.setText('1970-01-01');
+  }
+
+  setDate(year, month, day) {
+    this.year = Number(year) || 0;
+    this.month = Number(month) || 0;
+    this.day = Number(day) || 1;
+    this.setText(`${this.year}-${String(this.month + 1).padStart(2, '0')}-${String(this.day).padStart(2, '0')}`);
+    this.invalidate?.();
+  }
+}
