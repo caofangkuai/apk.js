@@ -4199,6 +4199,28 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ToggleButton;', {
+      super: 'Landroid/widget/CompoundButton;',
+      ctor: viewPeerConstructor('Landroid/widget/ToggleButton;', 'Landroid/widget/CompoundButton;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setTextOn(Ljava/lang/CharSequence;)V': (self, [text]) => { self.textOn = jsString(text); self.refreshToggle?.(); },
+        'setTextOff(Ljava/lang/CharSequence;)V': (self, [text]) => { self.textOff = jsString(text); self.refreshToggle?.(); },
+        'getTextOn()Ljava/lang/CharSequence;': (self) => self.textOn ?? 'ON',
+        'getTextOff()Ljava/lang/CharSequence;': (self) => self.textOff ?? 'OFF',
+        'setChecked(Z)V': (self, [value]) => {
+          self.view.checked = !!value;
+          self.view.setText?.(self.view.checked ? (self.textOn ?? 'ON') : (self.textOff ?? 'OFF'));
+          self.view.invalidate?.();
+        },
+        'isChecked()Z': (self) => (self.view?.checked ? 1 : 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/CheckBox;', {
       super: 'Landroid/widget/CompoundButton;',
       ctor: viewPeerConstructor('Landroid/widget/CheckBox;', 'Landroid/widget/CompoundButton;'),
