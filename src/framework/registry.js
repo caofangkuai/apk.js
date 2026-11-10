@@ -550,6 +550,11 @@ function dialogShow(peer) {
       if (inside) {
         for (const rect of peer.itemRects || []) {
           if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
+            if (typeof peer.onItemSelected === 'function') {
+              dialogDismiss(peer);
+              peer.onItemSelected(rect.index);
+              return true;
+            }
             if (peer.choiceMode === 'multi') {
               peer.multiChecked[rect.index] = !peer.multiChecked[rect.index];
               try { peer.vm.invokeInterface(peer.multiListener, 'onClick', '(Landroid/content/DialogInterface;IZ)V', [peer.dialogObject || peer, rect.index, peer.multiChecked[rect.index]]); } catch (_) {}
@@ -4161,13 +4166,26 @@ function buildFrameworkDefinitions(vm) {
         'performClick()Z': (self, _args, vm) => {
           const count = self.count | 0;
           if (count <= 0) return false;
-          self.selectedPosition = ((self.selectedPosition | 0) + 1) % count;
-          try {
-            const item = vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [self.selectedPosition]);
-            self.view?.setText?.(jsString(item));
-            self.view?.invalidate?.();
-            vm.invokeInterface(self.selectionListener, 'onItemSelected', '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V', [self.$object ?? self, null, self.selectedPosition, BigInt(self.selectedPosition)]);
-          } catch (_) {}
+          const items = [];
+          for (let index = 0; index < count; index += 1) {
+            try { items.push(jsString(vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [index]))); } catch (_) { items.push(String(index)); }
+          }
+          const dialogPeer = {
+            vm,
+            title: self.hint ?? '',
+            items,
+            cancelable: true,
+            onItemSelected: (index) => {
+              self.selectedPosition = index | 0;
+              try {
+                const item = vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [index]);
+                self.view?.setText?.(jsString(item));
+                self.view?.invalidate?.();
+                vm.invokeInterface(self.selectionListener, 'onItemSelected', '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V', [self.$object ?? self, null, index, BigInt(index)]);
+              } catch (_) {}
+            },
+          };
+          dialogShow(dialogPeer);
           return true;
         },
       },
