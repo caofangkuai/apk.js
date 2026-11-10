@@ -60,6 +60,16 @@ if (screen?.decorView) {
   screen.render();
 }
 
+const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+let blankSamples = 0;
+const totalSamples = canvas.width * canvas.height;
+for (let i = 0; i < imageData.length; i += 4) {
+  if (imageData[i] > 245 && imageData[i + 1] > 245 && imageData[i + 2] > 245) blankSamples++;
+}
+if (blankSamples / totalSamples > 0.995) {
+  console.log('WARN 画面接近空白，检查 Activity 启动或渲染链路');
+}
+
 const outputPath = path.join(outputDir, `${outputName}.png`);
 fs.writeFileSync(outputPath, canvas.toBuffer('image/png'));
 console.log(`已生成 ${path.relative(root, outputPath)}`);
