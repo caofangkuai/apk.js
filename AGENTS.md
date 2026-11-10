@@ -31,7 +31,10 @@ npm run check
 # Drawable / 绘制像素级回归（node-canvas）
 npm run test:drawables
 
-# 全部回归一起跑（test + check + test:parse + test:drawables）
+# 检查 native 类重复注册
+npm run check:duplicates
+
+# 全部回归一起跑（coverage + duplicates + test + parse + zip + listview + drawables）
 npm run test:all
 
 
