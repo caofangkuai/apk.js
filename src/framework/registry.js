@@ -4384,6 +4384,25 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ExpandableListView;', {
+      super: 'Landroid/widget/ListView;',
+      ctor: viewPeerConstructor('Landroid/widget/ExpandableListView;', 'Landroid/widget/ListView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setAdapter(Landroid/widget/ExpandableListAdapter;)V': (self, [adapter]) => { self.expandableAdapter = adapter ?? null; },
+        'getExpandableListAdapter()Landroid/widget/ExpandableListAdapter;': (self) => self.expandableAdapter ?? null,
+        'expandGroup(I)Z': (self, [group]) => { if (!self.expandedGroups) self.expandedGroups = new Set(); self.expandedGroups.add(group | 0); return true; },
+        'collapseGroup(I)Z': (self, [group]) => { self.expandedGroups?.delete(group | 0); return true; },
+        'isGroupExpanded(I)Z': (self, [group]) => (self.expandedGroups?.has(group | 0) ? 1 : 0),
+        'setOnGroupClickListener(Landroid/widget/ExpandableListView$OnGroupClickListener;)V': (self, [listener]) => { self.groupClickListener = listener; },
+        'setOnChildClickListener(Landroid/widget/ExpandableListView$OnChildClickListener;)V': (self, [listener]) => { self.childClickListener = listener; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/CalendarView;', {
       super: 'Landroid/widget/FrameLayout;',
       ctor: viewPeerConstructor('Landroid/widget/CalendarView;', 'Landroid/widget/FrameLayout;'),

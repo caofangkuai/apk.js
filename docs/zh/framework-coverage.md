@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：353
-- 方法/构造函数键（静态统计）：3431
+- 注册的 native 类：354
+- 方法/构造函数键（静态统计）：3441
 
 ## Native 类清单
 
@@ -201,6 +201,7 @@
 | `Landroid/widget/DatePicker;` | registry.js |
 | `Landroid/widget/EdgeEffect;` | registry.js |
 | `Landroid/widget/EditText;` | registry.js |
+| `Landroid/widget/ExpandableListView;` | registry.js |
 | `Landroid/widget/FrameLayout;` | registry.js |
 | `Landroid/widget/FrameLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/Gallery;` | registry.js |
