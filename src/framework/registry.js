@@ -4382,6 +4382,20 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/Gallery;', {
+      super: 'Landroid/widget/Spinner;',
+      ctor: viewPeerConstructor('Landroid/widget/Gallery;', 'Landroid/widget/Spinner;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setSpacing(I)V': (self, [value]) => { self.spacing = value | 0; },
+        'setUnselectedAlpha(F)V': (self, [value]) => { self.unselectedAlpha = Number(value) || 0; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/GridView;', {
       super: 'Landroid/widget/ListView;',
       ctor: viewPeerConstructor('Landroid/widget/GridView;', 'Landroid/widget/ListView;'),
