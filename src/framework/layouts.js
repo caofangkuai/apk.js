@@ -1337,6 +1337,24 @@ export class ListView extends ViewGroup {
     return item;
   }
 
+  measureLazyHeights(end, width) {
+    const vm = this.$vm || this.vm;
+    if (!vm || !this.adapter) return;
+    const target = Math.min(end | 0, this.$itemCount | 0);
+    for (let index = 0; index < target; index += 1) {
+      if (this.$lazyHeights.has(index)) continue;
+      try {
+        const object = vm.invokeByName('getView', '(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;', this.adapter, [index, null, this.$javaObject || null]);
+        const view = object?.$view || object?.$peer?.view || null;
+        if (!view) continue;
+        view.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(this.$rowHeight, MeasureSpec.AT_MOST));
+        const measured = view.getMeasuredHeight?.() || this.$rowHeight;
+        this.$lazyHeights.set(index, measured);
+        this.$lazyHeightDelta += measured - this.$rowHeight;
+      } catch { /* 单行测量失败时保留估算 */ }
+    }
+  }
+
   lazyOffset(index, rowHeight) {
     const step = Math.max(1, rowHeight + (this.dividerHeight | 0));
     let total = index * step;
@@ -1359,6 +1377,8 @@ export class ListView extends ViewGroup {
       }
     }
     const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
+    const estimatedStart = Math.max(0, Math.floor(((this.scrollY | 0) - viewportHeight) / rowHeight) + 1);
+    if (estimatedStart > 0) this.measureLazyHeights(estimatedStart, width);
     const top = Math.max(0, (this.scrollY | 0) - viewportHeight);
     const bottom = (this.scrollY | 0) + viewportHeight * 2;
     let start = Math.max(0, Math.min((this.$itemCount | 0) - 1, Math.floor(top / rowHeight) - 1));
