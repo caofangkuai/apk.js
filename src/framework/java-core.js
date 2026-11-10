@@ -5190,6 +5190,15 @@ JAVA_CORE_CLASSES['Ljava/io/RandomAccessFile;'] = nativeDef('Ljava/io/RandomAcce
     'read([BII)I': (self, [buffer, offset, length]) => readIntoBuffer(self, buffer, offset | 0, length | 0),
     'readFully([B)V': (self, [buffer]) => { readIntoBuffer(self, buffer); },
     'readFully([BII)V': (self, [buffer, offset, length]) => { readIntoBuffer(self, buffer, offset | 0, length | 0); },
+    'readLine()Ljava/lang/String;': (self) => {
+      if (self.cursor >= self.data.length) return null;
+      let end = self.cursor;
+      while (end < self.data.length && self.data[end] !== 0x0a && self.data[end] !== 0x0d) end += 1;
+      const line = utf8Decode(self.data.subarray(self.cursor, end));
+      while (end < self.data.length && (self.data[end] === 0x0a || self.data[end] === 0x0d)) end += 1;
+      self.cursor = end;
+      return line;
+    },
     'write(I)V': (self, [byte]) => { writeRandom(self, self.cursor, Uint8Array.of(byte & 0xff)); self.cursor += 1; },
     'write([B)V': (self, [buffer]) => { const data = Uint8Array.from(buffer?.$data ?? buffer ?? []); writeRandom(self, self.cursor, data); self.cursor += data.length; },
     'write([BII)V': (self, [buffer, offset, length]) => {
