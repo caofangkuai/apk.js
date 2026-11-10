@@ -4028,6 +4028,40 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/app/ProgressDialog;', {
+      super: 'Landroid/app/AlertDialog;',
+      ctor: class ProgressDialogPeer { constructor() { this.showing = false; this.cancelable = true; this.indeterminate = true; } },
+      staticMethods: {
+        'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/app/ProgressDialog;': (_self, [context, title, message], vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
+          dialog.$peer = { vm, showing: false, cancelable: true, title: jsString(title), message: jsString(message), dialogObject: dialog };
+          dialogShow(dialog.$peer);
+          return dialog;
+        },
+        'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Z)Landroid/app/ProgressDialog;': (_self, [context, title, message, indeterminate], vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
+          dialog.$peer = { vm, showing: false, cancelable: true, title: jsString(title), message: jsString(message), indeterminate: !!indeterminate, dialogObject: dialog };
+          dialogShow(dialog.$peer);
+          return dialog;
+        },
+      },
+      methods: {
+        '<init>(Landroid/content/Context;)V': (self) => { self.showing = false; self.cancelable = true; },
+        'show()V': (self, _args, vm) => { self.vm = vm; self.dialogObject = self.$object ?? self; dialogShow(self); },
+        'dismiss()V': (self) => dialogDismiss(self),
+        'isShowing()Z': (self) => (self.showing ? 1 : 0),
+        'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => { self.title = jsString(title); },
+        'setMessage(Ljava/lang/CharSequence;)V': (self, [message]) => { self.message = jsString(message); },
+        'setIndeterminate(Z)V': (self, [value]) => { self.indeterminate = !!value; },
+        'setProgressStyle(I)V': () => undefined,
+        'setMax(I)V': (self, [max]) => { self.max = max | 0; },
+        'setProgress(I)V': (self, [value]) => { self.progress = value | 0; },
+        'getProgress()I': (self) => self.progress | 0,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/app/AlertDialog$Builder;', {
       super: 'Ljava/lang/Object;',
       ctor: class AlertDialogBuilderPeer { constructor() { this.cancelable = true; } },
