@@ -271,6 +271,7 @@ export class EmulatorEngine {
       maxFrames: this.options.maxFrames || 512,
     });
     this.vm = vm;
+    vm.nightMode = this.options.nightMode ?? null;
     vm.apk = apk;
     apk.invalidate = () => this.screen?.invalidate?.();
     vm.interpreter = new DexInterpreter(vm);

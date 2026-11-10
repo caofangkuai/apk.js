@@ -8070,7 +8070,9 @@ function themeStore(vm) {
   if (!vm) return DEFAULT_THEME_ATTRIBUTES;
   if (!vm.themeAttributes) {
     const density = vm.resources?.displayMetrics?.density || 1;
-    const night = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+    const night = vm.nightMode !== null && vm.nightMode !== undefined
+      ? !!vm.nightMode
+      : (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
     const colors = night ? {
       colorSurface: 0xff121212 >>> 0,
       colorOnSurface: 0xffffffff >>> 0,

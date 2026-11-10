@@ -5,6 +5,7 @@ const DEFAULT_DEVICE = {
   height: 640,
   dpr: undefined,
   style: 'default',
+  nightMode: null,
   maxApkSize: 50 * 1024 * 1024,
 };
 
@@ -114,6 +115,7 @@ export class ApkSimulator {
       height: this.device.height,
       dpr: this.device.dpr,
       style: this.device.style,
+      nightMode: this.device.nightMode,
       onLog: (entry) => this.options.onLog?.(entry),
       onFinished: () => {
         this.running = false;

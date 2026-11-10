@@ -43,7 +43,7 @@ canvas.removeEventListener = () => {};
 canvas.setPointerCapture = () => {};
 canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width, height });
 
-const engine = new EmulatorEngine({ onLog: () => {}, width, height, density });
+const engine = new EmulatorEngine({ onLog: () => {}, width, height, density, nightMode: process.env.RENDER_NIGHT === '1' });
 engine.attachCanvas(canvas);
 
 const apk = await loadApkFiles(await JSZip.loadAsync(fs.readFileSync(apkPath)));
