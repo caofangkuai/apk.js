@@ -1075,6 +1075,9 @@ export class ListView extends ViewGroup {
     this.$touchStartScroll = 0;
     this.$dragging = false;
     this.$selectionPadding = { left: 0, top: 0, right: 0, bottom: 0 };
+    this.$lazy = false;
+    this.$lazyViews = new Map();
+    this.$rowHeight = 0;
   }
 
   setDivider(drawable) {
@@ -1246,6 +1249,16 @@ export class ListView extends ViewGroup {
 
   ensureItems() {
     const count = this.adapterCount();
+    if (count > 300) {
+      if (!this.$lazy || this.$itemCount !== count) {
+        this.$lazy = true;
+        this.$itemCount = count;
+        this.$lazyViews = new Map();
+        this.$rowHeight = Math.round(48 * this.getDensity());
+      }
+      return;
+    }
+    if (this.$lazy) { this.$lazy = false; this.$lazyViews = new Map(); }
     const version = this.adapter?.$dirty | 0;
     if (count === this.$itemCount && this.$items.length === count && version === (this.$adapterVersion | 0)) return;
     const previous = this.$items || [];
@@ -1295,12 +1308,57 @@ export class ListView extends ViewGroup {
     return Math.max(0, this.$items.length - 1);
   }
 
+  lazyItem(position, width) {
+    const vm = this.$vm || this.vm;
+    if (!vm || !this.adapter) return null;
+    let item = this.$lazyViews.get(position);
+    if (item) return item;
+    const parent = this.$javaObject || null;
+    try {
+      const object = vm.invokeByName('getView', '(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;', this.adapter, [position, null, parent]);
+      item = object?.$view || object?.$peer?.view || null;
+    } catch {
+      item = null;
+    }
+    if (!item) return null;
+    item.parent = this;
+    item.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(this.$rowHeight, MeasureSpec.AT_MOST));
+    this.$lazyViews.set(position, item);
+    return item;
+  }
+
+  updateLazyWindow(width, viewportHeight) {
+    const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
+    const top = (this.scrollY | 0) - viewportHeight;
+    const bottom = (this.scrollY | 0) + viewportHeight * 2;
+    const start = Math.max(0, Math.floor(top / rowHeight) - 1);
+    const end = Math.min(this.$itemCount | 0, Math.ceil(bottom / rowHeight) + 1);
+    const visible = [];
+    for (let index = start; index < end; index += 1) {
+      const item = this.lazyItem(index, width);
+      if (!item) continue;
+      const itemTop = index * rowHeight;
+      item.layout(this.paddingLeft, itemTop, this.paddingLeft + width, itemTop + (item.getMeasuredHeight() || this.$rowHeight));
+      visible.push(item);
+    }
+    this.$items = visible;
+    this.children = visible;
+  }
+
   onMeasure(widthSpec, heightSpec) {
     this.ensureItems();
     const widthMode = MeasureSpec.getMode(widthSpec);
     const heightMode = MeasureSpec.getMode(heightSpec);
     let maxWidth = 0;
     let totalHeight = 0;
+    if (this.$lazy) {
+      const widthSizeLazy = widthMode === MeasureSpec.UNSPECIFIED ? this.getWidth() || 0 : MeasureSpec.getSize(widthSpec);
+      const viewport = heightMode === MeasureSpec.UNSPECIFIED ? (this.$rowHeight | 0) * 8 : MeasureSpec.getSize(heightSpec);
+      this.$contentHeight = (this.$itemCount | 0) * ((this.$rowHeight | 0) + (this.dividerHeight | 0));
+      this.updateLazyWindow(Math.max(0, widthSizeLazy - this.paddingLeft - this.paddingRight), Math.max(1, viewport));
+      this.setMeasuredDimension(resolveSize(widthSizeLazy, widthSpec), resolveSize(this.$contentHeight, heightSpec));
+      return;
+    }
     const widthSize = widthMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(widthSpec);
     const childWidthSpec = widthMode === MeasureSpec.UNSPECIFIED
       ? MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
@@ -1324,6 +1382,13 @@ export class ListView extends ViewGroup {
   }
 
   onLayout(changed, left, top, right, bottom) {
+    if (this.$lazy) {
+      this.$contentHeight = (this.$itemCount | 0) * ((this.$rowHeight | 0) + (this.dividerHeight | 0));
+      this.scrollRange = Math.max(0, this.$contentHeight - (bottom - top));
+      this.scrollY = Math.max(0, Math.min(this.scrollRange, this.scrollY | 0));
+      this.updateLazyWindow(Math.max(0, right - left - this.paddingLeft - this.paddingRight), Math.max(1, bottom - top));
+      return;
+    }
     let y = this.paddingTop;
     for (const item of this.$items) {
       if (isGone(item)) continue;
@@ -1345,6 +1410,12 @@ export class ListView extends ViewGroup {
   }
 
   itemIndexAt(x, y) {
+    if (this.$lazy) {
+      const localY = (y - this.paddingTop) + (this.scrollY | 0);
+      const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
+      const index = Math.floor(localY / rowHeight);
+      return index >= 0 && index < (this.$itemCount | 0) ? index : -1;
+    }
     const localY = y - this.paddingTop;
     let cursor = 0;
     for (let i = 0; i < this.$items.length; i += 1) {
@@ -1359,7 +1430,7 @@ export class ListView extends ViewGroup {
 
   performItemClick(position) {
     const vm = this.$vm || this.vm;
-    const item = this.$items[position | 0];
+    const item = this.$lazy ? this.lazyItem(position | 0, Math.max(1, this.getWidth() - this.paddingLeft - this.paddingRight)) : this.$items[position | 0];
     if (!vm || !item) return false;
     const listener = this.$onItemClickListener;
     if (listener) {
