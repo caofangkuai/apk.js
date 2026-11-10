@@ -4696,6 +4696,17 @@ function seedHardwareFs() {
     `SwapFree:        ${sodiumSwapTotalKb} kB`,
     '',
   ].join('\n'));
+  const thermalZones = [
+    ['cpu-0-0', 42000], ['cpu-1-0', 41500], ['gpu-0-0', 38000],
+    ['battery', 30000], ['xo-therm', 36000], ['quiet-therm', 34000],
+  ];
+  thermalZones.forEach(([type, temp], index) => {
+    const base = '/sys/class/thermal/thermal_zone' + index;
+    write(base + '/type', type + '\n');
+    write(base + '/temp', String(temp));
+    write('/sys/devices/virtual/thermal/thermal_zone' + index + '/temp', String(temp));
+  });
+  write('/sys/module/msm_thermal/sensor_info', thermalZones.map(([type, temp]) => type + ':' + temp).join(' ') + '\n');
   write('/sys/class/power_supply/battery/manufacturer', 'apk.js\n');
   write('/sys/class/power_supply/battery/batt_capacity_max', '4500000\n');
   write('/sys/class/power_supply/battery/capacity', '87\n');
