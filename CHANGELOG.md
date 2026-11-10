@@ -37,6 +37,12 @@
 
 - Node 基准（DeviceInfoHW，360×640）：启动约 135ms，渲染约 20.9ms/帧、47.9 FPS。
 
+### 修复
+
+- Toast 不再吞掉后续触摸，连续点击恢复正常；Toast 文字按屏幕密度缩放。
+- `Activity.finish()` 恢复上一个 Activity 的 DecorView 与内容视图。
+- `String.format` 支持 `%.Nf` 精度。
+
 ### Tests
 
 - 新增 API 校验：URL 协议、APK 大小、截图环境错误。
