@@ -4612,6 +4612,7 @@ function vmShowChild(self, index) {
         'remove(Ljava/lang/Object;)V': (self, [value]) => { const i = self.objects.indexOf(value); if (i >= 0) self.objects.splice(i, 1); self.$dirty++; },
         'clear()V': (self) => { self.objects = []; self.$dirty++; },
         'getPosition(Ljava/lang/Object;)I': (self, [value]) => self.objects.indexOf(value),
+        'getFilter()Landroid/widget/Filter;': () => null,
         'notifyDataSetChanged()V': (self) => { self.$dirty++; },
         'setNotifyOnChange(Z)V': () => undefined,
       },
