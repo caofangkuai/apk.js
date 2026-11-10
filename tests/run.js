@@ -247,6 +247,24 @@ try {
   console.log('radio group failed:', error.message);
 }
 
+// Spinner dropdown smoke
+try {
+  const array = vm.newArray('[Ljava/lang/Object;', 2, ['A', 'B']);
+  const adapter = vm.instantiate('Landroid/widget/ArrayAdapter;', [engine.activity, 0, array]);
+  if (!adapter.$peer) vm.registry.getPeer(adapter, 'Landroid/widget/ArrayAdapter;');
+  vm.invokeByName('<init>', '(Landroid/content/Context;I[Ljava/lang/Object;)V', adapter, [engine.activity, 0, array]);
+  const spinner = vm.instantiate('Landroid/widget/Spinner;', [engine.activity]);
+  if (!spinner.$peer) vm.registry.getPeer(spinner, 'Landroid/widget/Spinner;');
+  vm.invokeByName('setAdapter', '(Landroid/widget/SpinnerAdapter;)V', spinner, [adapter]);
+  const before = (engine.screen.overlays || []).length;
+  vm.invokeByName('performClick', '()Z', spinner, []);
+  const opened = (engine.screen.overlays || []).length > before;
+  console.log('spinner smoke:', { count: vm.invokeByName('getCount', '()I', spinner, []), opened });
+  if (opened) engine.screen.removeOverlay(engine.screen.overlays[engine.screen.overlays.length - 1]);
+} catch (error) {
+  console.log('spinner smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
