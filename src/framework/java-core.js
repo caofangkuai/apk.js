@@ -4698,6 +4698,34 @@ function seedHardwareFs() {
   ].join('\n'));
   write('/sys/class/power_supply/battery/manufacturer', 'apk.js\n');
   write('/sys/class/power_supply/battery/batt_capacity_max', '4500000\n');
+  write('/sys/class/power_supply/battery/capacity', '87\n');
+  write('/sys/class/power_supply/battery/voltage_now', '4200000\n');
+  write('/sys/class/power_supply/battery/current_now', '-420000\n');
+  write('/sys/class/power_supply/battery/current_avg', '-400000\n');
+  write('/sys/class/power_supply/battery/temp', '300\n');
+  write('/sys/class/power_supply/battery/status', 'Charging\n');
+  write('/sys/class/power_supply/battery/health', 'Good\n');
+  write('/sys/class/power_supply/battery/technology', 'Li-ion\n');
+  write('/sys/class/power_supply/battery/present', '1\n');
+  write('/sys/class/power_supply/battery/online', '1\n');
+  write('/sys/class/power_supply/battery/charge_counter', '3200000\n');
+  write('/sys/class/power_supply/battery/charge_full', '4500000\n');
+  write('/sys/class/power_supply/battery/cycle_count', '120\n');
+  write('/sys/class/power_supply/battery/uevent', [
+    'POWER_SUPPLY_NAME=battery',
+    'POWER_SUPPLY_STATUS=Charging',
+    'POWER_SUPPLY_PRESENT=1',
+    'POWER_SUPPLY_TECHNOLOGY=Li-ion',
+    'POWER_SUPPLY_CYCLE_COUNT=120',
+    'POWER_SUPPLY_VOLTAGE_MIN_DESIGN=4200000',
+    'POWER_SUPPLY_VOLTAGE_NOW=4200000',
+    'POWER_SUPPLY_CURRENT_NOW=-420000',
+    'POWER_SUPPLY_CHARGE_COUNTER=3200000',
+    'POWER_SUPPLY_CAPACITY=87',
+    'POWER_SUPPLY_TEMP=300',
+    'POWER_SUPPLY_HEALTH=Good',
+    '',
+  ].join('\n'));
   write('/sys/class/sensors/accelerometer_sensor/name', identity.sensorAccel + '\n');
   write('/sys/class/sensors/magnetic_sensor/name', identity.sensorMagn + '\n');
   write('/sys/class/sensors/acc_sensor/info', identity.sensorAccel + '\n');
