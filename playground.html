@@ -494,6 +494,7 @@
     const logEl = document.getElementById('log');
     const runtimeNote = document.getElementById('runtime-note');
     const statPackage = document.getElementById('stat-package');
+    const statResolution = document.getElementById('stat-resolution');
     const statActivities = document.getElementById('stat-activities');
     const statLogs = document.getElementById('stat-logs');
     const sampleBtn = document.getElementById('sample-btn');
@@ -513,6 +514,7 @@
     const syncVmStats = (sim) => {
       const vm = sim?.vm;
       statPackage.textContent = vm?.packageName || '—';
+      if (statResolution) statResolution.textContent = `${sim?.device?.width || 360}×${sim?.device?.height || 640}`;
       const count = vm?.activityStack?.length;
       statActivities.textContent = Number.isFinite(count) ? String(count) : '—';
       runtimeNote.textContent = sim?.running ? '运行中' : '已停止';
