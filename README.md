@@ -187,6 +187,7 @@ npm test
 npm run check
 
 # All of the above
+npm run diagnose -- /path/to/app.apk
 npm run test:all
 ```
 
