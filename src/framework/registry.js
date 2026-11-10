@@ -3701,6 +3701,26 @@ function vmShowChild(self, index) {
 }
 
   defs.push(
+    nativeDef('Landroid/widget/TextClock;', {
+      super: 'Landroid/widget/TextView;',
+      ctor: viewPeerConstructor('Landroid/widget/TextClock;', 'Landroid/widget/TextView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setFormat12Hour(Ljava/lang/CharSequence;)V': (self, [format]) => { self.format12 = jsString(format); },
+        'setFormat24Hour(Ljava/lang/CharSequence;)V': (self, [format]) => { self.format24 = jsString(format); },
+        'getFormat12Hour()Ljava/lang/CharSequence;': (self) => self.format12 ?? 'h:mm a',
+        'getFormat24Hour()Ljava/lang/CharSequence;': (self) => self.format24 ?? 'H:mm',
+        'setTimeZone(Ljava/lang/String;)V': (self, [zone]) => { self.timeZone = jsString(zone); },
+        'getTimeZone()Ljava/lang/String;': (self) => self.timeZone ?? '',
+        'is24HourModeEnabled()Z': () => 0,
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { if (self.view) self.view.setText?.(jsString(text)); },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Chronometer;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Chronometer;', 'Landroid/widget/TextView;'),
