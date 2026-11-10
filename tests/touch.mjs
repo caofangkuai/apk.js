@@ -68,6 +68,7 @@ const tapButton = async (needle) => {
 await pump(400);
 await tapButton('点我执行 DEX 逻辑');
 assert.ok(text().includes('已点击 1 次'), '触摸未触发点击回调');
+assert.ok(engine.screen.overlays.length > 0, 'Toast overlay 未显示');
 await tap(324, 1267);
 assert.ok(text().includes('10%'), '触摸未更新进度');
 console.log('touch OK');
