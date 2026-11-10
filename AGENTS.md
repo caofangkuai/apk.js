@@ -155,7 +155,7 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，最新 HEAD `fed4e06`；2026-11-11 多轮改动已推送。
+- 分支 `main`，最新 HEAD `c059477`；2026-11-11 多轮改动已推送。
 - 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
 - 本轮验证通过：`npm run test:all`（含 format/diagnose/interaction/widgets/drawables）、`npm run build`、`npm run site`。
