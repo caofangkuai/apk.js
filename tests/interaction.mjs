@@ -33,7 +33,7 @@ const findText = (needle) => {
   let found = null;
   const walk = (view) => {
     if (!view) return;
-    if (String(view.text || '').includes(needle)) found = view;
+    if (String(view.text || '').includes(needle) && (!found || view.clickable)) found = view;
     for (const child of view.children || []) walk(child);
     if (view.child) walk(view.child);
   };
@@ -59,4 +59,8 @@ await tapText('打开第二个页面');
 assert.ok(findText('第二个 Activity') || findText('收到参数'), '未进入第二个 Activity');
 await tapText('返回');
 assert.ok(findText('Hello World'), '未返回主 Activity');
+await tapText('打开第二个页面');
+assert.ok(findText('第二个 Activity'), '第二次进入失败');
+await tapText('返回');
+assert.ok(findText('Hello World'), '第二次返回失败');
 console.log('interaction OK');
