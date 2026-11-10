@@ -81,6 +81,9 @@ export class ApkSimulator {
   }
 
   async loadFromUrl(url, options = {}) {
+    let parsed;
+    try { parsed = new URL(String(url)); } catch { throw new Error('APK 地址无效'); }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP(S) 地址');
     const controller = options.signal ? null : new AbortController();
     const timer = controller ? setTimeout(() => controller.abort(), 60000) : null;
     let response;
