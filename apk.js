@@ -148,6 +148,7 @@ export class ApkSimulator {
   }
 
   capture(type = 'image/png', quality) {
+    if (!this.canvas && this.options.canvas && typeof this.options.canvas.toDataURL === 'function') this.canvas = this.options.canvas;
     if (!this.canvas || typeof this.canvas.toDataURL !== 'function') throw new Error('当前环境不支持截图');
     return this.canvas.toDataURL(type, quality);
   }
