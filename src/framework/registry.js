@@ -42,6 +42,7 @@ import {
   EditText,
   ImageView,
   ProgressBar,
+  AnalogClock,
   ScrollView,
   TextView,
   WebView,
@@ -325,6 +326,7 @@ const NATIVE_VIEW_CLASSES = {
   'Landroid/widget/ProgressBar;': ProgressBar,
   'Landroid/widget/AbsoluteLayout;': AbsoluteLayout,
   'Landroid/widget/Switch;': Button,
+  'Landroid/widget/AnalogClock;': AnalogClock,
   'Landroid/widget/CompoundButton;': Button,
   'Landroid/webkit/WebView;': WebView,
 };
@@ -3710,6 +3712,18 @@ function vmShowChild(self, index) {
         'setTimeZone(Ljava/lang/String;)V': (self, [zone]) => { self.timeZone = jsString(zone); },
         'getTimeZone()Ljava/lang/String;': (self) => self.timeZone ?? '',
         'setFormat(Ljava/lang/String;)V': (self, [format]) => { self.format = jsString(format); },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/AnalogClock;', {
+      super: 'Landroid/view/View;',
+      ctor: viewPeerConstructor('Landroid/widget/AnalogClock;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
       },
     })
   );

@@ -1412,3 +1412,41 @@ export class WebView extends View {
     ctx.restore();
   }
 }
+
+export class AnalogClock extends View {
+  onDraw(canvas) {
+    const ctx = canvas.context;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    const cx = width / 2;
+    const cy = height / 2;
+    const radius = Math.max(1, Math.min(width, height) / 2 - 4);
+    const now = new Date();
+    const seconds = now.getSeconds();
+    const minutes = now.getMinutes() + seconds / 60;
+    const hours = (now.getHours() % 12) + minutes / 60;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#546e7a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const hand = (angle, length, widthValue, color) => {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = widthValue;
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.sin(angle) * length, -Math.cos(angle) * length);
+      ctx.stroke();
+    };
+    hand((hours / 12) * Math.PI * 2, radius * 0.5, 4, '#263238');
+    hand((minutes / 60) * Math.PI * 2, radius * 0.72, 3, '#37474f');
+    hand((seconds / 60) * Math.PI * 2, radius * 0.82, 1, '#e53935');
+    ctx.beginPath();
+    ctx.fillStyle = '#263238';
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
