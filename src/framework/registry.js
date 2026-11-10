@@ -4137,6 +4137,21 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/MultiAutoCompleteTextView;', {
+      super: 'Landroid/widget/AutoCompleteTextView;',
+      ctor: viewPeerConstructor('Landroid/widget/MultiAutoCompleteTextView;', 'Landroid/widget/AutoCompleteTextView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setTokenizer(Landroid/widget/MultiAutoCompleteTextView$Tokenizer;)V': (self, [tokenizer]) => { self.tokenizer = tokenizer; },
+        'getTokenizer()Landroid/widget/MultiAutoCompleteTextView$Tokenizer;': (self) => self.tokenizer ?? null,
+        'enoughToFilter()Z': () => true,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/AutoCompleteTextView;', {
       super: 'Landroid/widget/EditText;',
       ctor: viewPeerConstructor('Landroid/widget/AutoCompleteTextView;', 'Landroid/widget/EditText;'),

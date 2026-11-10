@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：332
-- 方法/构造函数键（静态统计）：3287
+- 注册的 native 类：333
+- 方法/构造函数键（静态统计）：3293
 
 ## Native 类清单
 
@@ -205,6 +205,7 @@
 | `Landroid/widget/LinearLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/ListAdapter;` | registry.js |
 | `Landroid/widget/ListView;` | registry.js |
+| `Landroid/widget/MultiAutoCompleteTextView;` | registry.js |
 | `Landroid/widget/OverScroller;` | registry.js |
 | `Landroid/widget/PopupWindow;` | registry.js |
 | `Landroid/widget/ProgressBar;` | registry.js |
