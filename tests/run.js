@@ -265,6 +265,24 @@ try {
   console.log('spinner smoke failed:', error.message);
 }
 
+// AutoCompleteTextView dropdown smoke
+try {
+  const array = vm.newArray('[Ljava/lang/Object;', 2, ['A', 'B']);
+  const adapter = vm.instantiate('Landroid/widget/ArrayAdapter;', [engine.activity, 0, array]);
+  if (!adapter.$peer) vm.registry.getPeer(adapter, 'Landroid/widget/ArrayAdapter;');
+  vm.invokeByName('<init>', '(Landroid/content/Context;I[Ljava/lang/Object;)V', adapter, [engine.activity, 0, array]);
+  const auto = vm.instantiate('Landroid/widget/AutoCompleteTextView;', [engine.activity]);
+  if (!auto.$peer) vm.registry.getPeer(auto, 'Landroid/widget/AutoCompleteTextView;');
+  vm.invokeByName('setAdapter', '(Landroid/widget/ListAdapter;)V', auto, [adapter]);
+  const before = (engine.screen.overlays || []).length;
+  vm.invokeByName('showDropDown', '()V', auto, []);
+  const opened = (engine.screen.overlays || []).length > before;
+  console.log('autocomplete smoke:', { opened });
+  if (opened) engine.screen.removeOverlay(engine.screen.overlays[engine.screen.overlays.length - 1]);
+} catch (error) {
+  console.log('autocomplete smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
