@@ -4711,6 +4711,29 @@ function seedHardwareFs() {
   write('/sys/class/power_supply/battery/charge_counter', '3200000\n');
   write('/sys/class/power_supply/battery/charge_full', '4500000\n');
   write('/sys/class/power_supply/battery/cycle_count', '120\n');
+  write('/sys/class/power_supply/battery/battery_cycle', '120\n');
+  write('/sys/class/power_supply/charge_full', '4500000\n');
+  write('/sys/class/power_supply/bms/capacity', '87\n');
+  write('/sys/class/power_supply/bms/voltage_now', '4200000\n');
+  write('/sys/class/power_supply/bms/current_now', '-420000\n');
+  write('/sys/class/power_supply/bms/temp', '300\n');
+  write('/sys/class/power_supply/bms/status', 'Charging\n');
+  write('/sys/class/power_supply/bms/health', 'Good\n');
+  write('/sys/class/power_supply/bms/charge_counter', '3200000\n');
+  write('/sys/class/power_supply/bms/uevent', [
+    'POWER_SUPPLY_NAME=bms',
+    'POWER_SUPPLY_STATUS=Charging',
+    'POWER_SUPPLY_PRESENT=1',
+    'POWER_SUPPLY_TECHNOLOGY=Li-ion',
+    'POWER_SUPPLY_CYCLE_COUNT=120',
+    'POWER_SUPPLY_VOLTAGE_NOW=4200000',
+    'POWER_SUPPLY_CURRENT_NOW=-420000',
+    'POWER_SUPPLY_CHARGE_COUNTER=3200000',
+    'POWER_SUPPLY_CAPACITY=87',
+    'POWER_SUPPLY_TEMP=300',
+    'POWER_SUPPLY_HEALTH=Good',
+    '',
+  ].join('\n'));
   write('/sys/class/power_supply/battery/uevent', [
     'POWER_SUPPLY_NAME=battery',
     'POWER_SUPPLY_STATUS=Charging',
