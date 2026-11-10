@@ -1202,7 +1202,20 @@ export class ListView extends ViewGroup {
     }
   }
 
+  updateWindow() {
+    if (!this.$items?.length) { this.children = []; return; }
+    const top = (this.scrollY | 0) - this.getHeight();
+    const bottom = (this.scrollY | 0) + this.getHeight() * 2;
+    const visible = [];
+    for (const item of this.$items) {
+      if (!item) continue;
+      if (item.bottom >= top && item.top <= bottom) visible.push(item);
+    }
+    this.children = visible;
+  }
+
   dispatchDraw(canvas) {
+    this.updateWindow();
     canvas.save();
     canvas.translate(-(this.scrollX | 0), -(this.scrollY | 0));
     this.drawSelector(canvas);
@@ -1322,6 +1335,7 @@ export class ListView extends ViewGroup {
     this.$contentHeight = y + this.paddingBottom;
     this.scrollRange = Math.max(0, this.$contentHeight - (bottom - top));
     this.scrollY = Math.max(0, Math.min(this.scrollRange, this.scrollY | 0));
+    this.updateWindow();
   }
 
   scrollTo(x, y) {

@@ -708,11 +708,38 @@ function drawXmlRoot(ctx, node, rect, options) {
   if (name === 'animated-vector') {
     const drawableAttr = attrValue(node, 'drawable');
     const resolved = drawableFromAttr(vm, drawableAttr);
-    if (resolved) return drawDrawable(ctx, resolved, rect, options);
+    if (!resolved) return false;
     const target = firstChildNamed(node, 'target');
-    const animation = attrValue(target, 'animation');
-    void animation;
-    return false;
+    const animationValue = attrValue(target, 'animation');
+    const animationId = typeof animationValue === 'number' ? animationValue : animationValue?.reference;
+    let rotation = null;
+    if (animationId && vm?.resources?.getLayout) {
+      try {
+        const animRoot = vm.resources.getLayout(animationId >>> 0);
+        const animNode = elementChildren(animRoot)[0];
+        const property = attrValue(animNode, 'propertyName');
+        if (property === 'rotation' || property === 'rotationX' || property === 'rotationY') {
+          const duration = Number(attrValue(animNode, 'duration')) || 1000;
+          const from = Number(attrValue(animNode, 'valueFrom'));
+          const to = Number(attrValue(animNode, 'valueTo'));
+          rotation = { duration, from: Number.isFinite(from) ? from : 0, to: Number.isFinite(to) ? to : 360 };
+        }
+      } catch { /* 动画资源不可用时保持静态 */ }
+    }
+    if (rotation) {
+      const progress = (Date.now() % rotation.duration) / rotation.duration;
+      const angle = rotation.from + (rotation.to - rotation.from) * progress;
+      const cx = (rect.left + rect.right) / 2;
+      const cy = (rect.top + rect.bottom) / 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate((angle * Math.PI) / 180);
+      ctx.translate(-cx, -cy);
+      const painted = drawDrawable(ctx, resolved, rect, options);
+      ctx.restore();
+      return painted;
+    }
+    return drawDrawable(ctx, resolved, rect, options);
   }
   const child = elementChildren(node)[0];
   if (child) return drawXmlRoot(ctx, child, rect, options);
