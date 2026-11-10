@@ -936,12 +936,12 @@ export const JAVA_CORE_CLASSES = {
       'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args]) => {
         const values = isJavaArray(args) ? args.$data : [];
         let index = 0;
-        return jsString(format).replace(/%(\d+\$)?([sdifxX%])/g, (match, positional, type) => {
+        return jsString(format).replace(/%(\d+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
           if (type === '%') return '%';
           const at = positional ? parseInt(positional, 10) - 1 : index++;
           const value = values[at];
           if (type === 'd') return String(toInt(value));
-          if (type === 'f') return (Number(value) || 0).toFixed(2);
+          if (type === 'f') return (Number(value) || 0).toFixed(precision === undefined ? 2 : Math.min(20, Number(precision) || 0));
           if (type === 'x') return toInt(value).toString(16);
           if (type === 'X') return toInt(value).toString(16).toUpperCase();
           return jsString(value);
@@ -5345,12 +5345,12 @@ function makeRegexMatcher(vm, regex, input) {
 function formatJavaString(format, args) {
   const values = isJavaArray(args) ? args.$data : [];
   let index = 0;
-  return jsString(format).replace(/%([0-9]+\$)?([sdifxX%])/g, (match, positional, type) => {
+  return jsString(format).replace(/%([0-9]+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
     if (type === '%') return '%';
     const at = positional ? parseInt(positional, 10) - 1 : index++;
     const value = values[at];
     if (type === 'd') return String(toInt(value));
-    if (type === 'f') return (Number(value) || 0).toFixed(2);
+    if (type === 'f') return (Number(value) || 0).toFixed(precision === undefined ? 2 : Math.min(20, Number(precision) || 0));
     if (type === 'x') return toInt(value).toString(16);
     if (type === 'X') return toInt(value).toString(16).toUpperCase();
     if (type === 'i') return String(toInt(value));

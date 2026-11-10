@@ -1230,6 +1230,17 @@ function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/content/Context;', {
       super: 'Ljava/lang/Object;',
       methods: {
+        'registerReceiver(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;': (self, [receiver, filter], vm) => {
+          const action = filter?.actions?.[0] || filter?.action || 'android.intent.action.BATTERY_CHANGED';
+          if (action !== 'android.intent.action.BATTERY_CHANGED') return null;
+          const intent = vm.allocateRawObject('Landroid/content/Intent;');
+          intent.$peer = { vm, action, extras: new Map([
+            ['level', 87], ['scale', 100], ['voltage', 4200], ['temperature', 300],
+            ['status', 2], ['health', 2], ['plugged', 1], ['present', true], ['technology', 'Li-ion'],
+          ]), flags: 0 };
+          if (receiver) { try { vm.invokeInterface(receiver, 'onReceive', '(Landroid/content/Context;Landroid/content/Intent;)V', [self.$object || self, intent]); } catch (_) {} }
+          return intent;
+        },
         'getResources()Landroid/content/res/Resources;': (self, _args, vm) => self.resources || vm.resources,
         'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [id], vm) => (vm.resources || self.resources)?.getColorStateList?.(id >>> 0) ?? null,
         'checkPermission(Ljava/lang/String;II)I': () => 0,
@@ -2135,6 +2146,10 @@ function buildFrameworkDefinitions(vm) {
       staticFields: new Map([
         ['ACTION_MAIN:Ljava/lang/String;', 'android.intent.action.MAIN'],
         ['ACTION_VIEW:Ljava/lang/String;', 'android.intent.action.VIEW'],
+        ['ACTION_BATTERY_CHANGED:Ljava/lang/String;', 'android.intent.action.BATTERY_CHANGED'],
+        ['ACTION_BATTERY_LOW:Ljava/lang/String;', 'android.intent.action.BATTERY_LOW'],
+        ['ACTION_POWER_CONNECTED:Ljava/lang/String;', 'android.intent.action.ACTION_POWER_CONNECTED'],
+        ['ACTION_POWER_DISCONNECTED:Ljava/lang/String;', 'android.intent.action.ACTION_POWER_DISCONNECTED'],
         ['ACTION_SEND:Ljava/lang/String;', 'android.intent.action.SEND'],
         ['ACTION_PICK:Ljava/lang/String;', 'android.intent.action.PICK'],
         ['ACTION_GET_CONTENT:Ljava/lang/String;', 'android.intent.action.GET_CONTENT'],
