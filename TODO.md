@@ -97,3 +97,13 @@
 - [x] VitePress 中英双语文档站
 - [x] 演示页面改名为 `playground.html`，文档站设为默认入口
 - [x] AGENTS.md
+
+## 已知剩余缺口
+
+- [ ] 相机页空白：需要完整 `CameraCharacteristics` / `StreamConfigurationMap` 数据。
+- [ ] 电池页电量/电压为 0：需确认应用读取的 sysfs/Intent 路径。
+- [ ] 温度页数值为 0：type 已读取，temp 数据源仍待确认。
+- [ ] 应用程序页空白：最小化 `getInstalledPackages` 已补，页面仍未使用。
+- [ ] 分区页显示原始挂载文本：需修正应用解析的字段来源。
+- [ ] `androidx.appcompat.widget.SearchView` 类缺失：菜单搜索项不可用。
+- [ ] 复现：`npm run diagnose -- /tmp/devinfo.apk`；`npm run render -- /tmp/devinfo.apk check`。
