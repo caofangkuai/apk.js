@@ -297,6 +297,25 @@ try {
   console.log('chronometer smoke failed:', error.message);
 }
 
+// Date/Calendar/Expandable smoke
+try {
+  const calendar = vm.instantiate('Landroid/widget/CalendarView;', [engine.activity]);
+  if (!calendar.$peer) vm.registry.getPeer(calendar, 'Landroid/widget/CalendarView;');
+  vm.invokeByName('setDate', '(J)V', calendar, [BigInt(123456789)]);
+  const calendarDate = vm.invokeByName('getDate', '()J', calendar, []);
+  const picker = vm.instantiate('Landroid/widget/DatePicker;', [engine.activity]);
+  if (!picker.$peer) vm.registry.getPeer(picker, 'Landroid/widget/DatePicker;');
+  vm.invokeByName('updateDate', '(III)V', picker, [2024, 5, 6]);
+  const expandable = vm.instantiate('Landroid/widget/ExpandableListView;', [engine.activity]);
+  if (!expandable.$peer) vm.registry.getPeer(expandable, 'Landroid/widget/ExpandableListView;');
+  vm.invokeByName('expandGroup', '(I)Z', expandable, [1]);
+  const expanded = vm.invokeByName('isGroupExpanded', '(I)Z', expandable, [1]);
+  vm.invokeByName('collapseGroup', '(I)Z', expandable, [1]);
+  console.log('date/expandable smoke:', { calendarDate: String(calendarDate), year: vm.invokeByName('getYear', '()I', picker, []), expanded, collapsed: vm.invokeByName('isGroupExpanded', '(I)Z', expandable, [1]) });
+} catch (error) {
+  console.log('date/expandable smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
