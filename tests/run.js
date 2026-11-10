@@ -200,6 +200,21 @@ if (activityAction) {
 await new Promise((resolve) => setTimeout(resolve, 500));
 console.log('overlays:', engine.screen.overlays.length, 'screen dirty:', engine.screen.dirty);
 
+// AlertDialog host smoke: builder -> show -> dismiss
+try {
+  const dialogBuilder = vm.instantiate('Landroid/app/AlertDialog$Builder;', [engine.activity]);
+  vm.invokeByName('setTitle', '(Ljava/lang/CharSequence;)Landroid/app/AlertDialog$Builder;', dialogBuilder, ['Dialog']);
+  vm.invokeByName('setMessage', '(Ljava/lang/CharSequence;)Landroid/app/AlertDialog$Builder;', dialogBuilder, ['hello']);
+  const before = (engine.screen.overlays || []).length;
+  const dialog = vm.invokeByName('show', '()Landroid/app/AlertDialog;', dialogBuilder, []);
+  const shown = (engine.screen.overlays || []).length > before;
+  vm.invokeByName('dismiss', '()V', dialog, []);
+  const dismissed = (engine.screen.overlays || []).length === before;
+  console.log('dialog host:', { shown, dismissed });
+} catch (error) {
+  console.log('dialog host failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);

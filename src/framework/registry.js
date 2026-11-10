@@ -441,6 +441,107 @@ function dismissPopup(peer) {
   }
 }
 
+function dialogEnsureWindow(peer, vm) {
+  if (!peer.windowObject) {
+    const windowObject = vm.allocateRawObject('Landroid/view/Window;');
+    windowObject.$peer = { dialog: peer, vm };
+    peer.windowObject = windowObject;
+  }
+  return peer.windowObject;
+}
+function dialogLayout(peer, screen) {
+  const width = Math.min(screen?.width || 360, Math.round((screen?.width || 360) * 0.86));
+  const message = String(peer.message ?? '');
+  const lines = Math.max(1, Math.ceil(message.length / 22));
+  const contentHeight = peer.contentView ? Math.min(Math.round((screen?.height || 640) * 0.7), 480) : 0;
+  const height = Math.max(contentHeight, Math.min(screen?.height || 640, 96 + lines * 20 + (peer.positiveText || peer.negativeText ? 56 : 16)));
+  return { width, height, left: Math.round(((screen?.width || 360) - width) / 2), top: Math.round(((screen?.height || 640) - height) / 2) };
+}
+function dialogDismiss(peer) {
+  if (!peer.showing) return;
+  peer.showing = false;
+  const screen = peer.vm?.screen;
+  if (screen && peer.overlay) screen.removeOverlay?.(peer.overlay);
+  try { peer.vm?.invokeInterface?.(peer.dismissListener, 'onDismiss', '(Landroid/content/DialogInterface;)V', [peer.dialogObject || peer]); } catch (_) {}
+}
+function dialogShow(peer) {
+  const vm = peer.vm;
+  const screen = vm?.screen;
+  if (!screen) return;
+  peer.showing = true;
+  peer.overlay = {
+    draw: (ctx) => {
+      const layout = dialogLayout(peer, screen);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      ctx.fillRect(0, 0, screen.width, screen.height);
+      ctx.fillStyle = peer.night ? '#1e1e1e' : '#ffffff';
+      ctx.fillRect(layout.left, layout.top, layout.width, layout.height);
+      ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+      ctx.font = 'bold 18px sans-serif';
+      if (peer.title) ctx.fillText(String(peer.title), layout.left + 20, layout.top + 34);
+      ctx.font = '16px sans-serif';
+      const message = String(peer.message ?? '');
+      const words = message.split(/\s+/);
+      let line = '';
+      let y = layout.top + (peer.title ? 66 : 34);
+      for (const word of words) {
+        const next = line ? line + ' ' + word : word;
+        if (ctx.measureText(next).width > layout.width - 40) { ctx.fillText(line, layout.left + 20, y); y += 20; line = word; }
+        else line = next;
+      }
+      if (line) ctx.fillText(line, layout.left + 20, y);
+      if (peer.contentView) {
+        const view = unwrapView(peer.contentView);
+        if (view) {
+          const contentWidth = layout.width - 40;
+          const heightSpec = Math.round((layout.height - 40) * 0.65);
+          view.measure(MeasureSpec.makeMeasureSpec(contentWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(heightSpec, MeasureSpec.AT_MOST));
+          view.layout(0, 0, contentWidth, Math.max(view.getMeasuredHeight(), 0));
+          ctx.save();
+          ctx.translate(layout.left + 20, layout.top + 20);
+          view.draw(createCanvasAdapter(ctx, screen));
+          ctx.restore();
+        }
+      }
+      const labels = [peer.negativeText, peer.positiveText].filter(Boolean).map(String);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#00796b';
+      let bx = layout.left + layout.width - 20;
+      peer.buttonRects = [];
+      for (const label of labels.reverse()) {
+        const w = ctx.measureText(label).width;
+        ctx.fillText(label, bx, layout.top + layout.height - 20);
+        peer.buttonRects.push({ left: bx - w - 10, top: layout.top + layout.height - 44, right: bx + 4, bottom: layout.top + layout.height - 10, label });
+        bx -= w + 36;
+      }
+      ctx.textAlign = 'left';
+      ctx.restore();
+    },
+    handleTouch: (event) => {
+      if (event.action !== 'up') return true;
+      const layout = dialogLayout(peer, screen);
+      const inside = event.x >= layout.left && event.x <= layout.left + layout.width && event.y >= layout.top && event.y <= layout.top + layout.height;
+      if (inside) {
+        for (const rect of peer.buttonRects || []) {
+          if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
+            const positive = rect.label === String(peer.positiveText ?? '');
+            const listener = positive ? peer.positiveListener : peer.negativeListener;
+            dialogDismiss(peer);
+            try { peer.vm.invokeInterface(listener, 'onClick', '(Landroid/content/DialogInterface;I)V', [peer.dialogObject || peer, positive ? -1 : -2]); } catch (_) {}
+            return true;
+          }
+        }
+        return true;
+      }
+      if (peer.cancelable !== false) dialogDismiss(peer);
+      return true;
+    },
+  };
+  screen.addOverlay(peer.overlay);
+  screen.invalidate?.();
+}
+
 function showPopup(peer, left, top) {
   const vm = peer?.vm;
   const screen = vm?.screen;
