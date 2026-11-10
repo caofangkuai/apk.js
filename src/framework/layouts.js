@@ -1417,12 +1417,13 @@ export class ListView extends ViewGroup {
       const columns = Math.max(1, this.numColumns | 0);
       const cellWidth = Math.max(1, Math.floor((widthSize - this.paddingLeft - this.paddingRight) / columns));
       const rowHeights = [];
+      const gridAvailable = heightMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(heightSpec);
       for (let index = 0; index < this.$items.length; index += 1) {
         const item = this.$items[index];
         if (isGone(item)) continue;
         item.measure(
           MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY),
-          MeasureSpec.makeMeasureSpec(availableHeight > 0 ? availableHeight : 0, MeasureSpec.AT_MOST),
+          MeasureSpec.makeMeasureSpec(gridAvailable > 0 ? gridAvailable : 0, MeasureSpec.AT_MOST),
         );
         const row = Math.floor(index / columns);
         rowHeights[row] = Math.max(rowHeights[row] || 0, item.getMeasuredHeight());

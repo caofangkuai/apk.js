@@ -57,3 +57,31 @@ const tops = variable.children.map((view) => view.top).sort((a, b) => a - b);
 for (let i = 1; i < tops.length; i++) assert.ok(tops[i] >= tops[i - 1] + 20, '异形行不应重叠');
 assert.ok(tops[0] > 0, '滚动后应有可视行');
 console.log('listview variable heights OK', { children: variable.children.length, firstTop: tops[0] });
+
+const grid = new ListView(null);
+grid.numColumns = 2;
+grid.$vm = {
+  invokeByName(name, _proto, adapter, args) {
+    if (name === 'getCount') return 4;
+    if (name === 'getView') {
+      const index = args?.[0] | 0;
+      const height = 20;
+      return { $view: {
+        top: 0, bottom: 0, left: 0, right: 0, parent: grid, visibility: 0,
+        measure(_w, _h) { this.height = height; },
+        layout(left, top, right, bottom) { this.left = left; this.top = top; this.right = right; this.bottom = bottom; },
+        getMeasuredHeight() { return height; },
+        getMeasuredWidth() { return 160; },
+      } };
+    }
+    return null;
+  },
+};
+grid.adapter = {};
+grid.onMeasure(MeasureSpec.makeMeasureSpec(320, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(480, MeasureSpec.EXACTLY));
+grid.onLayout(true, 0, 0, 320, 480);
+const gridItems = grid.$items.filter((item) => item && item.bottom > item.top);
+assert.ok(gridItems.length >= 4, '网格应布局 4 项');
+assert.equal(gridItems[1].top, gridItems[0].top, '同一行 top 应一致');
+assert.ok(gridItems[1].left > gridItems[0].left, '第二列应在右侧');
+console.log('gridview OK', { items: gridItems.length, rowTop: gridItems[0].top, secondLeft: gridItems[1].left });
