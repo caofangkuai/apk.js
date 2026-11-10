@@ -104,7 +104,7 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 | `canvas` | Use an existing `<canvas>`. Takes precedence over `element`. |
 | `device.width` / `device.height` | Logical resolution. Defaults to 360×640. |
 | `device.dpr` | Device pixel ratio. Defaults to `window.devicePixelRatio` capped at 2. The canvas backing size is logical size × dpr. |
-| `device.style` | Theme style. Defaults to `material`. |
+| `device.style` | Theme style. Defaults to `default`. |
 | `device.maxApkSize` | APK size limit. Defaults to 50MB. |
 | `onLog` / `onFinished` / `onError` | Log, finish and error callbacks. |
 
@@ -115,6 +115,7 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 | `loadFromArrayBuffer(buffer)` | Load from binary contents. |
 | `loadFromZip(zip)` | Load from a JSZip instance. |
 | `setDevice(device)` | Update device info and apply the new size immediately. |
+| `capture(type, quality)` | Export the current frame as a dataURL (PNG by default). |
 | `stop()` / `destroy()` | Stop running / stop and clean up the canvas. |
 | `vm` | The current `JavaVM` instance (read-only). |
 

@@ -104,7 +104,7 @@ npm run serve
 | `canvas` | 直接使用已有的 `<canvas>`，优先于 `element`。 |
 | `device.width` / `device.height` | 逻辑分辨率，默认 360×640。 |
 | `device.dpr` | 设备像素比，默认取 `window.devicePixelRatio` 且上限为 2。canvas 物理尺寸为逻辑尺寸乘 dpr。 |
-| `device.style` | 主题风格，默认 `material`。 |
+| `device.style` | 主题风格，默认 `default`。 |
 | `device.maxApkSize` | APK 大小上限，默认 50MB。 |
 | `onLog` / `onFinished` / `onError` | 日志、结束、错误回调。 |
 
@@ -115,6 +115,7 @@ npm run serve
 | `loadFromArrayBuffer(buffer)` | 从二进制内容加载。 |
 | `loadFromZip(zip)` | 从 JSZip 实例加载。 |
 | `setDevice(device)` | 更新设备信息并立即应用新尺寸。 |
+| `capture(type, quality)` | 导出当前画面为 dataURL（默认 PNG）。 |
 | `stop()` / `destroy()` | 停止运行 / 停止并清理 canvas。 |
 | `vm` | 当前 `JavaVM` 实例（只读）。 |
 
