@@ -1255,6 +1255,7 @@ export class ListView extends ViewGroup {
         this.$itemCount = count;
         this.$lazyViews = new Map();
         this.$rowHeight = Math.round(48 * this.getDensity());
+        this.$rowHeightMeasured = false;
       }
       return;
     }
@@ -1328,6 +1329,14 @@ export class ListView extends ViewGroup {
   }
 
   updateLazyWindow(width, viewportHeight) {
+    if (!this.$rowHeightMeasured && width > 0) {
+      const first = this.lazyItem(0, width);
+      if (first) {
+        const measured = first.getMeasuredHeight?.() || 0;
+        if (measured > 0) this.$rowHeight = measured;
+        this.$rowHeightMeasured = true;
+      }
+    }
     const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
     const top = (this.scrollY | 0) - viewportHeight;
     const bottom = (this.scrollY | 0) + viewportHeight * 2;
