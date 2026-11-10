@@ -1557,3 +1557,17 @@ export class CalendarView extends View {
     ctx.restore();
   }
 }
+
+export class NumberPicker extends TextView {
+  constructor(context = null) {
+    super(context);
+    this.value = 0;
+    this.setText('0');
+  }
+
+  setValue(value) {
+    this.value = Number(value) || 0;
+    this.setText(String(this.value));
+    this.invalidate?.();
+  }
+}
