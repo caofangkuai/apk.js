@@ -548,7 +548,9 @@ export class JavaVM {
     if (!this.activityStack) this.activityStack = [];
     if (callerPeer) {
       this.savedState = callerPeer;
-      this.activityStack.push(callerPeer);
+      if (this.activityStack[this.activityStack.length - 1] !== callerPeer) {
+        this.activityStack.push(callerPeer);
+      }
     }
     const activityObject = this.instantiate(descriptor, []);
     this.activity = activityObject;
