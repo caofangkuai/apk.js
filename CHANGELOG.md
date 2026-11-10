@@ -28,6 +28,10 @@
 - `npm run docs:coverage` / `check:coverage`：Framework 覆盖矩阵与 CI 校验。
 - `test:all` 现包含 coverage、zip limits、ListView lazy、Drawable 回归。
 
+### Performance
+
+- Node 基准（DeviceInfoHW，360×640）：启动约 135ms，渲染约 20.9ms/帧、47.9 FPS。
+
 ### 安全
 
 - 所有 APK 入口统一 50MB 限制。
