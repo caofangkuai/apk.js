@@ -511,7 +511,10 @@ function dialogShow(peer) {
         ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
         peer.items.forEach((item, index) => {
           const top = layout.top + 20 + index * 44;
-          ctx.fillText(String(item), layout.left + 20, top + 26);
+          let prefix = '';
+          if (peer.choiceMode === 'single') prefix = (peer.checkedIndex | 0) === index ? '● ' : '○ ';
+          else if (peer.choiceMode === 'multi') prefix = peer.multiChecked?.[index] ? '☑ ' : '☐ ';
+          ctx.fillText(prefix + String(item), layout.left + 20, top + 26);
           peer.itemRects.push({ left: layout.left, top, right: layout.left + layout.width, bottom: top + 44, index });
         });
       }
@@ -536,7 +539,14 @@ function dialogShow(peer) {
       if (inside) {
         for (const rect of peer.itemRects || []) {
           if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
+            if (peer.choiceMode === 'multi') {
+              peer.multiChecked[rect.index] = !peer.multiChecked[rect.index];
+              try { peer.vm.invokeInterface(peer.multiListener, 'onClick', '(Landroid/content/DialogInterface;IZ)V', [peer.dialogObject || peer, rect.index, peer.multiChecked[rect.index]]); } catch (_) {}
+              screen.invalidate?.();
+              return true;
+            }
             const listener = peer.itemListener;
+            if (peer.choiceMode === 'single') peer.checkedIndex = rect.index;
             dialogDismiss(peer);
             try { peer.vm.invokeInterface(listener, 'onClick', '(Landroid/content/DialogInterface;I)V', [peer.dialogObject || peer, rect.index]); } catch (_) {}
             return true;
@@ -4020,6 +4030,22 @@ function buildFrameworkDefinitions(vm) {
         'setCancelable(Z)Landroid/app/AlertDialog$Builder;': (self, [value]) => { self.cancelable = !!value; return self.$object ?? self; },
         'setNeutralButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.neutralText = jsString(text); self.neutralListener = listener; return self.$object ?? self; },
         'setView(Landroid/view/View;)Landroid/app/AlertDialog$Builder;': (self, [view]) => { self.contentView = view ?? null; return self.$object ?? self; },
+        'setSingleChoiceItems([Ljava/lang/CharSequence;ILandroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [items, checked, listener]) => {
+          const values = items?.$data || items || [];
+          self.items = Array.from(values, (item) => jsString(item));
+          self.choiceMode = 'single';
+          self.checkedIndex = checked | 0;
+          self.itemListener = listener;
+          return self.$object ?? self;
+        },
+        'setMultiChoiceItems([Ljava/lang/CharSequence;[ZLandroid/content/DialogInterface$OnMultiChoiceClickListener;)Landroid/app/AlertDialog$Builder;': (self, [items, checked, listener]) => {
+          const values = items?.$data || items || [];
+          self.items = Array.from(values, (item) => jsString(item));
+          self.choiceMode = 'multi';
+          self.multiChecked = Array.from(checked?.$data || checked || [], (value) => !!value);
+          self.multiListener = listener;
+          return self.$object ?? self;
+        },
         'setItems([Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [items, listener]) => {
           const values = items?.$data || items || [];
           self.items = Array.from(values, (item) => jsString(item));
