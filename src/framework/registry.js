@@ -4474,6 +4474,35 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/SearchView;', {
+      super: 'Landroid/widget/LinearLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/SearchView;', 'Landroid/widget/LinearLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setOnQueryTextListener(Landroid/widget/SearchView$OnQueryTextListener;)V': (self, [listener]) => { self.queryListener = listener; },
+        'setOnCloseListener(Landroid/widget/SearchView$OnCloseListener;)V': (self, [listener]) => { self.closeListener = listener; },
+        'setQuery(Ljava/lang/CharSequence;Z)V': (self, [query]) => {
+          self.query = jsString(query);
+          self.inputView ||= new EditText(self.vm?.contextObject || null);
+          self.inputView.setText?.(self.query);
+          self.view?.invalidate?.();
+        },
+        'setQuery(Ljava/lang/CharSequence;)V': (self, [query]) => { self.query = jsString(query); self.inputView?.setText?.(self.query); },
+        'getQuery()Ljava/lang/CharSequence;': (self) => self.query ?? '',
+        'setQueryHint(Ljava/lang/CharSequence;)V': (self, [hint]) => { self.hint = jsString(hint); },
+        'getQueryHint()Ljava/lang/CharSequence;': (self) => self.hint ?? '',
+        'setIconified(Z)V': (self, [value]) => { self.iconified = !!value; },
+        'isIconified()Z': (self) => (self.iconified ? 1 : 0),
+        'setIconifiedByDefault(Z)V': (self, [value]) => { self.iconifiedByDefault = !!value; },
+        'clearFocus()V': () => undefined,
+        'setSubmitButtonEnabled(Z)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Gallery;', {
       super: 'Landroid/widget/Spinner;',
       ctor: viewPeerConstructor('Landroid/widget/Gallery;', 'Landroid/widget/Spinner;'),
