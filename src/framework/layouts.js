@@ -1413,6 +1413,26 @@ export class ListView extends ViewGroup {
       return;
     }
     const widthSize = widthMode === MeasureSpec.UNSPECIFIED ? 0 : MeasureSpec.getSize(widthSpec);
+    if ((this.numColumns | 0) > 1 && this.$items.length) {
+      const columns = Math.max(1, this.numColumns | 0);
+      const cellWidth = Math.max(1, Math.floor((widthSize - this.paddingLeft - this.paddingRight) / columns));
+      const rowHeights = [];
+      for (let index = 0; index < this.$items.length; index += 1) {
+        const item = this.$items[index];
+        if (isGone(item)) continue;
+        item.measure(
+          MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY),
+          MeasureSpec.makeMeasureSpec(availableHeight > 0 ? availableHeight : 0, MeasureSpec.AT_MOST),
+        );
+        const row = Math.floor(index / columns);
+        rowHeights[row] = Math.max(rowHeights[row] || 0, item.getMeasuredHeight());
+      }
+      this.$gridRows = rowHeights;
+      const total = rowHeights.reduce((sum, height) => sum + height, 0);
+      this.$contentHeight = total + this.paddingTop + this.paddingBottom;
+      this.setMeasuredDimension(resolveSize(widthSize, widthSpec), resolveSize(this.$contentHeight, heightSpec));
+      return;
+    }
     const childWidthSpec = widthMode === MeasureSpec.UNSPECIFIED
       ? MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
       : getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, -1);
@@ -1440,6 +1460,27 @@ export class ListView extends ViewGroup {
       this.scrollRange = Math.max(0, this.$contentHeight - (bottom - top));
       this.scrollY = Math.max(0, Math.min(this.scrollRange, this.scrollY | 0));
       this.updateLazyWindow(Math.max(0, right - left - this.paddingLeft - this.paddingRight), Math.max(1, bottom - top));
+      return;
+    }
+    if ((this.numColumns | 0) > 1 && this.$items.length) {
+      const columns = Math.max(1, this.numColumns | 0);
+      const width = Math.max(0, right - left - this.paddingLeft - this.paddingRight);
+      const cellWidth = Math.max(1, Math.floor(width / columns));
+      const rows = this.$gridRows || [];
+      let rowTop = this.paddingTop;
+      for (let row = 0; row < rows.length; row += 1) {
+        for (let col = 0; col < columns; col += 1) {
+          const index = row * columns + col;
+          const item = this.$items[index];
+          if (!item) continue;
+          item.layout(this.paddingLeft + col * cellWidth, rowTop, this.paddingLeft + (col + 1) * cellWidth, rowTop + rows[row]);
+        }
+        rowTop += rows[row];
+      }
+      this.$contentHeight = rowTop + this.paddingBottom;
+      this.scrollRange = Math.max(0, this.$contentHeight - (bottom - top));
+      this.scrollY = Math.max(0, Math.min(this.scrollRange, this.scrollY | 0));
+      this.updateWindow();
       return;
     }
     let y = this.paddingTop;
