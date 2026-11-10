@@ -9,3 +9,10 @@ const big = { 'classes.dex': { dir: false, _data: { uncompressedSize: 32 * 1024 
 await assert.rejects(() => loadApkFiles({ files: big }, { maxTotalSize: 16 * 1024 * 1024 }), /体积超过上限/);
 
 console.log('zip limits OK');
+
+await assert.rejects(() => loadApkFiles({ files: {}, file: () => null }), /AndroidManifest/);
+await assert.rejects(
+  () => loadApkFiles({ files: { 'AndroidManifest.xml': { dir: false, _data: { uncompressedSize: 1 } } }, file: (name) => (name === 'AndroidManifest.xml' ? { async: async () => new Uint8Array([0]) } : null) }),
+  /resources\.arsc/,
+);
+console.log('apk structure validation OK');
