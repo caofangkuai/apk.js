@@ -4616,8 +4616,8 @@ function vmShowChild(self, index) {
       ctor: viewPeerConstructor('Landroid/widget/ImageButton;', 'Landroid/widget/ImageView;'),
       methods: {
         '<init>(Landroid/content/Context;)V': () => undefined,
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self, _args, vm) => applyProgrammaticViewStyle(vm, self, 0),
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': (self, args, vm) => applyProgrammaticViewStyle(vm, self, args?.[2] | 0),
       },
     })
   );
