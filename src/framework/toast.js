@@ -13,7 +13,8 @@ export const Toast = {
       vm.toastOverlay = null;
     }
     const total = DURATION_MS[duration === 1 ? 1 : 0];
-    const overlay = new ToastOverlay(message, total);
+    const density = Number(vm.resources?.density) || Number(vm.resources?.displayMetrics?.density) || 1;
+    const overlay = new ToastOverlay(message, total, density);
     vm.toastOverlay = overlay;
     screen.addOverlay(overlay);
     overlay.start(() => {
@@ -31,9 +32,10 @@ export const Toast = {
 };
 
 class ToastOverlay {
-  constructor(text, duration) {
+  constructor(text, duration, density = 1) {
     this.text = text;
     this.duration = duration;
+    this.density = density;
     this.startedAt = 0;
     this.alpha = 0;
     this.closed = false;
@@ -73,17 +75,18 @@ class ToastOverlay {
 
   draw(ctx, screen) {
     this.screen = screen;
-    const textSize = 14;
+    const density = this.density || 1;
+    const textSize = 14 * density;
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, this.alpha)) * 0.9;
     ctx.font = `500 ${textSize}px 'Noto Sans CJK SC'`;
     const metrics = ctx.measureText(this.text);
-    const paddingX = 20;
-    const paddingY = 12;
+    const paddingX = 20 * density;
+    const paddingY = 12 * density;
     const width = Math.min(screen.width - 48, Math.ceil(metrics.width) + paddingX * 2);
     const height = textSize + paddingY * 2;
     const left = Math.round((screen.width - width) / 2);
-    const top = Math.round(screen.height - MARGIN_BOTTOM - height);
+    const top = Math.round(screen.height - MARGIN_BOTTOM * density - height);
     const radius = height / 2;
     ctx.fillStyle = 'rgba(50, 50, 50, 0.92)';
     ctx.beginPath();
