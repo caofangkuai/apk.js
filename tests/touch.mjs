@@ -46,8 +46,27 @@ const text = () => {
   return values.join('|');
 };
 
+const findButton = (needle) => {
+  let found = null;
+  const walk = (view) => {
+    if (!view) return;
+    const text = String(view.text || '');
+    if (text.includes(needle) && (!found || view.clickable)) found = view;
+    for (const child of view.children || []) walk(child);
+    if (view.child) walk(view.child);
+  };
+  walk(engine.screen.decorView);
+  return found;
+};
+const tapButton = async (needle) => {
+  const view = findButton(needle);
+  assert.ok(view, `找不到按钮: ${needle}`);
+  const x = (view.left + view.right) / 2;
+  const y = (view.top + view.bottom) / 2;
+  await tap(x, y);
+};
 await pump(400);
-await tap(324, 500);
+await tapButton('点我执行 DEX 逻辑');
 assert.ok(text().includes('已点击 1 次'), '触摸未触发点击回调');
 await tap(324, 1267);
 assert.ok(text().includes('10%'), '触摸未更新进度');

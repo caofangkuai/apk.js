@@ -4705,6 +4705,7 @@ function seedHardwareFs() {
     write(base + '/type', type + '\n');
     write(base + '/temp', String(temp));
     write('/sys/devices/virtual/thermal/thermal_zone' + index + '/temp', String(temp));
+    write(base + '/uevent', 'TEMP=' + temp + '\nTYPE=' + type + '\n');
   });
   write('/sys/module/msm_thermal/sensor_info', thermalZones.map(([type, temp]) => type + ':' + temp).join(' ') + '\n');
   write('/sys/class/power_supply/battery/manufacturer', 'apk.js\n');
