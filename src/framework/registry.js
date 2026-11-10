@@ -3803,6 +3803,69 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/app/Dialog;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class DialogPeer { constructor() { this.showing = false; this.cancelable = true; } },
+      methods: {
+        '<init>(Landroid/content/Context;)V': (self) => { self.showing = false; self.cancelable = true; },
+        '<init>(Landroid/content/Context;I)V': (self) => { self.showing = false; self.cancelable = true; },
+        'show()V': (self, _args, vm) => { self.vm = vm; self.dialogObject = self.$object ?? self; dialogShow(self); },
+        'dismiss()V': (self) => dialogDismiss(self),
+        'cancel()V': (self) => dialogDismiss(self),
+        'isShowing()Z': (self) => (self.showing ? 1 : 0),
+        'setCancelable(Z)V': (self, [value]) => { self.cancelable = !!value; },
+        'setCanceledOnTouchOutside(Z)V': (self, [value]) => { self.cancelable = !!value; },
+        'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => { self.title = jsString(title); },
+        'setContentView(Landroid/view/View;)V': (self, [view]) => { self.contentView = view ?? null; },
+        'findViewById(I)Landroid/view/View;': (self, [id]) => self.contentView?.findViewById?.(id) ?? null,
+        'setOnDismissListener(Landroid/content/DialogInterface$OnDismissListener;)V': (self, [listener]) => { self.dismissListener = listener; },
+        'getWindow()Landroid/view/Window;': () => null,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/app/AlertDialog;', {
+      super: 'Landroid/app/Dialog;',
+      ctor: class AlertDialogPeer { constructor() { this.showing = false; this.cancelable = true; } },
+      methods: {
+        'show()V': (self, _args, vm) => { self.vm = vm; self.dialogObject = self.$object ?? self; dialogShow(self); },
+        'dismiss()V': (self) => dialogDismiss(self),
+        'isShowing()Z': (self) => (self.showing ? 1 : 0),
+        'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => { self.title = jsString(title); },
+        'setMessage(Ljava/lang/CharSequence;)V': (self, [message]) => { self.message = jsString(message); },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/app/AlertDialog$Builder;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class AlertDialogBuilderPeer { constructor() { this.cancelable = true; } },
+      methods: {
+        '<init>(Landroid/content/Context;)V': (self) => { self.cancelable = true; },
+        '<init>(Landroid/content/Context;I)V': (self) => { self.cancelable = true; },
+        'setTitle(Ljava/lang/CharSequence;)Landroid/app/AlertDialog$Builder;': (self, [title]) => { self.title = jsString(title); return self.$object ?? self; },
+        'setMessage(Ljava/lang/CharSequence;)Landroid/app/AlertDialog$Builder;': (self, [message]) => { self.message = jsString(message); return self.$object ?? self; },
+        'setPositiveButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.positiveText = jsString(text); self.positiveListener = listener; return self.$object ?? self; },
+        'setNegativeButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.negativeText = jsString(text); self.negativeListener = listener; return self.$object ?? self; },
+        'setCancelable(Z)Landroid/app/AlertDialog$Builder;': (self, [value]) => { self.cancelable = !!value; return self.$object ?? self; },
+        'create()Landroid/app/AlertDialog;': (self, _args, vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/AlertDialog;');
+          dialog.$peer = { ...self, vm, showing: false };
+          return dialog;
+        },
+        'show()Landroid/app/AlertDialog;': (self, _args, vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/AlertDialog;');
+          dialog.$peer = { ...self, vm, showing: false, dialogObject: dialog };
+          dialogShow(dialog.$peer);
+          return dialog;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ArrayAdapter;', {
       super: 'Landroid/widget/BaseAdapter;',
       ctor: class ArrayAdapterPeer {
@@ -5823,6 +5886,7 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       ctor: class ConfigurationPeer {
         constructor(other) {
+          this.uiMode = other?.$peer?.uiMode ?? ((typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches) ? 0x20 : 0x10);
           this.fontScale = other?.$peer?.fontScale ?? 1;
           this.orientation = other?.$peer?.orientation ?? 1;
           this.screenWidthDp = other?.$peer?.screenWidthDp ?? 360;
@@ -5834,6 +5898,7 @@ function buildFrameworkDefinitions(vm) {
         '<init>()V': () => undefined,
         '<init>(Landroid/content/res/Configuration;)V': (self, [other]) => {
           const peer = other?.$peer || {};
+          self.uiMode = peer.uiMode ?? ((typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches) ? 0x20 : 0x10);
           self.fontScale = peer.fontScale ?? 1;
           self.orientation = peer.orientation ?? 1;
           self.screenWidthDp = peer.screenWidthDp ?? 360;
@@ -5848,7 +5913,9 @@ function buildFrameworkDefinitions(vm) {
         },
         'getLocale()Ljava/util/Locale;': (self, _args, vm) => makeDefaultLocaleObject(vm),
         'getLayoutDirection()I': () => 0,
+        'isNightModeActive()Z': (self) => (((self.uiMode | 0) & 0x30) === 0x20 ? 1 : 0),
       },
+      instanceFields: new Map([['uiMode:I', 0x10]]),
     })
   );
   defs.push(
@@ -8003,7 +8070,21 @@ function themeStore(vm) {
   if (!vm) return DEFAULT_THEME_ATTRIBUTES;
   if (!vm.themeAttributes) {
     const density = vm.resources?.displayMetrics?.density || 1;
-    vm.themeAttributes = { ...DEFAULT_THEME_ATTRIBUTES, actionBarSize: Math.round(56 * density) };
+    const night = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+    const colors = night ? {
+      colorSurface: 0xff121212 >>> 0,
+      colorOnSurface: 0xffffffff >>> 0,
+      colorBackground: 0xff121212 >>> 0,
+      colorOnBackground: 0xffffffff >>> 0,
+      colorSurfaceVariant: 0xff49454f >>> 0,
+      colorOnSurfaceVariant: 0xffcac4d0 >>> 0,
+      textColorPrimary: 0xffffffff >>> 0,
+      textColorSecondary: 0xb3ffffff >>> 0,
+      textColorTertiary: 0x80ffffff >>> 0,
+      windowBackground: 0xff121212 >>> 0,
+      isLightTheme: false,
+    } : { isLightTheme: true };
+    vm.themeAttributes = { ...DEFAULT_THEME_ATTRIBUTES, ...colors, actionBarSize: Math.round(56 * density) };
   }
   return vm.themeAttributes;
 }

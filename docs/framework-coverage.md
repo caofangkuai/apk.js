@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：326
-- 方法/构造函数键（静态统计）：3200
+- 注册的 native 类：329
+- 方法/构造函数键（静态统计）：3228
 
 ## Native 类清单
 
@@ -19,7 +19,10 @@
 | `Landroid/app/Activity;` | registry.js |
 | `Landroid/app/ActivityManager;` | java-core.js |
 | `Landroid/app/ActivityManager$MemoryInfo;` | java-core.js |
+| `Landroid/app/AlertDialog;` | registry.js |
+| `Landroid/app/AlertDialog$Builder;` | registry.js |
 | `Landroid/app/Application;` | registry.js |
+| `Landroid/app/Dialog;` | registry.js |
 | `Landroid/app/Fragment;` | registry.js |
 | `Landroid/app/FragmentManager;` | registry.js |
 | `Landroid/app/FragmentTransaction;` | registry.js |
