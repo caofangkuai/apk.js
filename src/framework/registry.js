@@ -4221,6 +4221,34 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/RatingBar;', {
+      super: 'Landroid/widget/ProgressBar;',
+      ctor: viewPeerConstructor('Landroid/widget/RatingBar;', 'Landroid/widget/ProgressBar;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setNumStars(I)V': (self, [value]) => { self.numStars = value | 0; },
+        'getNumStars()I': (self) => self.numStars | 0,
+        'setRating(F)V': (self, [value]) => { self.rating = Number(value) || 0; self.view.progress = Math.round(self.rating); self.view.invalidate?.(); },
+        'getRating()F': (self) => Number(self.rating) || 0,
+        'setStepSize(F)V': (self, [value]) => { self.stepSize = Number(value) || 1; },
+        'getStepSize()F': (self) => Number(self.stepSize) || 1,
+        'setOnRatingBarChangeListener(Landroid/widget/RatingBar$OnRatingBarChangeListener;)V': (self, [listener]) => { self.ratingListener = listener; },
+        'performClick()Z': (self, _args, vm) => {
+          const stars = Math.max(1, self.numStars | 0 || 5);
+          const step = Number(self.stepSize) || 1;
+          const next = Math.min(stars, (Number(self.rating) || 0) + step);
+          self.rating = next;
+          if (self.view) { self.view.progress = Math.round(next); self.view.invalidate?.(); }
+          try { vm.invokeInterface(self.ratingListener, 'onRatingChanged', '(Landroid/widget/RatingBar;FZ)V', [self.$object ?? self, next, true]); } catch (_) {}
+          return true;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/SeekBar;', {
       super: 'Landroid/widget/ProgressBar;',
       ctor: viewPeerConstructor('Landroid/widget/SeekBar;', 'Landroid/widget/ProgressBar;'),
