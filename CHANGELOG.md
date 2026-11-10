@@ -20,6 +20,10 @@
 - 容器类：ViewAnimator/ViewFlipper/ViewSwitcher/TextSwitcher/ImageSwitcher、AdapterViewFlipper。
 - 计时/列表：Chronometer、ViewStub、Space、ImageButton、ArrayAdapter。
 
+### Playground
+
+- 新增截图导出：`sim.capture()` 与“保存截图”按钮。
+
 ### 工具链
 
 - `npm run bench:render`：启动/帧耗时基准。
