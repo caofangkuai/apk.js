@@ -1450,3 +1450,38 @@ export class AnalogClock extends View {
     ctx.restore();
   }
 }
+
+export class TimePicker extends View {
+  onDraw(canvas) {
+    const ctx = canvas.context;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    const cx = width / 2;
+    const cy = height / 2;
+    const radius = Math.max(1, Math.min(width, height) / 2 - 6);
+    const hour = Number(this.hour ?? 0) % 12;
+    const minute = Number(this.minute ?? 0) % 60;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#546e7a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const hand = (angle, length, widthValue, color) => {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = widthValue;
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.sin(angle) * length, -Math.cos(angle) * length);
+      ctx.stroke();
+    };
+    hand(((hour + minute / 60) / 12) * Math.PI * 2, radius * 0.5, 4, '#263238');
+    hand((minute / 60) * Math.PI * 2, radius * 0.74, 3, '#37474f');
+    ctx.beginPath();
+    ctx.fillStyle = '#263238';
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
