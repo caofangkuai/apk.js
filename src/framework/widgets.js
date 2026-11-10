@@ -1535,7 +1535,8 @@ export class CalendarView extends View {
     ctx.fillText(`${year}-${String(month + 1).padStart(2, '0')}`, width / 2, 18);
     ctx.font = '12px sans-serif';
     ctx.fillStyle = '#78909c';
-    for (let i = 0; i < 7; i += 1) ctx.fillText(String((i + (this.firstDayOfWeek | 0)) % 7), cellWidth * (i + 0.5), 34);
+    const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+    for (let i = 0; i < 7; i += 1) ctx.fillText(weekNames[(i + (this.firstDayOfWeek | 0)) % 7], cellWidth * (i + 0.5), 34);
     ctx.font = '12px sans-serif';
     for (let day = 1; day <= days; day += 1) {
       const index = start + day - 1;
