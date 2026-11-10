@@ -48,12 +48,14 @@ export async function loadApkFiles(zip, limits = {}) {
     assetFiles.set(name.slice('assets/'.length), { name, bytes: await entry.async('uint8array') });
   }
 
+  if (!zip.file('resources.arsc')) throw new Error('不是有效的 APK：缺少 resources.arsc');
   const manifestBytes = await zip.file('AndroidManifest.xml').async('uint8array');
   const manifestXml = parseBinaryXml(manifestBytes);
   const arscBytes = await zip.file('resources.arsc').async('uint8array');
   const resourceTable = new ResourceTable(arscBytes);
 
   const dexNames = Object.keys(files).filter((n) => /^classes\d*\.dex$/.test(n)).sort();
+  if (!dexNames.length) throw new Error('不是有效的 APK：缺少 classes*.dex');
   const dexFiles = [];
   for (const name of dexNames) {
     dexFiles.push(new DexFile(await zip.file(name).async('uint8array')));
