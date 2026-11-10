@@ -44,6 +44,9 @@ npm run test:all
 # 渲染性能基准（120 帧）
 npm run bench:render -- /path/to/app.apk
 
+# 诊断 APK 启动日志
+npm run diagnose -- /path/to/app.apk
+
 # 渲染 Widget 画廊
 npm run render:widgets
 

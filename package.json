@@ -33,7 +33,8 @@
     "test:api": "node tests/api.mjs",
     "test:widgets": "node tests/widgets.mjs",
     "render:widgets": "node tools/render-widgets.mjs",
-    "test:interaction": "node tests/interaction.mjs"
+    "test:interaction": "node tests/interaction.mjs",
+    "diagnose": "node tools/diagnose-apk.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"
