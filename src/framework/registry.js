@@ -3564,6 +3564,28 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/AdapterViewFlipper;', {
+      super: 'Landroid/widget/ViewAnimator;',
+      ctor: viewPeerConstructor('Landroid/widget/AdapterViewFlipper;', 'Landroid/widget/ViewAnimator;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setAdapter(Landroid/widget/Adapter;)V': (self, [adapter], vm) => {
+          self.adapter = adapter ?? null;
+          try { self.count = Number(vm.invokeByName('getCount', '()I', adapter, [])) || 0; } catch (_) { self.count = 0; }
+        },
+        'getAdapter()Landroid/widget/Adapter;': (self) => self.adapter ?? null,
+        'getCount()I': (self) => self.count | 0,
+        'setFlipInterval(I)V': (self, [value]) => { self.flipInterval = value | 0; },
+        'getFlipInterval()I': (self) => self.flipInterval | 0,
+        'startFlipping()V': (self) => { self.flipping = true; },
+        'stopFlipping()V': (self) => { self.flipping = false; },
+        'isFlipping()Z': (self) => (self.flipping ? 1 : 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ViewSwitcher;', {
       super: 'Landroid/widget/ViewAnimator;',
       ctor: viewPeerConstructor('Landroid/widget/ViewSwitcher;', 'Landroid/widget/ViewAnimator;'),
