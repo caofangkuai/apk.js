@@ -326,6 +326,16 @@ try {
   console.log('searchview smoke failed:', error.message);
 }
 
+// NumberPicker smoke
+try {
+  const picker = vm.instantiate('Landroid/widget/NumberPicker;', [engine.activity]);
+  if (!picker.$peer) vm.registry.getPeer(picker, 'Landroid/widget/NumberPicker;');
+  vm.invokeByName('setValue', '(I)V', picker, [42]);
+  console.log('numberpicker smoke:', { value: vm.invokeByName('getValue', '()I', picker, []) });
+} catch (error) {
+  console.log('numberpicker smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
