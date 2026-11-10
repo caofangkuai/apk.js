@@ -3676,6 +3676,8 @@ function buildFrameworkDefinitions(vm) {
         'getFlipInterval()I': (self) => self.flipInterval | 0,
         'startFlipping()V': (self) => {
           self.flipping = true;
+          const count = self.view?.children?.length || 0;
+          if (count > 1) vmShowChild(self, ((self.displayedChild | 0) + 1) % count);
           const tick = () => {
             if (!self.flipping) return;
             const count = self.view?.children?.length || 0;
