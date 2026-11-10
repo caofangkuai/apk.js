@@ -140,7 +140,7 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，最新 HEAD `1662926`；2026-11-09 多轮改动已推送。
+- 分支 `main`，最新 HEAD `d5ef961`；2026-11-10 多轮改动已推送。
 - 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
 - 本轮验证通过：`npm run check:refs`、`npm run test:all`、`npm run build`、`npm run site`、`npm run check:coverage`。
@@ -277,12 +277,13 @@ npm run site
 
 ### 仍待修复的系统性 UI 差异
 
-1. **MaterialShapeDrawable 阴影**：Shader host 已具备，但 Material 的 `ShadowRenderer` 三段渐变（0x44/0x14/0x00）尚未按其几何复现；当前 Card/Button 阴影仍走 Canvas shadow。
-2. **elevation overlay**：深色主题下 MaterialShapeDrawable 的 elevation overlay 颜色叠加未实现。
-3. **AnimatedVectorDrawable 属性动画**：只画目标 vector，未执行 trimPath/旋转动画（ProgressBar circular indeterminate 仍是 JS 近似）。
-4. **ListView 窗口化布局**：已支持 convertView 复用与可见位置，但仍是全量创建 + scrollY 位移，未实现 fillDown/fillUp 窗口。
-5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的回归 APK。
-6. **TextInputLayout / AppBarLayout 细节**：浮动标签、collapse 行为依赖 DEX 执行，未做 host 兜底。
+1. **MaterialShapeDrawable 阴影**：Shader/Matrix/clipPath 基元已具备，三段渐变阴影仍需真机像素对照。
+2. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。
+3. **AnimatedVectorDrawable**：已支持 rotation 类 target；trimPath/路径动画仍缺失。
+4. **ListView 窗口化**：适配器 >300 行进入懒创建，按逐行高度缓存修正偏移；超长跳转仍需继续测量。
+5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
+6. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
+7. **Dialog/AlertDialog**：框架 host 已完成 show/dismiss/getWindow/布局解析；AppCompat 复杂主题布局仍需验证。
 
 ### 建议接手顺序
 
