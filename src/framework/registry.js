@@ -4132,6 +4132,49 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/Spinner;', {
+      super: 'Landroid/widget/TextView;',
+      ctor: viewPeerConstructor('Landroid/widget/Spinner;', 'Landroid/widget/TextView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        '<init>(Landroid/content/Context;I)V': () => undefined,
+        'setAdapter(Landroid/widget/SpinnerAdapter;)V': (self, [adapter], vm) => {
+          self.adapter = adapter ?? null;
+          self.selectedPosition = 0;
+          if (adapter) {
+            try { self.count = Number(vm.invokeByName('getCount', '()I', adapter, [])) || 0; } catch (_) { self.count = 0; }
+            try { self.view?.setText?.(jsString(vm.invokeByName('getItem', '(I)Ljava/lang/Object;', adapter, [0]))); } catch (_) {}
+          }
+        },
+        'getAdapter()Landroid/widget/SpinnerAdapter;': (self) => self.adapter ?? null,
+        'getCount()I': (self) => self.count | 0,
+        'getSelectedItemPosition()I': (self) => self.selectedPosition | 0,
+        'getSelectedItem()Ljava/lang/Object;': (self, _args, vm) => {
+          if (!self.adapter) return null;
+          try { return vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [self.selectedPosition | 0]); } catch (_) { return null; }
+        },
+        'setSelection(I)V': (self, [position]) => { self.selectedPosition = position | 0; },
+        'setOnItemSelectedListener(Landroid/widget/AdapterView$OnItemSelectedListener;)V': (self, [listener]) => { self.selectionListener = listener; },
+        'getOnItemSelectedListener()Landroid/widget/AdapterView$OnItemSelectedListener;': (self) => self.selectionListener ?? null,
+        'performClick()Z': (self, _args, vm) => {
+          const count = self.count | 0;
+          if (count <= 0) return false;
+          self.selectedPosition = ((self.selectedPosition | 0) + 1) % count;
+          try {
+            const item = vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [self.selectedPosition]);
+            self.view?.setText?.(jsString(item));
+            self.view?.invalidate?.();
+            vm.invokeInterface(self.selectionListener, 'onItemSelected', '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V', [self.$object ?? self, null, self.selectedPosition, BigInt(self.selectedPosition)]);
+          } catch (_) {}
+          return true;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ArrayAdapter;', {
       super: 'Landroid/widget/BaseAdapter;',
       ctor: class ArrayAdapterPeer {
