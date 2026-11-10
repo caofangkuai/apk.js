@@ -125,6 +125,20 @@ export class ActivityHost {
       const index = stack.indexOf(this);
       if (index >= 0) stack.splice(index, 1);
     }
+    const previous = stack[stack.length - 1];
+    if (previous && previous !== this && !previous.finished) {
+      this.vm.activity = previous.object;
+      if (previous.object?.$descriptor) this.vm.activityDescriptor = previous.object.$descriptor;
+      previous.ensureWindow?.();
+      const screen = this.vm.screen;
+      if (screen && previous.decorView) {
+        screen.decorView = previous.decorView;
+        previous.decorView.setContentView(previous.contentView || null);
+        screen.contentView = previous.contentView || null;
+      }
+      previous.relayout?.();
+      this.vm.screen?.invalidate?.();
+    }
     this.vm.onActivityFinished?.(this);
   }
 

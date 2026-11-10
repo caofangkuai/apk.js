@@ -41,9 +41,10 @@ const findText = (needle) => {
   return found;
 };
 const tapText = async (needle) => {
-  const view = findText(needle);
+  let view = findText(needle);
   assert.ok(view, `找不到按钮: ${needle}`);
-  assert.ok(view.performClick?.(), `按钮不可点击: ${needle}`);
+  while (view && !view.clickable) view = view.parent;
+  assert.ok(view?.performClick?.(), `按钮不可点击: ${needle}`);
   await pump(600);
 };
 
@@ -54,4 +55,8 @@ await tapText('推进进度 +10');
 assert.ok(findText('10%'), '进度未更新');
 await tapText('动态添加一行');
 assert.ok(findText('动态行 #1'), '动态行未添加');
+await tapText('打开第二个页面');
+assert.ok(findText('第二个 Activity') || findText('收到参数'), '未进入第二个 Activity');
+await tapText('返回');
+assert.ok(findText('Hello World'), '未返回主 Activity');
 console.log('interaction OK');
