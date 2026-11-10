@@ -596,14 +596,26 @@
         loadFile(event.dataTransfer?.files?.[0]);
       });
 
+      try {
+        const savedSize = localStorage.getItem('apkjs.deviceSize');
+        if (savedSize && [...deviceSize.options].some((option) => option.value === savedSize)) {
+          deviceSize.value = savedSize;
+          const [w, h] = savedSize.split('x').map(Number);
+          sim.setDevice({ width: w, height: h });
+        }
+        const savedUrl = localStorage.getItem('apkjs.apkUrl');
+        if (savedUrl && apkUrl) apkUrl.value = savedUrl;
+      } catch (_) { /* localStorage 不可用时忽略 */ }
       deviceSize?.addEventListener('change', () => {
         const [width, height] = String(deviceSize.value || '360x640').split('x').map(Number);
         sim.setDevice({ width, height });
+        try { localStorage.setItem('apkjs.deviceSize', width + 'x' + height); } catch (_) {}
         syncVmStats(sim);
         setStatus('已切换到 ' + width + '×' + height, 'info');
       });
       loadUrlBtn?.addEventListener('click', async () => {
         const url = apkUrl?.value?.trim();
+        try { if (url) localStorage.setItem('apkjs.apkUrl', url); } catch (_) {}
         if (!url) { setStatus('请输入 APK 地址', 'error'); return; }
         setStatus('正在下载 APK…', 'busy');
         try {
