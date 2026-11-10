@@ -14,6 +14,12 @@
 - 主题：Material 默认色、uiMode 夜间模式、nightMode 渲染选项。
 - 补齐常用 host：org.json、BatteryManager、Camera、Process、Settings.Global、BitSet、PointF、Accessibility 等。
 
+### Widgets
+
+- 选择类：CheckBox、RadioButton/RadioGroup、ToggleButton、Switch、SeekBar、RatingBar、Spinner、AutoCompleteTextView/MultiAutoCompleteTextView、Gallery、GridView。
+- 容器类：ViewAnimator/ViewFlipper/ViewSwitcher/TextSwitcher/ImageSwitcher、AdapterViewFlipper。
+- 计时/列表：Chronometer、ViewStub、Space、ImageButton、ArrayAdapter。
+
 ### 工具链
 
 - `npm run bench:render`：启动/帧耗时基准。
