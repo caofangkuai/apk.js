@@ -454,7 +454,8 @@ function dialogLayout(peer, screen) {
   const message = String(peer.message ?? '');
   const lines = Math.max(1, Math.ceil(message.length / 22));
   const contentHeight = peer.contentView ? Math.min(Math.round((screen?.height || 640) * 0.7), 480) : 0;
-  const itemHeight = Array.isArray(peer.items) ? peer.items.length * 44 : 0;
+  const itemCount = Array.isArray(peer.items) ? peer.items.length : (peer.adapter ? Number(peer.adapterCount) || 0 : 0);
+  const itemHeight = itemCount * 44;
   const height = Math.max(contentHeight, itemHeight, Math.min(screen?.height || 640, 96 + lines * 20 + (peer.positiveText || peer.negativeText ? 56 : 16)));
   return { width, height, left: Math.round(((screen?.width || 360) - width) / 2), top: Math.round(((screen?.height || 640) - height) / 2) };
 }
@@ -506,7 +507,17 @@ function dialogShow(peer) {
         }
       }
       peer.itemRects = [];
-      if (Array.isArray(peer.items)) {
+      if (peer.adapter) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+        const count = Number(peer.adapterCount) || 0;
+        for (let index = 0; index < count; index += 1) {
+          const top = layout.top + 20 + index * 44;
+          const value = peer.adapterItems?.[index] ?? String(index);
+          ctx.fillText(String(value), layout.left + 20, top + 26);
+          peer.itemRects.push({ left: layout.left, top, right: layout.left + layout.width, bottom: top + 44, index });
+        }
+      } else if (Array.isArray(peer.items)) {
         ctx.textAlign = 'left';
         ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
         peer.items.forEach((item, index) => {
@@ -4030,6 +4041,19 @@ function buildFrameworkDefinitions(vm) {
         'setCancelable(Z)Landroid/app/AlertDialog$Builder;': (self, [value]) => { self.cancelable = !!value; return self.$object ?? self; },
         'setNeutralButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.neutralText = jsString(text); self.neutralListener = listener; return self.$object ?? self; },
         'setView(Landroid/view/View;)Landroid/app/AlertDialog$Builder;': (self, [view]) => { self.contentView = view ?? null; return self.$object ?? self; },
+        'setAdapter(Landroid/widget/ListAdapter;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [adapter, listener], vm) => {
+          self.adapter = adapter ?? null;
+          self.itemListener = listener;
+          self.adapterCount = 0;
+          self.adapterItems = [];
+          if (adapter) {
+            try { self.adapterCount = Number(vm.invokeByName('getCount', '()I', adapter, [])) || 0; } catch (_) {}
+            for (let index = 0; index < self.adapterCount; index += 1) {
+              try { self.adapterItems.push(vm.invokeByName('getItem', '(I)Ljava/lang/Object;', adapter, [index])); } catch (_) { self.adapterItems.push(index); }
+            }
+          }
+          return self.$object ?? self;
+        },
         'setSingleChoiceItems([Ljava/lang/CharSequence;ILandroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [items, checked, listener]) => {
           const values = items?.$data || items || [];
           self.items = Array.from(values, (item) => jsString(item));
