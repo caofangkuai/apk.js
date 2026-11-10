@@ -3564,6 +3564,42 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/Chronometer;', {
+      super: 'Landroid/widget/TextView;',
+      ctor: viewPeerConstructor('Landroid/widget/Chronometer;', 'Landroid/widget/TextView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setBase(J)V': (self, [base]) => { self.base = Number(base) || Date.now(); self.refreshChronometer?.(); },
+        'getBase()J': (self) => BigInt(self.base || Date.now()),
+        'setFormat(Ljava/lang/String;)V': (self, [format]) => { self.format = jsString(format); self.refreshChronometer?.(); },
+        'setCountDown(Z)V': (self, [value]) => { self.countDown = !!value; },
+        'isCountDown()Z': (self) => (self.countDown ? 1 : 0),
+        'start()V': (self) => {
+          self.running = true;
+          const tick = () => {
+            if (!self.running) return;
+            self.refreshChronometer?.();
+            self.timer = setTimeout(tick, 1000);
+            self.timer?.unref?.();
+          };
+          self.refreshChronometer = () => {
+            const elapsed = Math.max(0, ((Date.now() - (self.base || Date.now())) / 1000) | 0);
+            const value = self.countDown ? Math.max(0, elapsed) : elapsed;
+            const text = self.format ? String(self.format).replace('%s', String(value)) : String(value);
+            self.view?.setText?.(text);
+            self.view?.invalidate?.();
+          };
+          tick();
+        },
+        'stop()V': (self) => { self.running = false; if (self.timer) clearTimeout(self.timer); self.timer = null; },
+        'setOnChronometerTickListener(Landroid/widget/Chronometer$OnChronometerTickListener;)V': (self, [listener]) => { self.tickListener = listener; },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Space;', {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/Space;', 'Landroid/view/View;'),
