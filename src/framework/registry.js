@@ -958,6 +958,30 @@ function buildFrameworkDefinitions(vm) {
         }
       },
       methods: {
+        'showDialog(I)Landroid/app/Dialog;': (self, [id], vm) => {
+          const activity = self.object || self.$object || vm.activity;
+          if (!vm.$activityDialogs) vm.$activityDialogs = new Map();
+          let dialog = vm.$activityDialogs.get(id | 0);
+          if (!dialog) {
+            try { dialog = vm.invokeByName('onCreateDialog', '(I)Landroid/app/Dialog;', activity, [id | 0]); } catch (_) { dialog = null; }
+            if (dialog) vm.$activityDialogs.set(id | 0, dialog);
+          }
+          if (dialog) {
+            try { vm.invokeByName('onPrepareDialog', '(ILandroid/app/Dialog;)V', activity, [id | 0, dialog]); } catch (_) {}
+            try { vm.invokeByName('show', '()V', dialog, []); } catch (_) {}
+          }
+          return dialog ?? null;
+        },
+        'showDialog(ILandroid/os/Bundle;)Landroid/app/Dialog;': (self, [id], vm) => vm.invokeByName('showDialog', '(I)Landroid/app/Dialog;', self.object || self.$object || vm.activity, [id]),
+        'dismissDialog(I)V': (self, [id], vm) => {
+          const dialog = vm.$activityDialogs?.get(id | 0);
+          if (dialog) { try { vm.invokeByName('dismiss', '()V', dialog, []); } catch (_) {} }
+        },
+        'removeDialog(I)V': (self, [id], vm) => {
+          const dialog = vm.$activityDialogs?.get(id | 0);
+          if (dialog) { try { vm.invokeByName('dismiss', '()V', dialog, []); } catch (_) {} vm.$activityDialogs.delete(id | 0); }
+        },
+
         'requestPermissions([Ljava/lang/String;I)V': (self, [permissions, requestCode], vm) => {
           const count = permissions?.$data?.length ?? 0;
           const granted = vm.newArray('I', count, new Array(count).fill(0));
