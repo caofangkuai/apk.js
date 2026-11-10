@@ -477,6 +477,7 @@
             <h2 class="card-title">运行日志</h2>
             <div style="display:flex; gap:8px; align-items:center;">
               <button id="clear-log-btn" class="btn btn-ghost" type="button" style="padding:4px 10px; font-size:12px;">清空</button>
+              <button id="export-log-btn" class="btn btn-ghost" type="button" style="padding:4px 10px; font-size:12px;">导出</button>
               <span class="card-note">DEX 解释器与 Framework 输出</span>
             </div>
           </div>
@@ -522,6 +523,7 @@
     const screenshotBtn = document.getElementById('screenshot-btn');
     const stopBtn = document.getElementById('stop-btn');
     const clearLogBtn = document.getElementById('clear-log-btn');
+    const exportLogBtn = document.getElementById('export-log-btn');
 
     let logCount = 0;
     let cleared = false;
@@ -633,6 +635,15 @@
         syncVmStats(sim);
       });
       stopBtn && (stopBtn.disabled = false);
+      exportLogBtn?.addEventListener('click', () => {
+        const text = logEl.innerText || '';
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'apkjs-log.txt';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
       clearLogBtn?.addEventListener('click', () => {
         logEl.replaceChildren();
         cleared = false;
