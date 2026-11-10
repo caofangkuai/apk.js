@@ -3754,10 +3754,26 @@ function vmShowChild(self, index) {
       ctor: viewPeerConstructor('Landroid/widget/ViewStub;'),
       methods: {
         'setVisibility(I)V': (self, [value]) => self.view?.setVisibility(value | 0),
-        'setInflatedId(I)V': () => undefined,
-        'setLayoutResource(I)V': () => undefined,
-        'setLayoutInflater(Landroid/view/LayoutInflater;)V': () => undefined,
-        'inflate()Landroid/view/View;': (self) => self.view?.inflate?.() ?? null,
+        'setInflatedId(I)V': (self, [value]) => { self.inflatedId = value | 0; },
+        'setLayoutResource(I)V': (self, [value]) => { self.layoutResource = value >>> 0; },
+        'setLayoutInflater(Landroid/view/LayoutInflater;)V': (self, [inflater]) => { self.inflater = inflater ?? null; },
+        'inflate()Landroid/view/View;': (self, _args, vm) => {
+          if (!self.layoutResource || !self.view) return null;
+          const inflater = self.inflater || new LayoutInflater(vm.contextObject);
+          inflater.vm = vm;
+          const inflated = inflater.inflate(self.layoutResource);
+          const parent = self.view.parent;
+          if (parent) {
+            const index = parent.children?.indexOf(self.view) ?? -1;
+            if (index >= 0) parent.children.splice(index, 1, inflated);
+            inflated.parent = parent;
+            parent.$zOrder = null;
+            parent.requestLayout?.();
+            parent.invalidate?.();
+          }
+          if (self.inflatedId && inflated) inflated.id = self.inflatedId;
+          return viewObject(vm, inflated);
+        },
       },
     })
   );
