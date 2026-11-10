@@ -433,6 +433,10 @@
           <div id="drop-zone" class="drop-zone" role="button" tabindex="0">
             把 APK 拖到这里，或 <strong>点击选择文件</strong>
           </div>
+          <div class="toolbar-row" style="margin-top: 12px;">
+            <input id="apk-url" type="url" placeholder="或输入 APK 的 HTTPS 地址" style="flex:1; min-width:0; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.06); color:inherit;" />
+            <button id="load-url-btn" class="btn btn-ghost" type="button">从 URL 载入</button>
+          </div>
         </div>
 
         <div class="card">
@@ -501,6 +505,8 @@
     const pickBtn = document.getElementById('pick-btn');
     const fileInput = document.getElementById('apk-file');
     const dropZone = document.getElementById('drop-zone');
+    const apkUrl = document.getElementById('apk-url');
+    const loadUrlBtn = document.getElementById('load-url-btn');
     const screenshotBtn = document.getElementById('screenshot-btn');
 
     let logCount = 0;
@@ -574,6 +580,19 @@
         loadFile(event.dataTransfer?.files?.[0]);
       });
 
+      loadUrlBtn?.addEventListener('click', async () => {
+        const url = apkUrl?.value?.trim();
+        if (!url) { setStatus('请输入 APK 地址', 'error'); return; }
+        setStatus('正在下载 APK…', 'busy');
+        try {
+          await sim.loadFromUrl(url);
+          setStatus('运行中：' + (sim.vm?.packageName || url), 'ok');
+          syncVmStats(sim);
+        } catch (error) {
+          appendLog({ level: 'error', tag: 'load', message: error.message });
+          setStatus('加载失败：' + error.message, 'error');
+        }
+      });
       sampleBtn && (sampleBtn.disabled = false);
       screenshotBtn?.addEventListener('click', () => {
         try {
