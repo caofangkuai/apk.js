@@ -5415,7 +5415,7 @@ function makeRegexMatcher(vm, regex, input) {
 }
 
 function formatJavaString(format, args) {
-  const values = isJavaArray(args) ? args.$data : [];
+  const values = Array.isArray(args) ? args : (isJavaArray(args) ? args.$data : []);
   let index = 0;
   return jsString(format).replace(/%([0-9]+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
     if (type === '%') return '%';
@@ -5429,3 +5429,5 @@ function formatJavaString(format, args) {
     return value === null || value === undefined ? 'null' : jsString(value);
   });
 }
+
+export { formatJavaString };

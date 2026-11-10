@@ -9,7 +9,7 @@
     "build:dev": "cross-env NODE_ENV=development webpack",
     "test": "node tests/run.js",
     "check": "node tests/check.js",
-    "test:all": "npm run check:coverage && npm run check:duplicates && npm run check:playground && npm run check:refs && npm run test && npm run check && npm run test:parse && npm run test:api && npm run test:zip && npm run test:listview && npm run test:diagnose && npm run test:interaction && npm run test:widgets && npm run test:drawables",
+    "test:all": "npm run check:coverage && npm run check:duplicates && npm run check:playground && npm run check:refs && npm run test && npm run check && npm run test:parse && npm run test:api && npm run test:zip && npm run test:listview && npm run test:format && npm run test:diagnose && npm run test:interaction && npm run test:widgets && npm run test:drawables",
     "test:parse": "node tests/parse-smoke.mjs",
     "render": "node tools/render-apk.mjs",
     "serve": "python3 -m http.server 8080 --directory site",
@@ -37,7 +37,8 @@
     "diagnose": "node tools/diagnose-apk.mjs",
     "test:touch": "node tests/touch.mjs",
     "test:ui": "npm run setup:fonts && npm run test:touch && npm run test:interaction",
-    "test:diagnose": "node tests/diagnose.mjs"
+    "test:diagnose": "node tests/diagnose.mjs",
+    "test:format": "node tests/format.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"
