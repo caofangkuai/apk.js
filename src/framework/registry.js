@@ -3701,6 +3701,20 @@ function vmShowChild(self, index) {
 }
 
   defs.push(
+    nativeDef('Landroid/widget/DigitalClock;', {
+      super: 'Landroid/widget/TextView;',
+      ctor: viewPeerConstructor('Landroid/widget/DigitalClock;', 'Landroid/widget/TextView;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setTimeZone(Ljava/lang/String;)V': (self, [zone]) => { self.timeZone = jsString(zone); },
+        'getTimeZone()Ljava/lang/String;': (self) => self.timeZone ?? '',
+        'setFormat(Ljava/lang/String;)V': (self, [format]) => { self.format = jsString(format); },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/TextClock;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/TextClock;', 'Landroid/widget/TextView;'),
