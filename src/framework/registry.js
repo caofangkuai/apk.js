@@ -4384,6 +4384,24 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/CalendarView;', {
+      super: 'Landroid/widget/FrameLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/CalendarView;', 'Landroid/widget/FrameLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setOnDateChangeListener(Landroid/widget/CalendarView$OnDateChangeListener;)V': (self, [listener]) => { self.dateChangeListener = listener; },
+        'setDate(J)V': (self, [millis]) => { self.date = Number(millis) || 0; },
+        'setDate(JZZ)V': (self, [millis]) => { self.date = Number(millis) || 0; },
+        'getDate()J': (self) => BigInt(self.date || 0),
+        'setFirstDayOfWeek(I)V': (self, [day]) => { self.firstDayOfWeek = day | 0; },
+        'getFirstDayOfWeek()I': (self) => self.firstDayOfWeek | 0,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/DatePicker;', {
       super: 'Landroid/widget/FrameLayout;',
       ctor: viewPeerConstructor('Landroid/widget/DatePicker;', 'Landroid/widget/FrameLayout;'),
