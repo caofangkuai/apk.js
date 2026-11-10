@@ -1503,3 +1503,57 @@ export class DatePicker extends TextView {
     this.invalidate?.();
   }
 }
+
+export class CalendarView extends View {
+  constructor(context = null) {
+    super(context);
+    this.date = Date.now();
+    this.firstDayOfWeek = 0;
+  }
+
+  setDate(millis) {
+    this.date = Number(millis) || Date.now();
+    this.invalidate?.();
+  }
+
+  onDraw(canvas) {
+    const ctx = canvas.context;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    const date = new Date(this.date);
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const first = new Date(year, month, 1);
+    const start = (first.getDay() - (this.firstDayOfWeek | 0) + 7) % 7;
+    const days = new Date(year, month + 1, 0).getDate();
+    const cellWidth = width / 7;
+    const cellHeight = (height - 32) / 6;
+    ctx.save();
+    ctx.fillStyle = '#263238';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${year}-${String(month + 1).padStart(2, '0')}`, width / 2, 18);
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#78909c';
+    for (let i = 0; i < 7; i += 1) ctx.fillText(String((i + (this.firstDayOfWeek | 0)) % 7), cellWidth * (i + 0.5), 34);
+    ctx.font = '12px sans-serif';
+    for (let day = 1; day <= days; day += 1) {
+      const index = start + day - 1;
+      const row = Math.floor(index / 7);
+      const col = index % 7;
+      const x = cellWidth * (col + 0.5);
+      const y = 32 + cellHeight * (row + 0.5);
+      if (day === date.getDate()) {
+        ctx.fillStyle = '#00897b';
+        ctx.beginPath();
+        ctx.arc(x, y, Math.min(cellWidth, cellHeight) * 0.34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+      } else {
+        ctx.fillStyle = '#37474f';
+      }
+      ctx.fillText(String(day), x, y + 4);
+    }
+    ctx.restore();
+  }
+}
