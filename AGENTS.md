@@ -28,13 +28,16 @@ npm run build:dev
 npm run test
 npm run check
 
+# Widget 绘制像素级回归（node-canvas）
+npm run test:widgets
+
 # Drawable / 绘制像素级回归（node-canvas）
 npm run test:drawables
 
 # 检查 native 类重复注册
 npm run check:duplicates
 
-# 全部回归一起跑（coverage + duplicates + test + parse + zip + listview + drawables）
+# 全部回归一起跑（coverage + duplicates + playground + parse + api + zip + listview + widgets + drawables）
 npm run test:all
 
 
