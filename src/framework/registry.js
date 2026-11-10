@@ -4221,6 +4221,33 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/SeekBar;', {
+      super: 'Landroid/widget/ProgressBar;',
+      ctor: viewPeerConstructor('Landroid/widget/SeekBar;', 'Landroid/widget/ProgressBar;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setOnSeekBarChangeListener(Landroid/widget/SeekBar$OnSeekBarChangeListener;)V': (self, [listener]) => { self.seekListener = listener; },
+        'getOnSeekBarChangeListener()Landroid/widget/SeekBar$OnSeekBarChangeListener;': (self) => self.seekListener ?? null,
+        'performClick()Z': (self, _args, vm) => {
+          if (!self.view) return false;
+          const max = Math.max(1, self.view.max | 0);
+          const next = Math.min(max, (self.view.progress | 0) + Math.ceil(max / 10));
+          self.view.progress = next;
+          self.view.invalidate?.();
+          try {
+            vm.invokeInterface(self.seekListener, 'onProgressChanged', '(Landroid/widget/SeekBar;IZ)V', [self.$object ?? self, next, true]);
+            vm.invokeInterface(self.seekListener, 'onStartTrackingTouch', '(Landroid/widget/SeekBar;)V', [self.$object ?? self]);
+            vm.invokeInterface(self.seekListener, 'onStopTrackingTouch', '(Landroid/widget/SeekBar;)V', [self.$object ?? self]);
+          } catch (_) {}
+          return true;
+        },
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/CheckBox;', {
       super: 'Landroid/widget/CompoundButton;',
       ctor: viewPeerConstructor('Landroid/widget/CheckBox;', 'Landroid/widget/CompoundButton;'),

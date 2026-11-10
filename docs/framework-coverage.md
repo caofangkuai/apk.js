@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：337
-- 方法/构造函数键（静态统计）：3315
+- 注册的 native 类：338
+- 方法/构造函数键（静态统计）：3321
 
 ## Native 类清单
 
@@ -216,6 +216,7 @@
 | `Landroid/widget/RelativeLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/Scroller;` | registry.js |
 | `Landroid/widget/ScrollView;` | registry.js |
+| `Landroid/widget/SeekBar;` | registry.js |
 | `Landroid/widget/Spinner;` | registry.js |
 | `Landroid/widget/SpinnerAdapter;` | registry.js |
 | `Landroid/widget/Switch;` | registry.js |
