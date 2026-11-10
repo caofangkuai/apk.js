@@ -26,7 +26,7 @@
 - **纯前端。** 解压、解析、执行、渲染都在浏览器内完成，没有后端服务。
 - **DEX 解释器。** 覆盖 Dalvik 指令集的主要部分，支持异常处理、`switch`、数组、字段和方法调用。
 - **资源解析。** 读取二进制 `AndroidManifest.xml`（AXML）和 `resources.arsc` 资源表。
-- **Framework 子集。** `Activity` 生命周期、`View` 树的测量与布局、`LinearLayout` / `FrameLayout` / `RelativeLayout` / `ScrollView`、`TextView` / `Button` / `EditText` / `ImageView` / `ProgressBar`、`ActionBar` / `Toolbar`、`Toast`、`Context` / `Intent` / `Bundle` 等。
+- **Framework 子集。** `Activity` 生命周期、`View` 树的测量与布局、`LinearLayout` / `FrameLayout` / `RelativeLayout` / `ScrollView`、`TextView` / `Button` / `EditText` / `ImageView` / `ProgressBar` / `ListView` / `Spinner` / `CheckBox` / `RadioGroup` / `SeekBar` / `Dialog`、`ActionBar` / `Toolbar`、`Toast`、`Context` / `Intent` / `Bundle` 等。
 - **可绘制资源与主题。** 绘制 `shape` / `vector` / `ripple` / `selector`，解包 `RippleDrawable` 内容，处理 `GradientDrawable`、`backgroundTint`、`@android:color/*` 解析，以及 `Context.setTheme` 的主题继承链。
 - **软键盘输入。** 点击 `EditText` 会聚焦并弹出系统键盘（通过隐藏输入框桥接），支持 `InputMethodManager`、光标闪烁，以及 `getSelectionStart` / `setSelection`。
 - **系统与反射。** `android.os.Build` / `VERSION`、`Class.forName` / `getMethod` / `Method.invoke`（含基本类型参数拆箱），以及带 `Intent` 参数的 `startActivity` 多 Activity 跳转。

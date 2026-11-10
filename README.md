@@ -26,7 +26,7 @@ Run Android APKs in the browser with plain JavaScript. apk.js parses `classes.de
 - **Pure frontend.** Unpacking, parsing, execution and rendering all happen inside the browser. There is no backend.
 - **DEX interpreter.** Covers the bulk of the Dalvik instruction set, with exception handling, `switch`, arrays, fields and method dispatch.
 - **Resource parsing.** Binary `AndroidManifest.xml` (AXML) and the `resources.arsc` resource table.
-- **Framework subset.** `Activity` lifecycle, `View` tree with measure and layout, `LinearLayout` / `FrameLayout` / `RelativeLayout` / `ScrollView`, `TextView` / `Button` / `EditText` / `ImageView` / `ProgressBar`, `ActionBar` / `Toolbar`, `Toast`, `Context` / `Intent` / `Bundle`, and more.
+- **Framework subset.** `Activity` lifecycle, `View` tree with measure and layout, `LinearLayout` / `FrameLayout` / `RelativeLayout` / `ScrollView`, `TextView` / `Button` / `EditText` / `ImageView` / `ProgressBar` / `ListView` / `Spinner` / `CheckBox` / `RadioGroup` / `SeekBar` / `Dialog`, `ActionBar` / `Toolbar`, `Toast`, `Context` / `Intent` / `Bundle`, and more.
 - **Drawables and themes.** `shape` / `vector` / `ripple` / `selector` rendering, `RippleDrawable` content unwrapping, `GradientDrawable`, `backgroundTint`, `@android:color/*` resolution, and `Context.setTheme` inheritance.
 - **Soft keyboard input.** Tapping an `EditText` focuses it and raises the system keyboard through a hidden-input bridge. Supports `InputMethodManager`, a blinking caret, and `getSelectionStart` / `setSelection`.
 - **System and reflection.** `android.os.Build` / `VERSION`, `Class.forName` / `getMethod` / `Method.invoke` (including primitive argument unboxing), and multi-`Activity` navigation through `startActivity` with `Intent` extras.
