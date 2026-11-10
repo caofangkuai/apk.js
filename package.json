@@ -31,7 +31,8 @@
     "check:duplicates": "node tools/check-duplicates.mjs",
     "check:playground": "node tools/check-playground.mjs",
     "test:api": "node tests/api.mjs",
-    "test:widgets": "node tests/widgets.mjs"
+    "test:widgets": "node tests/widgets.mjs",
+    "render:widgets": "node tools/render-widgets.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"

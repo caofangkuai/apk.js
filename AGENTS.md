@@ -44,6 +44,9 @@ npm run test:all
 # 渲染性能基准（120 帧）
 npm run bench:render -- /path/to/app.apk
 
+# 渲染 Widget 画廊
+npm run render:widgets
+
 # 把真实 APK 渲染成 PNG，输出到 image-debug/
 npm run render -- /path/to/app.apk 输出名
 
