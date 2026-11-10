@@ -958,6 +958,14 @@ function buildFrameworkDefinitions(vm) {
         }
       },
       methods: {
+        'requestPermissions([Ljava/lang/String;I)V': (self, [permissions, requestCode], vm) => {
+          const count = permissions?.$data?.length ?? 0;
+          const granted = vm.newArray('I', count, new Array(count).fill(0));
+          const activity = self.object || self.$object || vm.activity;
+          try { vm.invokeByName('onRequestPermissionsResult', '(I[Ljava/lang/String;[I)V', activity, [requestCode | 0, permissions, granted]); } catch (_) {}
+        },
+        'checkCallingOrSelfPermission(Ljava/lang/String;)I': () => 0,
+        'checkCallingPermission(Ljava/lang/String;)I': () => 0,
         'onCreatePanelView(I)Landroid/view/View;': () => null,
         'onCreatePanelMenu(ILandroid/view/Menu;)Z': (self, [featureId, menu], vm) => {
           if ((featureId | 0) !== 0 || !menu) return false;
