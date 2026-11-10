@@ -206,7 +206,7 @@ function runShellCommand(command) {
       .join('\n');
   }
   if (text.startsWith('cat ')) {
-    const target = text.slice(4).trim().replace(/["']/g, '');
+    const target = text.slice(4).trim().split(/\s+/)[0].replace(/["']/g, '');
     const value = readFsText(target);
     return value ?? '';
   }
@@ -1231,6 +1231,28 @@ function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       methods: {
         'registerReceiver(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;': (self, [receiver, filter], vm) => {
+          const action = filter?.actions?.[0] || filter?.action || 'android.intent.action.BATTERY_CHANGED';
+          if (action !== 'android.intent.action.BATTERY_CHANGED') return null;
+          const intent = vm.allocateRawObject('Landroid/content/Intent;');
+          intent.$peer = { vm, action, extras: new Map([
+            ['level', 87], ['scale', 100], ['voltage', 4200], ['temperature', 300],
+            ['status', 2], ['health', 2], ['plugged', 1], ['present', true], ['technology', 'Li-ion'],
+          ]), flags: 0 };
+          if (receiver) { try { vm.invokeInterface(receiver, 'onReceive', '(Landroid/content/Context;Landroid/content/Intent;)V', [self.$object || self, intent]); } catch (_) {} }
+          return intent;
+        },
+        'registerReceiver(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;I)Landroid/content/Intent;': (self, [receiver, filter], vm) => {
+          const action = filter?.actions?.[0] || filter?.action || 'android.intent.action.BATTERY_CHANGED';
+          if (action !== 'android.intent.action.BATTERY_CHANGED') return null;
+          const intent = vm.allocateRawObject('Landroid/content/Intent;');
+          intent.$peer = { vm, action, extras: new Map([
+            ['level', 87], ['scale', 100], ['voltage', 4200], ['temperature', 300],
+            ['status', 2], ['health', 2], ['plugged', 1], ['present', true], ['technology', 'Li-ion'],
+          ]), flags: 0 };
+          if (receiver) { try { vm.invokeInterface(receiver, 'onReceive', '(Landroid/content/Context;Landroid/content/Intent;)V', [self.$object || self, intent]); } catch (_) {} }
+          return intent;
+        },
+        'registerReceiver(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;Ljava/lang/String;Landroid/os/Handler;)Landroid/content/Intent;': (self, [receiver, filter], vm) => {
           const action = filter?.actions?.[0] || filter?.action || 'android.intent.action.BATTERY_CHANGED';
           if (action !== 'android.intent.action.BATTERY_CHANGED') return null;
           const intent = vm.allocateRawObject('Landroid/content/Intent;');
