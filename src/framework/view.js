@@ -2043,7 +2043,10 @@ export class ViewGroup extends View {
       }
       order = this.$zOrder;
     }
-    for (const child of order) child.draw(canvas);
+    for (const child of order) {
+      if ((child.visibility | 0) === 8 || (child.visibility | 0) === 4) continue;
+      child.draw(canvas);
+    }
     if (scrolled) canvas.restore();
     if (this.clipChildren) canvas.restore();
   }
