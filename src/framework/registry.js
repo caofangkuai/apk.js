@@ -4137,6 +4137,53 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/AutoCompleteTextView;', {
+      super: 'Landroid/widget/EditText;',
+      ctor: viewPeerConstructor('Landroid/widget/AutoCompleteTextView;', 'Landroid/widget/EditText;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setAdapter(Landroid/widget/ListAdapter;)V': (self, [adapter], vm) => {
+          self.adapter = adapter ?? null;
+          try { self.count = Number(vm.invokeByName('getCount', '()I', adapter, [])) || 0; } catch (_) { self.count = 0; }
+        },
+        'getAdapter()Landroid/widget/ListAdapter;': (self) => self.adapter ?? null,
+        'setThreshold(I)V': (self, [value]) => { self.threshold = value | 0; },
+        'getThreshold()I': (self) => self.threshold | 0,
+        'setOnItemClickListener(Landroid/widget/AdapterView$OnItemClickListener;)V': (self, [listener]) => { self.itemClickListener = listener; },
+        'showDropDown()V': (self, _args, vm) => {
+          const count = self.count | 0;
+          if (count <= 0) return;
+          const items = [];
+          for (let index = 0; index < count; index += 1) {
+            try { items.push(jsString(vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [index]))); } catch (_) { items.push(String(index)); }
+          }
+          dialogShow({
+            vm,
+            items,
+            cancelable: true,
+            onItemSelected: (index) => {
+              try {
+                const item = vm.invokeByName('getItem', '(I)Ljava/lang/Object;', self.adapter, [index]);
+                self.view?.setText?.(jsString(item));
+                self.view?.invalidate?.();
+                vm.invokeInterface(self.itemClickListener, 'onItemClick', '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V', [self.$object ?? self, null, index, BigInt(index)]);
+              } catch (_) {}
+            },
+          });
+        },
+        'dismissDropDown()V': (self) => {
+          const overlays = self.vm?.screen?.overlays || [];
+          const overlay = overlays[overlays.length - 1];
+          if (overlay) self.vm.screen.removeOverlay?.(overlay);
+        },
+        'isPopupShowing()Z': (self) => ((self.vm?.screen?.overlays?.length || 0) > 0 ? 1 : 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/Spinner;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Spinner;', 'Landroid/widget/TextView;'),
