@@ -3803,6 +3803,53 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ArrayAdapter;', {
+      super: 'Landroid/widget/BaseAdapter;',
+      ctor: class ArrayAdapterPeer {
+        constructor() { this.objects = []; this.$dirty = 0; }
+      },
+      methods: {
+        '<init>(Landroid/content/Context;I)V': (self, [context]) => { self.context = context ?? null; self.objects = []; },
+        '<init>(Landroid/content/Context;II)V': (self, [context]) => { self.context = context ?? null; self.objects = []; },
+        '<init>(Landroid/content/Context;ILjava/util/List;)V': (self, [context, _resource, list]) => {
+          self.context = context ?? null;
+          self.objects = [...(list?.$peer?.items || list?.items || [])];
+        },
+        '<init>(Landroid/content/Context;I[Ljava/lang/Object;)V': (self, [context, _resource, array]) => {
+          self.context = context ?? null;
+          self.objects = Array.from(array?.$data || array || []);
+        },
+        '<init>(Landroid/content/Context;IILjava/util/List;)V': (self, [context, _resource, _textViewResourceId, list]) => {
+          self.context = context ?? null;
+          self.objects = [...(list?.$peer?.items || list?.items || [])];
+        },
+        'getCount()I': (self) => (self.objects || []).length,
+        'getItem(I)Ljava/lang/Object;': (self, [position]) => (self.objects || [])[position | 0] ?? null,
+        'getItemId(I)J': (_self, [position]) => BigInt(position | 0),
+        'getView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': (self, [position, convertView, _parent], vm) => {
+          let view = unwrapView(convertView);
+          if (!view) {
+            view = new TextView(self.context ?? null);
+            view.setPadding?.(16, 12, 16, 12);
+            view.setTextSize?.(16);
+          }
+          const value = (self.objects || [])[position | 0];
+          view.setText?.(value === null || value === undefined ? '' : jsString(value));
+          return viewObject(vm, view);
+        },
+        'add(Ljava/lang/Object;)V': (self, [value]) => { self.objects.push(value); self.$dirty++; },
+        'addAll(Ljava/util/Collection;)V': (self, [collection]) => { self.objects.push(...(collection?.$peer?.items || [])); self.$dirty++; },
+        'insert(Ljava/lang/Object;I)V': (self, [value, index]) => { self.objects.splice(index | 0, 0, value); self.$dirty++; },
+        'remove(Ljava/lang/Object;)V': (self, [value]) => { const i = self.objects.indexOf(value); if (i >= 0) self.objects.splice(i, 1); self.$dirty++; },
+        'clear()V': (self) => { self.objects = []; self.$dirty++; },
+        'getPosition(Ljava/lang/Object;)I': (self, [value]) => self.objects.indexOf(value),
+        'notifyDataSetChanged()V': (self) => { self.$dirty++; },
+        'setNotifyOnChange(Z)V': () => undefined,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/BaseAdapter;', {
       super: 'Ljava/lang/Object;',
       interfaces: ['Landroid/widget/ListAdapter;', 'Landroid/widget/SpinnerAdapter;'],
