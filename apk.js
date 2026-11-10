@@ -118,7 +118,7 @@ export class ApkSimulator {
       nightMode: this.device.nightMode,
       onLog: (entry) => this.options.onLog?.(entry),
       onFinished: () => {
-        this.running = false;
+        this.activityFinished = true;
         this.options.onFinished?.();
       },
     });
