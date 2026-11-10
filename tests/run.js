@@ -336,6 +336,17 @@ try {
   console.log('numberpicker smoke failed:', error.message);
 }
 
+// TimePicker smoke
+try {
+  const time = vm.instantiate('Landroid/widget/TimePicker;', [engine.activity]);
+  if (!time.$peer) vm.registry.getPeer(time, 'Landroid/widget/TimePicker;');
+  vm.invokeByName('setCurrentHour', '(Ljava/lang/Integer;)V', time, [10]);
+  vm.invokeByName('setCurrentMinute', '(Ljava/lang/Integer;)V', time, [30]);
+  console.log('timepicker smoke:', { hour: vm.invokeByName('getCurrentHour', '()Ljava/lang/Integer;', time, []), minute: vm.invokeByName('getCurrentMinute', '()Ljava/lang/Integer;', time, []) });
+} catch (error) {
+  console.log('timepicker smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
