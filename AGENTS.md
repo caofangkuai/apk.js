@@ -296,8 +296,7 @@ npm run site
 5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
 6. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
 7. **Dialog/AlertDialog**：框架 host 已完成 show/dismiss/getWindow/布局解析；AppCompat 复杂主题布局仍需验证。
-8. **连续触摸**：同一视图在第一次点击后，第二次合成触摸需要显式 `ACTION_CANCEL` 才会稳定触发；真实浏览器事件仍可用，回归测试已按此处理。
-9. **相机页**：`CameraManager.getCameraIdList()` 为空导致相机页空白；需要完整 `CameraCharacteristics`/`StreamConfigurationMap` host 才能显示。
+8. **相机页**：`CameraManager.getCameraIdList()` 为空导致相机页空白；需要完整 `CameraCharacteristics`/`StreamConfigurationMap` host 才能显示。
 
 ### 建议接手顺序
 

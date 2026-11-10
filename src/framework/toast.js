@@ -68,8 +68,7 @@ class ToastOverlay {
   }
 
   handleTouch() {
-    this.close();
-    return true;
+    return false;
   }
 
   draw(ctx, screen) {

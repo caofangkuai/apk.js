@@ -49,8 +49,6 @@ const text = () => {
 await pump(400);
 await tap(324, 500);
 assert.ok(text().includes('已点击 1 次'), '触摸未触发点击回调');
-engine.screen.dispatchTouch({ action: 'cancel', x: 324, y: 500, rawX: 324, rawY: 500 });
-await pump(300);
 await tap(324, 1267);
 assert.ok(text().includes('10%'), '触摸未更新进度');
 console.log('touch OK');
