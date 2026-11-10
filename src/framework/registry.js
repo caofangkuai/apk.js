@@ -4141,10 +4141,10 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Spinner;', 'Landroid/widget/TextView;'),
       methods: {
-        '<init>(Landroid/content/Context;)V': () => undefined,
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
-        '<init>(Landroid/content/Context;I)V': () => undefined,
+        '<init>(Landroid/content/Context;)V': (self) => { if (self.view) self.view.clickable = true; },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': (self) => { if (self.view) self.view.clickable = true; },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': (self) => { if (self.view) self.view.clickable = true; },
+        '<init>(Landroid/content/Context;I)V': (self) => { if (self.view) self.view.clickable = true; },
         'setAdapter(Landroid/widget/SpinnerAdapter;)V': (self, [adapter], vm) => {
           self.adapter = adapter ?? null;
           self.selectedPosition = 0;
