@@ -475,7 +475,10 @@
         <div class="card">
           <div class="card-head">
             <h2 class="card-title">运行日志</h2>
-            <span class="card-note">DEX 解释器与 Framework 输出</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button id="clear-log-btn" class="btn btn-ghost" type="button" style="padding:4px 10px; font-size:12px;">清空</button>
+              <span class="card-note">DEX 解释器与 Framework 输出</span>
+            </div>
           </div>
           <div id="log" class="log"><div class="log-line log-empty">尚未载入 APK。</div></div>
         </div>
@@ -518,6 +521,7 @@
     const deviceSize = document.getElementById('device-size');
     const screenshotBtn = document.getElementById('screenshot-btn');
     const stopBtn = document.getElementById('stop-btn');
+    const clearLogBtn = document.getElementById('clear-log-btn');
 
     let logCount = 0;
     let cleared = false;
@@ -629,6 +633,12 @@
         syncVmStats(sim);
       });
       stopBtn && (stopBtn.disabled = false);
+      clearLogBtn?.addEventListener('click', () => {
+        logEl.replaceChildren();
+        cleared = false;
+        logCount = 0;
+        statLogs.textContent = '0';
+      });
 
       const observer = new MutationObserver(() => {
         const kind = statusEl.dataset.kind;
