@@ -48,6 +48,7 @@ export async function loadApkFiles(zip, limits = {}) {
     assetFiles.set(name.slice('assets/'.length), { name, bytes: await entry.async('uint8array') });
   }
 
+  if (!zip.file('AndroidManifest.xml')) throw new Error('不是有效的 APK：缺少 AndroidManifest.xml');
   if (!zip.file('resources.arsc')) throw new Error('不是有效的 APK：缺少 resources.arsc');
   const manifestBytes = await zip.file('AndroidManifest.xml').async('uint8array');
   const manifestXml = parseBinaryXml(manifestBytes);
