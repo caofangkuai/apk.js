@@ -6791,6 +6791,25 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/content/pm/PackageItemInfo;', { super: 'Ljava/lang/Object;' })
   );
+function packageApplicationInfo(vm, packageName) {
+  const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
+  const manifest = vm.apk?.manifest;
+  const app = manifest?.findChild?.('application');
+  const labelRaw = app?.getAttribute?.('android:label') || app?.getAttribute?.('label') || packageName;
+  const label = typeof labelRaw === 'string' && labelRaw.startsWith('@')
+    ? (vm.resources?.getString?.(vm.resources.resolve?.(labelRaw) >>> 0) || packageName)
+    : String(labelRaw || packageName);
+  info.$peer = {
+    vm,
+    constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' },
+    packageName,
+    name: packageName,
+    label,
+    flags: 0,
+    uid: 10000,
+  };
+  return info;
+}
   defs.push(
     nativeDef('Landroid/content/pm/PackageManager;', {
       super: 'Ljava/lang/Object;',
@@ -6829,13 +6848,37 @@ function vmShowChild(self, index) {
           return info;
         },
         'getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;': (self, [pkg], vm) => {
+          const packageName = jsString(pkg) || vm.packageName || 'app';
           const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
           info.$peer = {
             vm,
             constructor: { $descriptor: 'Landroid/content/pm/PackageInfo;' },
-            packageName: jsString(pkg),
+            packageName,
+            versionName: '1.0',
+            versionCode: 1,
+            applicationInfo: packageApplicationInfo(vm, packageName),
           };
           return info;
+        },
+        'getInstalledPackages(I)Ljava/util/List;': (_self, _args, vm) => {
+          const packageName = vm.packageName || 'app';
+          const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
+          info.$peer = {
+            vm,
+            constructor: { $descriptor: 'Landroid/content/pm/PackageInfo;' },
+            packageName,
+            versionName: '1.0',
+            versionCode: 1,
+            applicationInfo: packageApplicationInfo(vm, packageName),
+          };
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: [info] };
+          return list;
+        },
+        'getInstalledApplications(I)Ljava/util/List;': (_self, _args, vm) => {
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: [packageApplicationInfo(vm, vm.packageName || 'app')] };
+          return list;
         },
         'queryIntentActivities(Landroid/content/Intent;I)Ljava/util/List;': () => null,
         'resolveActivity(Landroid/content/Intent;I)Landroid/content/pm/ResolveInfo;': () => null,
