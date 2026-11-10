@@ -18,7 +18,7 @@
 
 - 选择类：CheckBox、RadioButton/RadioGroup、ToggleButton、Switch、SeekBar、RatingBar、Spinner、AutoCompleteTextView/MultiAutoCompleteTextView、Gallery、GridView。
 - 容器类：ViewAnimator/ViewFlipper/ViewSwitcher/TextSwitcher/ImageSwitcher、AdapterViewFlipper。
-- 计时/列表：Chronometer、ViewStub、Space、ImageButton、ArrayAdapter。
+- 计时/列表：Chronometer、TextClock、DigitalClock、AnalogClock、ViewStub、Space、ImageButton、ArrayAdapter。
 
 ### Playground
 
