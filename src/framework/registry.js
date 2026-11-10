@@ -539,6 +539,7 @@ function dialogShow(peer) {
     },
   };
   screen.addOverlay(peer.overlay);
+  try { peer.vm?.invokeInterface?.(peer.showListener, 'onShow', '(Landroid/content/DialogInterface;)V', [peer.dialogObject || peer]); } catch (_) {}
   screen.invalidate?.();
 }
 
