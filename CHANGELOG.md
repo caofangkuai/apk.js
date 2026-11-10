@@ -37,6 +37,11 @@
 
 - Node 基准（DeviceInfoHW，360×640）：启动约 135ms，渲染约 20.9ms/帧、47.9 FPS。
 
+### Tests
+
+- 新增 API 校验：URL 协议、APK 大小、截图环境错误。
+- test:all 覆盖 coverage、duplicates、playground、parse、api、zip、listview、drawables。
+
 ### 安全
 
 - 所有 APK 入口统一 50MB 限制。
