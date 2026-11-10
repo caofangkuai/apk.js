@@ -420,6 +420,7 @@
           <button id="pick-btn" class="btn btn-primary" type="button">选择 APK</button>
           <button id="sample-btn" class="btn btn-ghost" type="button">运行示例</button>
           <button id="screenshot-btn" class="btn btn-ghost" type="button" disabled>保存截图</button>
+          <button id="stop-btn" class="btn btn-ghost" type="button" disabled>停止</button>
         </div>
         <input id="apk-file" type="file" accept=".apk,application/vnd.android.package-archive" />
       </section>
@@ -516,6 +517,7 @@
     const loadUrlBtn = document.getElementById('load-url-btn');
     const deviceSize = document.getElementById('device-size');
     const screenshotBtn = document.getElementById('screenshot-btn');
+    const stopBtn = document.getElementById('stop-btn');
 
     let logCount = 0;
     let cleared = false;
@@ -621,6 +623,12 @@
         }
       });
       screenshotBtn && (screenshotBtn.disabled = false);
+      stopBtn?.addEventListener('click', () => {
+        sim.stop();
+        setStatus('已停止', 'info');
+        syncVmStats(sim);
+      });
+      stopBtn && (stopBtn.disabled = false);
 
       const observer = new MutationObserver(() => {
         const kind = statusEl.dataset.kind;
