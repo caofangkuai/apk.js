@@ -37,6 +37,9 @@ npm run test:drawables
 # 检查 native 类重复注册
 npm run check:duplicates
 
+# 本地 UI/触摸回归（需要字体）
+npm run test:ui
+
 # 全部回归一起跑（coverage + duplicates + playground + parse + api + zip + listview + widgets + drawables）
 npm run test:all
 

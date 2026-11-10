@@ -35,7 +35,8 @@
     "render:widgets": "node tools/render-widgets.mjs",
     "test:interaction": "node tests/interaction.mjs",
     "diagnose": "node tools/diagnose-apk.mjs",
-    "test:touch": "node tests/touch.mjs"
+    "test:touch": "node tests/touch.mjs",
+    "test:ui": "npm run setup:fonts && npm run test:touch && npm run test:interaction"
   },
   "dependencies": {
     "jszip": "^3.10.1"
