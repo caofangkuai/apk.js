@@ -6828,6 +6828,24 @@ function vmShowChild(self, index) {
           }
           return info;
         },
+        'getInstalledPackages(I)Ljava/util/List;': (_self, _args, vm) => {
+          const packageName = vm.packageName || 'app';
+          const appInfo = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
+          appInfo.$peer = { vm, packageName, name: packageName, label: packageName, flags: 0, uid: 10000 };
+          const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
+          info.$peer = { vm, packageName, versionName: '1.0', versionCode: 1, applicationInfo: appInfo };
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: [info] };
+          return list;
+        },
+        'getInstalledApplications(I)Ljava/util/List;': (_self, _args, vm) => {
+          const packageName = vm.packageName || 'app';
+          const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
+          info.$peer = { vm, packageName, name: packageName, label: packageName, flags: 0, uid: 10000 };
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: [info] };
+          return list;
+        },
         'getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;': (self, [pkg], vm) => {
           const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
           info.$peer = {
