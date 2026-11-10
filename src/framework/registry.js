@@ -997,6 +997,7 @@ function buildFrameworkDefinitions(vm) {
         'getCallingActivity()Landroid/content/ComponentName;': () => null,
         'getCallingPackage()Ljava/lang/String;': () => null,
         'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => {
+        if (self.dialog) { self.dialog.title = jsString(title); return; }
           self.title = jsString(title);
           self.screen?.invalidate();
         },
@@ -2812,7 +2813,10 @@ function buildFrameworkDefinitions(vm) {
         if (vm) vm.windowCallback = callback ?? null;
         if (self.window) self.window.callback = callback ?? null;
       },
-      'getDecorView()Landroid/view/View;': (self) => (self.window?.decorView ? viewObject(self.vm, self.window.decorView) : null),
+      'getDecorView()Landroid/view/View;': (self, _args, vm) => {
+        if (self.dialog) { const view = unwrapView(self.dialog.contentView); return view ? viewObject(vm, view) : null; }
+        return self.window?.decorView ? viewObject(self.vm, self.window.decorView) : null;
+      },
       'getAttributes()Landroid/view/WindowManager$LayoutParams;': (self, _args, vm) => {
         if (self.attributes) return self.attributes;
         const definition = vm.registry.resolve('Landroid/view/WindowManager$LayoutParams;');
@@ -2839,7 +2843,8 @@ function buildFrameworkDefinitions(vm) {
         return object;
       },
       'getCurrentFocus()Landroid/view/View;': () => null,
-      'findViewById(I)Landroid/view/View;': (self, [id]) => {
+      'findViewById(I)Landroid/view/View;': (self, [id], vm) => {
+        if (self.dialog) { const view = unwrapView(self.dialog.contentView); return view ? (viewObject(vm, view.findViewById(id)) || null) : null; }
         const view = self.window?.decorView?.findViewById(id >>> 0);
         return view ? viewObject(self.vm, view) : null;
       },
@@ -2861,12 +2866,13 @@ function buildFrameworkDefinitions(vm) {
       },
       'setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V': () => {},
       'setBackgroundDrawableResource(I)V': () => {},
-      'setLayout(II)V': () => {},
+      'setLayout(II)V': (self, [width, height]) => { if (self.dialog) { self.dialog.panelWidth = width | 0; self.dialog.panelHeight = height | 0; } },
       'isFloating()Z': () => false,
       'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => {
         if (self.window) self.window.title = jsString(title);
       },
       'setContentView(Landroid/view/View;)V': (self, [view], vm) => {
+        if (self.dialog) { self.dialog.contentView = view ?? null; return; }
         const target = unwrapView(view);
         if (!target || !self.window) return;
         self.window.setContentView?.(target);
@@ -3819,7 +3825,7 @@ function buildFrameworkDefinitions(vm) {
         'setContentView(Landroid/view/View;)V': (self, [view]) => { self.contentView = view ?? null; },
         'findViewById(I)Landroid/view/View;': (self, [id]) => self.contentView?.findViewById?.(id) ?? null,
         'setOnDismissListener(Landroid/content/DialogInterface$OnDismissListener;)V': (self, [listener]) => { self.dismissListener = listener; },
-        'getWindow()Landroid/view/Window;': () => null,
+        'getWindow()Landroid/view/Window;': (self, _args, vm) => dialogEnsureWindow(self, vm),
       },
     })
   );
