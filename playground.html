@@ -442,7 +442,14 @@
         <div class="card">
           <div class="card-head">
             <h2 class="card-title">运行状态</h2>
-            <span class="card-note" id="runtime-note">未启动</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="device-size" style="padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.06); color:inherit;">
+                <option value="360x640">360×640</option>
+                <option value="393x852">393×852</option>
+                <option value="412x915">412×915</option>
+              </select>
+              <span class="card-note" id="runtime-note">未启动</span>
+            </div>
           </div>
           <div class="stats">
             <div class="stat">
@@ -507,6 +514,7 @@
     const dropZone = document.getElementById('drop-zone');
     const apkUrl = document.getElementById('apk-url');
     const loadUrlBtn = document.getElementById('load-url-btn');
+    const deviceSize = document.getElementById('device-size');
     const screenshotBtn = document.getElementById('screenshot-btn');
 
     let logCount = 0;
@@ -580,6 +588,12 @@
         loadFile(event.dataTransfer?.files?.[0]);
       });
 
+      deviceSize?.addEventListener('change', () => {
+        const [width, height] = String(deviceSize.value || '360x640').split('x').map(Number);
+        sim.setDevice({ width, height });
+        syncVmStats(sim);
+        setStatus('已切换到 ' + width + '×' + height, 'info');
+      });
       loadUrlBtn?.addEventListener('click', async () => {
         const url = apkUrl?.value?.trim();
         if (!url) { setStatus('请输入 APK 地址', 'error'); return; }
