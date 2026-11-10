@@ -497,6 +497,9 @@
     const statActivities = document.getElementById('stat-activities');
     const statLogs = document.getElementById('stat-logs');
     const sampleBtn = document.getElementById('sample-btn');
+    const pickBtn = document.getElementById('pick-btn');
+    const fileInput = document.getElementById('apk-file');
+    const dropZone = document.getElementById('drop-zone');
     const screenshotBtn = document.getElementById('screenshot-btn');
 
     let logCount = 0;
@@ -543,6 +546,30 @@
           appendLog({ level: 'error', tag: 'sample', message: error.message });
           setStatus(`加载失败：${error.message}`, 'error');
         }
+      });
+
+      const loadFile = async (file) => {
+        if (!file) return;
+        setStatus('正在载入 APK…', 'busy');
+        try {
+          await sim.loadFromFile(file);
+          setStatus('运行中：' + (sim.vm?.packageName || file.name), 'ok');
+          syncVmStats(sim);
+        } catch (error) {
+          appendLog({ level: 'error', tag: 'load', message: error.message });
+          setStatus('加载失败：' + error.message, 'error');
+        }
+      };
+      pickBtn?.addEventListener('click', () => fileInput?.click());
+      dropZone?.addEventListener('click', () => fileInput?.click());
+      dropZone?.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') fileInput?.click(); });
+      fileInput?.addEventListener('change', () => loadFile(fileInput.files?.[0]));
+      dropZone?.addEventListener('dragover', (event) => { event.preventDefault(); dropZone.classList.add('dragging'); });
+      dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+      dropZone?.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropZone.classList.remove('dragging');
+        loadFile(event.dataTransfer?.files?.[0]);
       });
 
       sampleBtn && (sampleBtn.disabled = false);
