@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：341
-- 方法/构造函数键（静态统计）：3346
+- 注册的 native 类：343
+- 方法/构造函数键（静态统计）：3361
 
 ## Native 类清单
 
@@ -229,6 +229,8 @@
 | `Landroid/widget/Toast;` | registry.js |
 | `Landroid/widget/Toast$Length;` | registry.js |
 | `Landroid/widget/ToggleButton;` | registry.js |
+| `Landroid/widget/ViewAnimator;` | registry.js |
+| `Landroid/widget/ViewFlipper;` | registry.js |
 | `Landroid/widget/ViewStub;` | registry.js |
 | `Ljava/io/BufferedReader;` | java-core.js |
 | `Ljava/io/Closeable;` | java-core.js |

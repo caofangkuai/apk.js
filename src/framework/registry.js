@@ -3564,6 +3564,69 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/ViewAnimator;', {
+      super: 'Landroid/widget/FrameLayout;',
+      ctor: viewPeerConstructor('Landroid/widget/ViewAnimator;', 'Landroid/widget/FrameLayout;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setDisplayedChild(I)V': (self, [index]) => {
+          if (!self.view) return;
+          self.displayedChild = index | 0;
+          (self.view.children || []).forEach((child, i) => { child.visibility = i === (index | 0) ? 0 : 8; });
+          self.view.invalidate?.();
+        },
+        'getDisplayedChild()I': (self) => self.displayedChild | 0,
+        'showNext()V': (self) => {
+          const count = self.view?.children?.length || 0;
+          if (count) vmShowChild(self, ((self.displayedChild | 0) + 1) % count);
+        },
+        'showPrevious()V': (self) => {
+          const count = self.view?.children?.length || 0;
+          if (count) vmShowChild(self, ((self.displayedChild | 0) - 1 + count) % count);
+        },
+        'getCurrentView()Landroid/view/View;': (self, _args, vm) => {
+          const child = self.view?.children?.[self.displayedChild | 0];
+          return child ? viewObject(vm, child) : null;
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/widget/ViewFlipper;', {
+      super: 'Landroid/widget/ViewAnimator;',
+      ctor: viewPeerConstructor('Landroid/widget/ViewFlipper;', 'Landroid/widget/ViewAnimator;'),
+      methods: {
+        '<init>(Landroid/content/Context;)V': () => undefined,
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+        'setFlipInterval(I)V': (self, [interval]) => { self.flipInterval = interval | 0; },
+        'getFlipInterval()I': (self) => self.flipInterval | 0,
+        'startFlipping()V': (self) => {
+          self.flipping = true;
+          const tick = () => {
+            if (!self.flipping) return;
+            const count = self.view?.children?.length || 0;
+            if (count > 1) vmShowChild(self, ((self.displayedChild | 0) + 1) % count);
+            self.flipTimer = setTimeout(tick, self.flipInterval || 3000);
+            self.flipTimer?.unref?.();
+          };
+          tick();
+        },
+        'stopFlipping()V': (self) => { self.flipping = false; if (self.flipTimer) clearTimeout(self.flipTimer); self.flipTimer = null; },
+        'isFlipping()Z': (self) => (self.flipping ? 1 : 0),
+        'isAutoStart()Z': () => false,
+      },
+    })
+  );
+
+function vmShowChild(self, index) {
+  self.displayedChild = index | 0;
+  (self.view?.children || []).forEach((child, i) => { child.visibility = i === (index | 0) ? 0 : 8; });
+  self.view?.invalidate?.();
+}
+
+  defs.push(
     nativeDef('Landroid/widget/Chronometer;', {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Chronometer;', 'Landroid/widget/TextView;'),
