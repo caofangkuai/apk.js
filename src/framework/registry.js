@@ -454,7 +454,8 @@ function dialogLayout(peer, screen) {
   const message = String(peer.message ?? '');
   const lines = Math.max(1, Math.ceil(message.length / 22));
   const contentHeight = peer.contentView ? Math.min(Math.round((screen?.height || 640) * 0.7), 480) : 0;
-  const height = Math.max(contentHeight, Math.min(screen?.height || 640, 96 + lines * 20 + (peer.positiveText || peer.negativeText ? 56 : 16)));
+  const itemHeight = Array.isArray(peer.items) ? peer.items.length * 44 : 0;
+  const height = Math.max(contentHeight, itemHeight, Math.min(screen?.height || 640, 96 + lines * 20 + (peer.positiveText || peer.negativeText ? 56 : 16)));
   return { width, height, left: Math.round(((screen?.width || 360) - width) / 2), top: Math.round(((screen?.height || 640) - height) / 2) };
 }
 function dialogDismiss(peer) {
@@ -504,6 +505,16 @@ function dialogShow(peer) {
           ctx.restore();
         }
       }
+      peer.itemRects = [];
+      if (Array.isArray(peer.items)) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+        peer.items.forEach((item, index) => {
+          const top = layout.top + 20 + index * 44;
+          ctx.fillText(String(item), layout.left + 20, top + 26);
+          peer.itemRects.push({ left: layout.left, top, right: layout.left + layout.width, bottom: top + 44, index });
+        });
+      }
       const labels = [peer.negativeText, peer.positiveText].filter(Boolean).map(String);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#00796b';
@@ -523,6 +534,14 @@ function dialogShow(peer) {
       const layout = dialogLayout(peer, screen);
       const inside = event.x >= layout.left && event.x <= layout.left + layout.width && event.y >= layout.top && event.y <= layout.top + layout.height;
       if (inside) {
+        for (const rect of peer.itemRects || []) {
+          if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
+            const listener = peer.itemListener;
+            dialogDismiss(peer);
+            try { peer.vm.invokeInterface(listener, 'onClick', '(Landroid/content/DialogInterface;I)V', [peer.dialogObject || peer, rect.index]); } catch (_) {}
+            return true;
+          }
+        }
         for (const rect of peer.buttonRects || []) {
           if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
             const positive = rect.label === String(peer.positiveText ?? '');
@@ -4001,6 +4020,12 @@ function buildFrameworkDefinitions(vm) {
         'setCancelable(Z)Landroid/app/AlertDialog$Builder;': (self, [value]) => { self.cancelable = !!value; return self.$object ?? self; },
         'setNeutralButton(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [text, listener]) => { self.neutralText = jsString(text); self.neutralListener = listener; return self.$object ?? self; },
         'setView(Landroid/view/View;)Landroid/app/AlertDialog$Builder;': (self, [view]) => { self.contentView = view ?? null; return self.$object ?? self; },
+        'setItems([Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;': (self, [items, listener]) => {
+          const values = items?.$data || items || [];
+          self.items = Array.from(values, (item) => jsString(item));
+          self.itemListener = listener;
+          return self.$object ?? self;
+        },
         'setIcon(I)Landroid/app/AlertDialog$Builder;': (self) => self.$object ?? self,
         'setIcon(Landroid/graphics/drawable/Drawable;)Landroid/app/AlertDialog$Builder;': (self) => self.$object ?? self,
         'create()Landroid/app/AlertDialog;': (self, _args, vm) => {
