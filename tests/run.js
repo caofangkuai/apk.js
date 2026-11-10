@@ -283,6 +283,20 @@ try {
   console.log('autocomplete smoke failed:', error.message);
 }
 
+// Chronometer smoke
+try {
+  const chrono = vm.instantiate('Landroid/widget/Chronometer;', [engine.activity]);
+  if (!chrono.$peer) vm.registry.getPeer(chrono, 'Landroid/widget/Chronometer;');
+  vm.invokeByName('setBase', '(J)V', chrono, [BigInt(Date.now() - 5000)]);
+  vm.invokeByName('start', '()V', chrono, []);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const text = vm.invokeByName('getText', '()Ljava/lang/CharSequence;', chrono, []);
+  vm.invokeByName('stop', '()V', chrono, []);
+  console.log('chronometer smoke:', { text: String(text) });
+} catch (error) {
+  console.log('chronometer smoke failed:', error.message);
+}
+
 const errors = logs.filter((entry) => entry.level === 'error');
 if (errors.length) {
   console.error('errors:', errors);
