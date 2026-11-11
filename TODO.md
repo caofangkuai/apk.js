@@ -104,7 +104,7 @@
 - [x] 温度页数值：修复 String.format 装箱数字解箱与 double 参数解码，已显示 42/41/38/30/36/34 °C。
 - [x] 电池充电速度：同一修复后显示 420.0 mA；内核配置文件/型号已补。
 - [x] 电池电量/健康/状态/电压：补 `onPostResume()` 后 Fragment 恢复，显示 87% / Good / Charging / 4200 mV。
-- [ ] 应用程序页空白：最小化 `getInstalledPackages` 已补，页面仍未使用。
+- [x] 应用程序页：补 `PackageItemInfo.loadLabel` 与 `ApplicationInfo` super 链，列表已显示。
 - [ ] 分区页显示原始挂载文本：需修正应用解析的字段来源。
 - [ ] `androidx.appcompat.widget.SearchView` 类缺失：菜单搜索项不可用。
 - [ ] 复现：`npm run diagnose -- /tmp/devinfo.apk`；`npm run render -- /tmp/devinfo.apk check`。
