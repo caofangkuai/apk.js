@@ -491,6 +491,7 @@ export class JavaVM {
       ['onCreate', '(Landroid/os/Bundle;)V', [null]],
       ['onStart', '()V', []],
       ['onResume', '()V', []],
+      ['onPostResume', '()V', []],
     ];
     for (const [name, proto, args] of lifecycles) {
       const resolution = this.findVirtual(descriptor, name, proto);

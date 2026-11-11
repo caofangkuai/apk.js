@@ -45,6 +45,8 @@
 
 - `PackageManager` 补最小化已安装包/应用列表，避免影响启动。
 
+- 补 `Activity.onPostResume()` 生命周期，恢复 Fragment 级 `onResume` 与电池状态。
+
 ### Tests
 
 - 新增 API 校验：URL 协议、APK 大小、截图环境错误。

@@ -1097,6 +1097,7 @@ function buildFrameworkDefinitions(vm) {
           vm.log('info', 'Activity', '默认 onCreate（未覆写）');
         },
         'onStart()V': () => undefined,
+        'onPostResume()V': () => undefined,
         'onResume()V': () => undefined,
         'invalidateOptionsMenu()V': () => undefined,
         'getApplication()Landroid/app/Application;': (self, _args, vm) => vm.applicationObject ?? null,

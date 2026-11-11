@@ -335,6 +335,7 @@ export class EmulatorEngine {
       ['onCreate', '(Landroid/os/Bundle;)V', [null]],
       ['onStart', '()V', []],
       ['onResume', '()V', []],
+      ['onPostResume', '()V', []],
     ];
     for (const [name, proto, args] of lifecycles) {
       try {
