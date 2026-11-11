@@ -933,20 +933,7 @@ export const JAVA_CORE_CLASSES = {
       'valueOf(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value)),
       'valueOf(Ljava/lang/Object;)Ljava/lang/String;': (_self, [value]) => (value === null ? 'null' : jsString(value)),
       'format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [locale, format, args]) => formatJavaString(format, args),
-      'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args]) => {
-        const values = isJavaArray(args) ? args.$data : [];
-        let index = 0;
-        return jsString(format).replace(/%(\d+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
-          if (type === '%') return '%';
-          const at = positional ? parseInt(positional, 10) - 1 : index++;
-          const value = values[at];
-          if (type === 'd') return String(toInt(value));
-          if (type === 'f') return (Number(value) || 0).toFixed(precision === undefined ? 2 : Math.min(20, Number(precision) || 0));
-          if (type === 'x') return toInt(value).toString(16);
-          if (type === 'X') return toInt(value).toString(16).toUpperCase();
-          return jsString(value);
-        });
-      },
+      'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args]) => formatJavaString(format, args),
       'join(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;': (_self, [separator, parts]) =>
         (isJavaArray(parts) ? parts.$data : []).map(jsString).join(jsString(separator)),
     },
@@ -4732,6 +4719,14 @@ function seedHardwareFs() {
   write('/sys/class/power_supply/bms/status', 'Charging\n');
   write('/sys/class/power_supply/bms/health', 'Good\n');
   write('/sys/class/power_supply/bms/charge_counter', '3200000\n');
+  write('/sys/class/power_supply/bms/charge_full', '4500000\n');
+  write('/sys/class/power_supply/bms/charge_full_design', '4800000\n');
+  write('/sys/class/power_supply/bms/battery_type', 'Li-ion\n');
+  write('/sys/class/power_supply/bms/battery_cycle', '120\n');
+  write('/sys/class/power_supply/battery/battery_type', 'Li-ion\n');
+  write('/sys/class/power_supply/battery/battery_id', '1\n');
+  write('/sys/class/power_supply/battery/battery_name', 'battery\n');
+  write('/sys/class/power_supply/battery/battery_meter', 'battery\n');
   write('/sys/class/power_supply/bms/uevent', [
     'POWER_SUPPLY_NAME=bms',
     'POWER_SUPPLY_STATUS=Charging',
@@ -5414,18 +5409,30 @@ function makeRegexMatcher(vm, regex, input) {
   return object;
 }
 
+function unboxJavaValue(value) {
+  if (!value || typeof value !== 'object') return value;
+  const peer = value.$peer || null;
+  if (peer && Object.prototype.hasOwnProperty.call(peer, 'value')) return peer.value;
+  const fields = value.$fields;
+  if (fields && typeof fields.get === 'function') {
+    for (const key of ['value:I', 'value:J', 'value:D', 'value:F', 'value:S', 'value:B', 'value:C']) {
+      if (fields.has(key)) return fields.get(key);
+    }
+  }
+  return value;
+}
+
 function formatJavaString(format, args) {
   const values = Array.isArray(args) ? args : (isJavaArray(args) ? args.$data : []);
   let index = 0;
   return jsString(format).replace(/%([0-9]+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
     if (type === '%') return '%';
     const at = positional ? parseInt(positional, 10) - 1 : index++;
-    const value = values[at];
-    if (type === 'd') return String(toInt(value));
+    const value = unboxJavaValue(values[at]);
+    if (type === 'd' || type === 'i') return String(Number(value) || 0);
     if (type === 'f') return (Number(value) || 0).toFixed(precision === undefined ? 2 : Math.min(20, Number(precision) || 0));
-    if (type === 'x') return toInt(value).toString(16);
-    if (type === 'X') return toInt(value).toString(16).toUpperCase();
-    if (type === 'i') return String(toInt(value));
+    if (type === 'x') return (Number(value) || 0).toString(16);
+    if (type === 'X') return (Number(value) || 0).toString(16).toUpperCase();
     return value === null || value === undefined ? 'null' : jsString(value);
   });
 }

@@ -710,6 +710,15 @@ export class JavaVM {
     return this.invokeNative(resolution, receiver, args, ref, mode);
   }
 
+  decodeDoubleOperand(value) {
+    if (typeof value !== 'bigint') return value;
+    const raw = BigInt.asIntN(64, value);
+    DOUBLE_BITS_VIEW.setBigInt64(0, raw);
+    const decoded = DOUBLE_BITS_VIEW.getFloat64(0);
+    if (Number.isFinite(decoded) && (decoded === 0 || Math.abs(decoded) >= 1e-300)) return decoded;
+    return Number(raw);
+  }
+
   decodeNativeArgs(ref, args) {
     const parameters = ref?.proto?.parameters;
     if (!Array.isArray(parameters) || !Array.isArray(args) || parameters.length !== args.length) return args;
@@ -719,8 +728,7 @@ export class JavaVM {
       if (parameters[i] === 'D') {
         const value = out[i];
         if (typeof value !== 'bigint') continue;
-        DOUBLE_BITS_VIEW.setBigUint64(0, BigInt.asUintN(64, value));
-        out[i] = DOUBLE_BITS_VIEW.getFloat64(0);
+        out[i] = this.decodeDoubleOperand(value);
         changed = true;
         continue;
       }
