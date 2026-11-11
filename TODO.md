@@ -103,7 +103,7 @@
 - [ ] 相机页空白：需要完整 `CameraCharacteristics` / `StreamConfigurationMap` 数据。
 - [x] 温度页数值：修复 String.format 装箱数字解箱与 double 参数解码，已显示 42/41/38/30/36/34 °C。
 - [x] 电池充电速度：同一修复后显示 420.0 mA；内核配置文件/型号已补。
-- [ ] 电池电量/健康/状态/电压仍为 0，需继续定位 bms 读取分支。
+- [ ] 电池电量/健康/状态/电压仍为 0：已确认应用只读取 bms/{battery_cycle,battery_type,charge_full,charge_full_design}，这些已补并显示内核配置；剩余值来自其他路径。
 - [ ] 应用程序页空白：最小化 `getInstalledPackages` 已补，页面仍未使用。
 - [ ] 分区页显示原始挂载文本：需修正应用解析的字段来源。
 - [ ] `androidx.appcompat.widget.SearchView` 类缺失：菜单搜索项不可用。
