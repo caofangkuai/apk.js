@@ -100,7 +100,7 @@
 
 ## 已知剩余缺口
 
-- [ ] 相机页空白：需要完整 `CameraCharacteristics` / `StreamConfigurationMap` 数据。
+- [ ] 相机页：Camera1/2 host、open、Parameters 已补，仍打印 “Can't connect to camera api1”，需继续定位连接校验分支。
 - [x] 温度页数值：修复 String.format 装箱数字解箱与 double 参数解码，已显示 42/41/38/30/36/34 °C。
 - [x] 电池充电速度：同一修复后显示 420.0 mA；内核配置文件/型号已补。
 - [x] 电池电量/健康/状态/电压：补 `onPostResume()` 后 Fragment 恢复，显示 87% / Good / Charging / 4200 mV。
