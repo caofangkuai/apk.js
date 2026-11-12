@@ -6856,19 +6856,13 @@ function vmShowChild(self, index) {
           return list;
         },
         'getInstalledApplications(I)Ljava/util/List;': (_self, _args, vm) => {
-          const packageName = vm.packageName || 'app';
-          const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
-          const appNode = vm.apk?.manifest?.findChild?.('application');
-          const labelRaw = appNode?.getAttribute?.('android:label') ?? appNode?.getAttribute?.('label');
-          const labelId = typeof labelRaw === 'number' ? labelRaw : vm.resources?.resolve?.(labelRaw);
-          let label = packageName;
-          try { if (typeof labelId === 'number' && labelId) label = vm.resources.getString(labelId >>> 0) || packageName; } catch (_) {}
-          info.$peer = { vm, packageName, name: packageName, label, flags: 0, uid: 10000 };
           const list = vm.allocateRawObject('Ljava/util/ArrayList;');
-          list.$peer = { items: [info] };
+          list.$peer = { items: [] };
           return list;
         },
         'getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;': (self, [pkg], vm) => {
+          const requested = jsString(pkg);
+          if (vm.packageName && requested && requested !== vm.packageName) return null;
           const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
           info.$peer = {
             vm,
@@ -6895,7 +6889,9 @@ function vmShowChild(self, index) {
           vm.newArray('[Ljava/lang/String;', 0, null),
         'hasSystemFeature(Ljava/lang/String;)Z': (_self, [name]) => systemFeatureNames().includes(jsString(name)),
         'hasSystemFeature(Ljava/lang/String;I)Z': (_self, [name]) => systemFeatureNames().includes(jsString(name)),
-        'getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;': (self, _args, vm) => {
+        'getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;': (self, [pkg], vm) => {
+          const requested = jsString(pkg);
+          if (vm.packageName && requested && requested !== vm.packageName) return null;
           const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
           info.$peer = { vm, constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' } };
           return info;
