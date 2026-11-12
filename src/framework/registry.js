@@ -713,6 +713,30 @@ function cameraCharacteristicValue(vm, key, self) {
   return null;
 }
 
+function applicationLabel(vm, fallback) {
+  const application = vm.apk?.manifest?.findChild?.('application');
+  if (!application) return fallback;
+  const raw = application.getAttribute?.('android:label') ?? application.getAttribute?.('label');
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const resolveId = (id) => {
+    try { return vm.resources?.getString?.(id >>> 0) ?? null; } catch (_) { return null; }
+  };
+  if (typeof raw === 'object' && raw !== null && 'reference' in raw) return resolveId(raw.reference) || fallback;
+  if (typeof raw === 'number') return resolveId(raw) || fallback;
+  if (typeof raw === 'string') {
+    const match = raw.match(/^@(0x[0-9a-f]+|\d+)$/i);
+    if (match) return resolveId(match[1].startsWith('0x') ? parseInt(match[1], 16) : parseInt(match[1], 10)) || fallback;
+    return raw;
+  }
+  return fallback;
+}
+
+function makeColorStateList(vm, info) {
+  const object = vm.allocateRawObject('Landroid/content/res/ColorStateList;');
+  object.$peer = { states: info.states, colors: info.colors, color: info.color };
+  return object;
+}
+
 function showPopup(peer, left, top) {
   const vm = peer?.vm;
   const screen = vm?.screen;
@@ -1374,7 +1398,11 @@ function buildFrameworkDefinitions(vm) {
           return intent;
         },
         'getResources()Landroid/content/res/Resources;': (self, _args, vm) => self.resources || vm.resources,
-        'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [id], vm) => (vm.resources || self.resources)?.getColorStateList?.(id >>> 0) ?? null,
+        'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [id], vm) => {
+          const resources = vm?.resources || self.resources;
+          const info = resources?.getColorStateList?.(id >>> 0);
+          return info ? makeColorStateList(vm, info) : null;
+        },
         'checkPermission(Ljava/lang/String;II)I': () => 0,
         'getAssets()Landroid/content/res/AssetManager;': (self, _args, vm) => (self.resources || vm.resources)?.getAssets(),
         'getApplicationContext()Landroid/content/Context;': (self, _args, vm) => self.contextObject || self,
@@ -7162,11 +7190,7 @@ function vmShowChild(self, index) {
         'getInstalledPackages(I)Ljava/util/List;': (_self, _args, vm) => {
           const packageName = vm.packageName || 'app';
           const appInfo = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
-          const appNode = vm.apk?.manifest?.findChild?.('application');
-          const labelRaw = appNode?.getAttribute?.('android:label') ?? appNode?.getAttribute?.('label');
-          const labelId = typeof labelRaw === 'number' ? labelRaw : vm.resources?.resolve?.(labelRaw);
-          let label = packageName;
-          try { if (typeof labelId === 'number' && labelId) label = vm.resources.getString(labelId >>> 0) || packageName; } catch (_) {}
+          const label = applicationLabel(vm, packageName);
           appInfo.$peer = { vm, packageName, name: packageName, label, flags: 0, uid: 10000 };
           const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
           info.$peer = { vm, packageName, versionName: '1.0', versionCode: 1, applicationInfo: appInfo };

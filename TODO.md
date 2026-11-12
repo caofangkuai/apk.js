@@ -107,5 +107,5 @@
 - [x] 电池电量/健康/状态/电压：补 `onPostResume()` 后 Fragment 恢复，显示 87% / Good / Charging / 4200 mV。
 - [x] 应用程序页：补 `PackageItemInfo.loadLabel` 与 `ApplicationInfo` super 链，列表已显示。
 - [x] 分区页：修正 `newArray` 元素表语义，挂载点/设备/fs/读写属性已正常。
-- [ ] SearchView：类存在于 DEX，4 种构造均可实例化；剩余为应用菜单反射路径。
+- [x] SearchView：`TypedArray.getColorStateList` 返回 JavaObject，构造不再 ClassCast；诊断 interesting=0。
 - [ ] 复现：`npm run diagnose -- /tmp/devinfo.apk`；`npm run render -- /tmp/devinfo.apk check`。
