@@ -100,7 +100,7 @@
 
 ## 已知剩余缺口
 
-- [ ] 相机页：Camera1/2 host、open、Parameters 已补，仍打印 “Can't connect to camera api1”，需继续定位连接校验分支。
+- [x] 相机页：修复 `getSupportedPictureFormats` 裸数字导致 ClassCast，页面已显示 2 台相机（需等待后台采集或下拉刷新）。
 - [ ] 应用程序页的 “System Applications” 行由应用自身 UI 生成，宿主列表只返回当前包。
 - [x] 温度页数值：修复 String.format 装箱数字解箱与 double 参数解码，已显示 42/41/38/30/36/34 °C。
 - [x] 电池充电速度：同一修复后显示 420.0 mA；内核配置文件/型号已补。
