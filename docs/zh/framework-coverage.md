@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：359
-- 方法/构造函数键（静态统计）：3499
+- 注册的 native 类：368
+- 方法/构造函数键（静态统计）：3538
 
 ## Native 类清单
 
@@ -94,7 +94,13 @@
 | `Landroid/graphics/SweepGradient;` | drawables.js |
 | `Landroid/graphics/Typeface;` | registry.js |
 | `Landroid/hardware/Camera;` | registry.js |
+| `Landroid/hardware/Camera$CameraInfo;` | registry.js |
+| `Landroid/hardware/Camera$Parameters;` | registry.js |
+| `Landroid/hardware/Camera$Size;` | registry.js |
+| `Landroid/hardware/camera2/CameraCharacteristics;` | registry.js |
+| `Landroid/hardware/camera2/CameraCharacteristics$Key;` | registry.js |
 | `Landroid/hardware/camera2/CameraManager;` | registry.js |
+| `Landroid/hardware/camera2/params/StreamConfigurationMap;` | registry.js |
 | `Landroid/hardware/Sensor;` | registry.js |
 | `Landroid/hardware/SensorManager;` | registry.js |
 | `Landroid/hardware/usb/UsbManager;` | registry.js |
@@ -137,6 +143,9 @@
 | `Landroid/util/DisplayMetrics;` | registry.js |
 | `Landroid/util/Log;` | registry.js |
 | `Landroid/util/LongSparseArray;` | java-core.js |
+| `Landroid/util/Range;` | registry.js |
+| `Landroid/util/Size;` | registry.js |
+| `Landroid/util/SizeF;` | registry.js |
 | `Landroid/util/SparseArray;` | java-core.js |
 | `Landroid/util/SparseIntArray;` | java-core.js |
 | `Landroid/util/TypedValue;` | registry.js |

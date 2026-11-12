@@ -610,6 +610,97 @@ function dialogShow(peer) {
   screen.invalidate?.();
 }
 
+const CAMERA_KEY_NAMES = [
+  'LENS_FACING', 'SENSOR_ORIENTATION', 'SENSOR_INFO_ACTIVE_ARRAY_SIZE',
+  'SENSOR_INFO_PIXEL_ARRAY_SIZE', 'SENSOR_INFO_PHYSICAL_SIZE', 'SENSOR_INFO_SENSITIVITY_RANGE',
+  'SCALER_STREAM_CONFIGURATION_MAP', 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM',
+  'CONTROL_AF_AVAILABLE_MODES', 'LENS_INFO_AVAILABLE_APERTURES',
+  'LENS_INFO_AVAILABLE_FOCAL_LENGTHS', 'LENS_INFO_MINIMUM_FOCUS_DISTANCE',
+  'FLASH_INFO_AVAILABLE', 'INFO_SUPPORTED_HARDWARE_LEVEL', 'INFO_VERSION',
+];
+
+function cameraKey(name) {
+  return { $descriptor: 'Landroid/hardware/camera2/CameraCharacteristics$Key;', $peer: { name } };
+}
+
+function cameraInstance(vm, id) {
+  const object = vm.allocateRawObject('Landroid/hardware/Camera;');
+  object.$peer = { vm, id: id | 0 };
+  return object;
+}
+
+function cameraSize(vm, width, height) {
+  const object = vm.allocateRawObject('Landroid/hardware/Camera$Size;');
+  object.$peer = { width, height };
+  return object;
+}
+
+function cameraSizeList(vm, sizes) {
+  const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+  list.$peer = { items: sizes.map(([w, h]) => cameraSize(vm, w, h)) };
+  return list;
+}
+
+function cameraSizeArray(vm) {
+  const sizes = [[4000, 3000], [1920, 1080], [1280, 720]];
+  const array = vm.newArray('[Landroid/util/Size;', sizes.length, null);
+  sizes.forEach(([w, h], index) => { array.$data[index] = cameraSize(vm, w, h); });
+  return array;
+}
+
+function cameraStringList(vm, values) {
+  const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+  list.$peer = { items: values.map((value) => jsString(value)) };
+  return list;
+}
+
+function cameraParameters(vm) {
+  const object = vm.allocateRawObject('Landroid/hardware/Camera$Parameters;');
+  object.$peer = { vm };
+  return object;
+}
+
+function cameraCharacteristicValue(vm, key, self) {
+  const name = key?.$peer?.name || key?.name || jsString(key);
+  const facing = self?.$peer?.facing ?? 1;
+  if (name === 'LENS_FACING') return facing ? 1 : 0;
+  if (name === 'SENSOR_ORIENTATION') return 90;
+  if (name === 'SENSOR_INFO_ACTIVE_ARRAY_SIZE') {
+    const rect = vm.allocateRawObject('Landroid/graphics/Rect;');
+    rect.$peer = { left: 0, top: 0, right: 4000, bottom: 3000 };
+    return rect;
+  }
+  if (name === 'SENSOR_INFO_PIXEL_ARRAY_SIZE') {
+    const size = vm.allocateRawObject('Landroid/util/Size;');
+    size.$peer = { width: 4000, height: 3000 };
+    return size;
+  }
+  if (name === 'SENSOR_INFO_PHYSICAL_SIZE') {
+    const size = vm.allocateRawObject('Landroid/util/SizeF;');
+    size.$peer = { width: 5.6, height: 4.2 };
+    return size;
+  }
+  if (name === 'SENSOR_INFO_SENSITIVITY_RANGE') {
+    const range = vm.allocateRawObject('Landroid/util/Range;');
+    range.$peer = { lower: 100, upper: 3200 };
+    return range;
+  }
+  if (name === 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM') return 8;
+  if (name === 'CONTROL_AF_AVAILABLE_MODES') return vm.newArray('I', 3, [1, 2, 3]);
+  if (name === 'LENS_INFO_AVAILABLE_APERTURES') return toFloatArray(vm, [1.8]);
+  if (name === 'LENS_INFO_AVAILABLE_FOCAL_LENGTHS') return toFloatArray(vm, [4.2]);
+  if (name === 'LENS_INFO_MINIMUM_FOCUS_DISTANCE') return 0.1;
+  if (name === 'FLASH_INFO_AVAILABLE') return facing === 1;
+  if (name === 'INFO_SUPPORTED_HARDWARE_LEVEL') return 1;
+  if (name === 'INFO_VERSION') return '3.2';
+  if (name === 'SCALER_STREAM_CONFIGURATION_MAP') {
+    const map = vm.allocateRawObject('Landroid/hardware/camera2/params/StreamConfigurationMap;');
+    map.$peer = { vm };
+    return map;
+  }
+  return null;
+}
+
 function showPopup(peer, left, top) {
   const vm = peer?.vm;
   const screen = vm?.screen;
@@ -5709,9 +5800,55 @@ function vmShowChild(self, index) {
     nativeDef('Landroid/hardware/camera2/CameraManager;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'getCameraIdList()[Ljava/lang/String;': (_self, _args, vm) => vm.newArray('Ljava/lang/String;', 0),
+        'getCameraIdList()[Ljava/lang/String;': (_self, _args, vm) => {
+          const list = vm.newArray('Ljava/lang/String;', 2);
+          list.$data[0] = jsString('0');
+          list.$data[1] = jsString('1');
+          return list;
+        },
+        'getCameraCharacteristics(Ljava/lang/String;)Landroid/hardware/camera2/CameraCharacteristics;': (_self, [id], vm) => {
+          const object = vm.allocateRawObject('Landroid/hardware/camera2/CameraCharacteristics;');
+          object.$peer = { id: jsString(id) || '0', facing: (jsString(id) || '0') === '0' ? 1 : 0 };
+          return object;
+        },
         'registerAvailabilityCallback(Ljava/util/concurrent/Executor;Landroid/hardware/camera2/CameraManager$AvailabilityCallback;)V': () => undefined,
         'unregisterAvailabilityCallback(Landroid/hardware/camera2/CameraManager$AvailabilityCallback;)V': () => undefined,
+      },
+    }),
+    nativeDef('Landroid/hardware/camera2/CameraCharacteristics$Key;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class CameraKeyPeer { constructor(name) { this.name = name || ''; } },
+      methods: {
+        'getName()Ljava/lang/String;': (self) => self.name || '',
+        'toString()Ljava/lang/String;': (self) => self.name || '',
+      },
+    }),
+    nativeDef('Landroid/hardware/camera2/CameraCharacteristics;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['LENS_FACING:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('LENS_FACING')],
+        ['SENSOR_ORIENTATION:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SENSOR_ORIENTATION')],
+        ['SENSOR_INFO_ACTIVE_ARRAY_SIZE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SENSOR_INFO_ACTIVE_ARRAY_SIZE')],
+        ['SENSOR_INFO_PIXEL_ARRAY_SIZE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SENSOR_INFO_PIXEL_ARRAY_SIZE')],
+        ['SENSOR_INFO_PHYSICAL_SIZE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SENSOR_INFO_PHYSICAL_SIZE')],
+        ['SENSOR_INFO_SENSITIVITY_RANGE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SENSOR_INFO_SENSITIVITY_RANGE')],
+        ['SCALER_STREAM_CONFIGURATION_MAP:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SCALER_STREAM_CONFIGURATION_MAP')],
+        ['SCALER_AVAILABLE_MAX_DIGITAL_ZOOM:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('SCALER_AVAILABLE_MAX_DIGITAL_ZOOM')],
+        ['CONTROL_AF_AVAILABLE_MODES:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('CONTROL_AF_AVAILABLE_MODES')],
+        ['LENS_INFO_AVAILABLE_APERTURES:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('LENS_INFO_AVAILABLE_APERTURES')],
+        ['LENS_INFO_AVAILABLE_FOCAL_LENGTHS:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('LENS_INFO_AVAILABLE_FOCAL_LENGTHS')],
+        ['LENS_INFO_MINIMUM_FOCUS_DISTANCE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('LENS_INFO_MINIMUM_FOCUS_DISTANCE')],
+        ['FLASH_INFO_AVAILABLE:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('FLASH_INFO_AVAILABLE')],
+        ['INFO_SUPPORTED_HARDWARE_LEVEL:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('INFO_SUPPORTED_HARDWARE_LEVEL')],
+        ['INFO_VERSION:Landroid/hardware/camera2/CameraCharacteristics$Key;', cameraKey('INFO_VERSION')],
+      ]),
+      methods: {
+        'get(Landroid/hardware/camera2/CameraCharacteristics$Key;)Ljava/lang/Object;': (self, [key], vm) => cameraCharacteristicValue(vm, key, self),
+        'getKeys()Ljava/util/List;': (_self, _args, vm) => {
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: CAMERA_KEY_NAMES.map((name) => cameraKey(name)) };
+          return list;
+        },
       },
     })
   );
@@ -5743,10 +5880,98 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/hardware/Camera;', {
       super: 'Ljava/lang/Object;',
+      ctor: class CameraPeer { constructor(vm, id) { this.vm = vm; this.id = id | 0; } },
+      methods: {
+        'release()V': () => undefined,
+        'lock()V': () => undefined,
+        'unlock()V': () => undefined,
+        'setPreviewDisplay(Landroid/view/SurfaceHolder;)V': () => undefined,
+        'startPreview()V': () => undefined,
+        'stopPreview()V': () => undefined,
+        'setParameters(Landroid/hardware/Camera$Parameters;)V': () => undefined,
+        'getParameters()Landroid/hardware/Camera$Parameters;': (self, _args, vm) => cameraParameters(vm),
+      },
       staticMethods: {
-        'getNumberOfCameras()I': () => 0,
-        'open()Landroid/hardware/Camera;': () => null,
-        'open(I)Landroid/hardware/Camera;': () => null,
+        'getNumberOfCameras()I': () => 2,
+        'open()Landroid/hardware/Camera;': (_self, _args, vm) => cameraInstance(vm, 0),
+        'open(I)Landroid/hardware/Camera;': (_self, [id], vm) => cameraInstance(vm, id | 0),
+        'getCameraInfo(ILandroid/hardware/Camera$CameraInfo;)V': (_self, [id, info]) => {
+          if (!info) return;
+          info.facing = (id | 0) === 0 ? 1 : 0;
+          info.orientation = 90;
+        },
+      },
+    }),
+    nativeDef('Landroid/hardware/Camera$CameraInfo;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class CameraInfoPeer { constructor() { this.facing = 1; this.orientation = 90; } },
+      methods: {
+        '<init>()V': () => undefined,
+      },
+    }),
+    nativeDef('Landroid/hardware/Camera$Size;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class CameraSizePeer { constructor(width = 0, height = 0) { this.width = width | 0; this.height = height | 0; } },
+      methods: {
+        '<init>(II)V': (self, [width, height]) => { self.width = width | 0; self.height = height | 0; },
+      },
+    }),
+    nativeDef('Landroid/hardware/Camera$Parameters;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class CameraParametersPeer { constructor(vm) { this.vm = vm; } },
+      methods: {
+        'getSupportedPreviewSizes()Ljava/util/List;': (self, _args, vm) => cameraSizeList(vm, [[4000, 3000], [1920, 1080], [1280, 720]]),
+        'getSupportedPictureSizes()Ljava/util/List;': (self, _args, vm) => cameraSizeList(vm, [[4000, 3000], [1920, 1080], [1280, 720]]),
+        'getPreviewSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 1920, 1080),
+        'getPictureSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 4000, 3000),
+        'getSupportedFocusModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['auto', 'continuous-picture', 'fixed']),
+        'getFocusMode()Ljava/lang/String;': () => 'auto',
+        'getFlashMode()Ljava/lang/String;': () => 'off',
+        'getSupportedFlashModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['off', 'auto', 'on']),
+        'getPreviewFpsRange([I)V': (_self, [range]) => { if (range?.$data) { range.$data[0] = 30000; range.$data[1] = 30000; } },
+        'getHorizontalViewAngle()F': () => 65,
+        'getVerticalViewAngle()F': () => 40,
+        'flatten()Ljava/lang/String;': () => 'preview-size=1920x1080;picture-size=4000x3000',
+      },
+    }),
+    nativeDef('Landroid/util/Size;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class SizePeer { constructor(width = 0, height = 0) { this.width = width | 0; this.height = height | 0; } },
+      methods: {
+        '<init>(II)V': (self, [width, height]) => { self.width = width | 0; self.height = height | 0; },
+        'getWidth()I': (self) => self.width | 0,
+        'getHeight()I': (self) => self.height | 0,
+      },
+    }),
+    nativeDef('Landroid/util/SizeF;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class SizeFPeer { constructor(width = 0, height = 0) { this.width = width; this.height = height; } },
+      methods: {
+        '<init>(FF)V': (self, [width, height]) => { self.width = Number(width) || 0; self.height = Number(height) || 0; },
+        'getWidth()F': (self) => self.width || 0,
+        'getHeight()F': (self) => self.height || 0,
+      },
+    }),
+    nativeDef('Landroid/util/Range;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class RangePeer { constructor(lower, upper) { this.lower = lower; this.upper = upper; } },
+      methods: {
+        'getLower()Ljava/lang/Comparable;': (self) => self.lower,
+        'getUpper()Ljava/lang/Comparable;': (self) => self.upper,
+      },
+      staticMethods: {
+        'create(Ljava/lang/Comparable;Ljava/lang/Comparable;)Landroid/util/Range;': (_self, [lower, upper], vm) => {
+          const range = vm.allocateRawObject('Landroid/util/Range;');
+          range.$peer = { lower, upper };
+          return range;
+        },
+      },
+    }),
+    nativeDef('Landroid/hardware/camera2/params/StreamConfigurationMap;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getOutputSizes(I)[Landroid/util/Size;': (_self, _args, vm) => cameraSizeArray(vm),
+        'getOutputSizes(Ljava/lang/Class;)[Landroid/util/Size;': (_self, _args, vm) => cameraSizeArray(vm),
       },
     })
   );
