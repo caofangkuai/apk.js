@@ -629,6 +629,16 @@ function cameraInstance(vm, id) {
   return object;
 }
 
+function cameraBox(vm, descriptor, value) {
+  return vm.wrapPeer({ value, constructor: { $descriptor: descriptor } });
+}
+
+function cameraIntList(vm, values) {
+  const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+  list.$peer = { items: values.map((value) => cameraBox(vm, 'Ljava/lang/Integer;', value | 0)) };
+  return list;
+}
+
 function cameraSize(vm, width, height) {
   const object = vm.allocateRawObject('Landroid/hardware/Camera$Size;');
   object.$peer = { width, height };
@@ -665,8 +675,8 @@ function cameraParameters(vm) {
 function cameraCharacteristicValue(vm, key, self) {
   const name = key?.$peer?.name || key?.name || jsString(key);
   const facing = self?.$peer?.facing ?? 1;
-  if (name === 'LENS_FACING') return facing ? 1 : 0;
-  if (name === 'SENSOR_ORIENTATION') return 90;
+  if (name === 'LENS_FACING') return cameraBox(vm, 'Ljava/lang/Integer;', facing ? 1 : 0);
+  if (name === 'SENSOR_ORIENTATION') return cameraBox(vm, 'Ljava/lang/Integer;', 90);
   if (name === 'SENSOR_INFO_ACTIVE_ARRAY_SIZE') {
     const rect = vm.allocateRawObject('Landroid/graphics/Rect;');
     rect.$peer = { left: 0, top: 0, right: 4000, bottom: 3000 };
@@ -687,13 +697,13 @@ function cameraCharacteristicValue(vm, key, self) {
     range.$peer = { lower: 100, upper: 3200 };
     return range;
   }
-  if (name === 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM') return 8;
-  if (name === 'CONTROL_AF_AVAILABLE_MODES') return vm.newArray('I', 3, [1, 2, 3]);
+  if (name === 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM') return cameraBox(vm, 'Ljava/lang/Float;', 8);
+  if (name === 'CONTROL_AF_AVAILABLE_MODES') return vm.newArray('[I', 3, [1, 2, 3]);
   if (name === 'LENS_INFO_AVAILABLE_APERTURES') return toFloatArray(vm, [1.8]);
   if (name === 'LENS_INFO_AVAILABLE_FOCAL_LENGTHS') return toFloatArray(vm, [4.2]);
-  if (name === 'LENS_INFO_MINIMUM_FOCUS_DISTANCE') return 0.1;
-  if (name === 'FLASH_INFO_AVAILABLE') return facing === 1;
-  if (name === 'INFO_SUPPORTED_HARDWARE_LEVEL') return 1;
+  if (name === 'LENS_INFO_MINIMUM_FOCUS_DISTANCE') return cameraBox(vm, 'Ljava/lang/Float;', 0.1);
+  if (name === 'FLASH_INFO_AVAILABLE') return cameraBox(vm, 'Ljava/lang/Boolean;', facing === 1);
+  if (name === 'INFO_SUPPORTED_HARDWARE_LEVEL') return cameraBox(vm, 'Ljava/lang/Integer;', 1);
   if (name === 'INFO_VERSION') return '3.2';
   if (name === 'SCALER_STREAM_CONFIGURATION_MAP') {
     const map = vm.allocateRawObject('Landroid/hardware/camera2/params/StreamConfigurationMap;');
@@ -5874,7 +5884,7 @@ function vmShowChild(self, index) {
       super: 'Ljava/lang/Object;',
       methods: {
         'getCameraIdList()[Ljava/lang/String;': (_self, _args, vm) => {
-          const list = vm.newArray('Ljava/lang/String;', 2);
+          const list = vm.newArray('[Ljava/lang/String;', 2);
           list.$data[0] = jsString('0');
           list.$data[1] = jsString('1');
           return list;
@@ -6004,7 +6014,7 @@ function vmShowChild(self, index) {
         'getPreviewSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 1920, 1080),
         'getPreviewFormat()I': () => 17,
         'getPictureFormat()I': () => 256,
-        'getSupportedPreviewFormats()Ljava/util/List;': (self, _args, vm) => { const list = vm.allocateRawObject('Ljava/util/ArrayList;'); list.$peer = { items: [17] }; return list; },
+        'getSupportedPreviewFormats()Ljava/util/List;': (self, _args, vm) => cameraIntList(vm, [17]),
         'getPictureSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 4000, 3000),
         'getSupportedFocusModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['auto', 'continuous-picture', 'fixed']),
         'getFocusMode()Ljava/lang/String;': () => 'auto',
@@ -6012,11 +6022,7 @@ function vmShowChild(self, index) {
         'getSupportedFlashModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['off', 'auto', 'on']),
         'getPreviewFpsRange([I)V': (_self, [range]) => { if (range?.$data) { range.$data[0] = 30000; range.$data[1] = 30000; } },
         'getFocalLength()F': () => 4.2,
-        'getSupportedPictureFormats()Ljava/util/List;': (self, _args, vm) => {
-          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
-          list.$peer = { items: [256] };
-          return list;
-        },
+        'getSupportedPictureFormats()Ljava/util/List;': (self, _args, vm) => cameraIntList(vm, [256]),
         'getHorizontalViewAngle()F': () => 65,
         'getVerticalViewAngle()F': () => 40,
         'flatten()Ljava/lang/String;': () => 'preview-size=1920x1080;picture-size=4000x3000',
