@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：368
-- 方法/构造函数键（静态统计）：3540
+- 注册的 native 类：370
+- 方法/构造函数键（静态统计）：3562
 
 ## Native 类清单
 
@@ -36,6 +36,7 @@
 | `Landroid/content/ContextThemeWrapper;` | registry.js |
 | `Landroid/content/ContextWrapper;` | registry.js |
 | `Landroid/content/Intent;` | registry.js |
+| `Landroid/content/IntentFilter;` | registry.js |
 | `Landroid/content/pm/ActivityInfo;` | registry.js |
 | `Landroid/content/pm/ApplicationInfo;` | registry.js |
 | `Landroid/content/pm/ConfigurationInfo;` | java-core.js |
@@ -117,6 +118,7 @@
 | `Landroid/os/Bundle;` | registry.js |
 | `Landroid/os/Environment;` | java-core.js |
 | `Landroid/os/Handler;` | registry.js |
+| `Landroid/os/HandlerThread;` | registry.js |
 | `Landroid/os/LocaleList;` | registry.js |
 | `Landroid/os/Looper;` | registry.js |
 | `Landroid/os/Message;` | registry.js |

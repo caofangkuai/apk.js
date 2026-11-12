@@ -1844,6 +1844,32 @@ function buildFrameworkDefinitions(vm) {
       },
     })
   );
+  defs.push(
+    nativeDef('Landroid/os/HandlerThread;', {
+      super: 'Ljava/lang/Thread;',
+      ctor: class HandlerThreadPeer {
+        constructor(vm, name) {
+          this.vm = vm;
+          this.name = name || 'HandlerThread';
+          this.looper = null;
+        }
+      },
+      methods: {
+        '<init>(Ljava/lang/String;)V': (self, [name]) => { self.name = jsString(name) || 'HandlerThread'; },
+        '<init>(Ljava/lang/String;I)V': (self, [name]) => { self.name = jsString(name) || 'HandlerThread'; },
+        'start()V': (self, _args, vm) => {
+          if (self.looper) return;
+          self.looper = vm.allocateRawObject('Landroid/os/Looper;');
+          self.looper.$peer = { vm, queue: vm.messageQueue };
+        },
+        'getLooper()Landroid/os/Looper;': (self) => self.looper,
+        'quit()V': (self) => { self.looper = null; },
+        'quitSafely()V': (self) => { self.looper = null; },
+        'getThreadId()I': () => 4242,
+      },
+    })
+  );
+
 
   defs.push(
     nativeDef('Landroid/os/MessageQueue;', {
@@ -5797,6 +5823,23 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/content/IntentFilter;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class IntentFilterPeer { constructor() { this.actions = []; this.categories = []; } },
+      methods: {
+        '<init>()V': (self) => { self.actions = []; self.categories = []; },
+        '<init>(Ljava/lang/String;)V': (self, [action]) => { self.actions = [jsString(action)]; self.categories = []; },
+        'addAction(Ljava/lang/String;)V': (self, [action]) => { if (self.actions) self.actions.push(jsString(action)); },
+        'addCategory(Ljava/lang/String;)V': (self, [category]) => { if (self.categories) self.categories.push(jsString(category)); },
+        'hasAction(Ljava/lang/String;)Z': (self, [action]) => (self.actions || []).includes(jsString(action)) ? 1 : 0,
+        'countActions()I': (self) => (self.actions || []).length,
+        'getAction(I)Ljava/lang/String;': (self, [index]) => (self.actions || [])[index | 0] ?? null,
+        'match(Landroid/content/ContentResolver;Landroid/content/Intent;ZLjava/lang/String;)I': () => -3,
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/hardware/camera2/CameraManager;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -8762,6 +8805,19 @@ function viewMethods() {
     'setTranslationZ(F)V': (self, [v]) => self.view?.setTranslationZ(v),
     'getTranslationZ()F': (self) => self.view?.getTranslationZ() ?? 0,
     'getTranslationX()F': (self) => self.view?.getTranslationX() ?? 0,
+    'hasTransientState()Z': () => 0,
+    'getAccessibilityDelegate()Landroid/view/View$AccessibilityDelegate;': () => null,
+    'saveHierarchyState(Landroid/util/SparseArray;)V': () => undefined,
+    'restoreHierarchyState(Landroid/util/SparseArray;)V': () => undefined,
+    'getMatrix()Landroid/graphics/Matrix;': (self, _args, vm) => {
+      if (self.view?.matrixObject) return self.view.matrixObject;
+      const matrix = vm.allocateRawObject('Landroid/graphics/Matrix;');
+      matrix.$peer = { matrix: [1, 0, 0, 1, 0, 0] };
+      if (self.view) self.view.matrixObject = matrix;
+      return matrix;
+    },
+    'isChildrenDrawingOrderEnabled()Z': () => 0,
+    'hasWindowFocus()Z': () => 1,
     'getTranslationY()F': (self) => self.view?.getTranslationY() ?? 0,
     'setX(F)V': (self, [v]) => self.view?.setX(v),
     'setY(F)V': (self, [v]) => self.view?.setY(v),
