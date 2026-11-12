@@ -199,14 +199,19 @@ export class JavaVM {
 
   newArray(typeDescriptor, length, initial) {
     if (length < 0) this.throwException('Ljava/lang/NegativeArraySizeException;', String(length));
-    let fill = undefined;
-    if (initial) fill = initial;
-    else if (typeDescriptor.startsWith('[') || typeDescriptor.startsWith('L')) fill = null;
-    else fill = defaultValueFor(typeDescriptor);
+    const reference = typeDescriptor.startsWith('[') || typeDescriptor.startsWith('L');
+    const fallback = reference ? null : defaultValueFor(typeDescriptor);
     const data = new Array(length);
-    if (fill !== undefined) data.fill(fill);
-    const array = new JavaArray(typeDescriptor, data, this);
-    return array;
+    const source = Array.isArray(initial)
+      ? initial
+      : (initial && Array.isArray(initial.$data) ? initial.$data : null);
+    if (source) {
+      for (let i = 0; i < length; i++) data[i] = i < source.length ? source[i] : fallback;
+      return new JavaArray(typeDescriptor, data, this);
+    }
+    const fill = initial !== undefined && initial !== null ? initial : fallback;
+    data.fill(fill);
+    return new JavaArray(typeDescriptor, data, this);
   }
 
   fieldKey(classDescriptor, name, type) {

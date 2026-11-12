@@ -49,6 +49,10 @@ const tapText = async (needle) => {
 };
 
 await pump(400);
+const seeded = engine.vm.newArray('[Ljava/lang/String;', 3, ['a', 'b', 'c']);
+assert.equal(seeded.$data[0], 'a');
+assert.equal(seeded.$data[2], 'c');
+assert.equal(seeded.$data.length, 3);
 await tapText('点我执行 DEX 逻辑');
 assert.ok(findText('已点击 1 次'), '点击计数未更新');
 await tapText('推进进度 +10');
