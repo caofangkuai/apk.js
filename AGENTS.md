@@ -155,7 +155,7 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，最新 HEAD `f968e45`；2026-11-11 多轮改动已推送。
+- 分支 `main`，最新 HEAD `ac9a743`；2026-11-12 多轮改动已推送。
 - 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
 - 本轮验证通过：`npm run test:all`（含 format/diagnose/interaction/widgets/drawables）、`npm run build`、`npm run site`。
@@ -299,7 +299,6 @@ npm run site
 5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
 6. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
 7. **Dialog/AlertDialog**：框架 host 已完成 show/dismiss/getWindow/布局解析；AppCompat 复杂主题布局仍需验证。
-8. **相机页**：`CameraManager.getCameraIdList()` 为空导致相机页空白；需要完整 `CameraCharacteristics`/`StreamConfigurationMap` host 才能显示。
 
 ### 建议接手顺序
 
@@ -318,6 +317,14 @@ npm run site
 - 触发路径：溢出菜单 tap `(697,53)`；菜单项 `(400,201)`；抽屉 swipe `(10,760)→(610,760)`。
 - 验证抽屉填充：对 NavigationView 的背景走 `drawDrawable`，断点应看到 `drawRoundRect(0,0,560,1520,0)`，采样像素为 `255,255,255,255`。
 - Drawable 回归：`npm run test:drawables`（node-canvas 像素断言，覆盖 Layer/Inset/Ripple/StateList/tint/TextView 基线）。
+
+### 已修复（2026-11-12）
+
+1. 温度/电池：String.format 解箱、double 参数解码、onPostResume 生命周期。
+2. 分区页：newArray 元素表语义。
+3. 相机页：Camera1/2 host、装箱 formats/characteristics；页面显示 2 台相机。
+4. 应用程序页：PackageItemInfo.loadLabel、ColorStateList 包装、应用名称解析。
+5. SearchView：ColorStateList 不再 ClassCast，诊断 interesting=0。
 
 ### 待用户确认
 
