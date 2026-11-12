@@ -5940,8 +5940,12 @@ function vmShowChild(self, index) {
         'open(I)Landroid/hardware/Camera;': (_self, [id], vm) => cameraInstance(vm, id | 0),
         'getCameraInfo(ILandroid/hardware/Camera$CameraInfo;)V': (_self, [id, info]) => {
           if (!info) return;
-          info.facing = (id | 0) === 0 ? 1 : 0;
-          info.orientation = 90;
+          const facing = (id | 0) === 0 ? 1 : 0;
+          if (!info.$peer) info.$peer = {};
+          info.$peer.facing = facing;
+          info.$peer.orientation = 90;
+          info.$fields?.set('facing:I', facing);
+          info.$fields?.set('orientation:I', 90);
         },
       },
     }),
