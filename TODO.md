@@ -101,10 +101,11 @@
 ## 已知剩余缺口
 
 - [ ] 相机页：Camera1/2 host、open、Parameters 已补，仍打印 “Can't connect to camera api1”，需继续定位连接校验分支。
+- [ ] 应用程序页的 “System Applications” 行由应用自身 UI 生成，宿主列表只返回当前包。
 - [x] 温度页数值：修复 String.format 装箱数字解箱与 double 参数解码，已显示 42/41/38/30/36/34 °C。
 - [x] 电池充电速度：同一修复后显示 420.0 mA；内核配置文件/型号已补。
 - [x] 电池电量/健康/状态/电压：补 `onPostResume()` 后 Fragment 恢复，显示 87% / Good / Charging / 4200 mV。
 - [x] 应用程序页：补 `PackageItemInfo.loadLabel` 与 `ApplicationInfo` super 链，列表已显示。
 - [x] 分区页：修正 `newArray` 元素表语义，挂载点/设备/fs/读写属性已正常。
-- [ ] `androidx.appcompat.widget.SearchView` 类缺失：菜单搜索项不可用。
+- [ ] SearchView：类存在于 DEX，4 种构造均可实例化；剩余为应用菜单反射路径。
 - [ ] 复现：`npm run diagnose -- /tmp/devinfo.apk`；`npm run render -- /tmp/devinfo.apk check`。
