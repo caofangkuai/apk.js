@@ -632,6 +632,8 @@ function cameraInstance(vm, id) {
 function cameraSize(vm, width, height) {
   const object = vm.allocateRawObject('Landroid/hardware/Camera$Size;');
   object.$peer = { width, height };
+  object.$fields?.set('width:I', width);
+  object.$fields?.set('height:I', height);
   return object;
 }
 
