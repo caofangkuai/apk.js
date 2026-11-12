@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：370
-- 方法/构造函数键（静态统计）：3567
+- 注册的 native 类：371
+- 方法/构造函数键（静态统计）：3582
 
 ## Native 类清单
 
@@ -149,6 +149,7 @@
 | `Landroid/util/Size;` | registry.js |
 | `Landroid/util/SizeF;` | registry.js |
 | `Landroid/util/SparseArray;` | java-core.js |
+| `Landroid/util/SparseBooleanArray;` | registry.js |
 | `Landroid/util/SparseIntArray;` | java-core.js |
 | `Landroid/util/TypedValue;` | registry.js |
 | `Landroid/util/Xml;` | registry.js |

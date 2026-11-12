@@ -1441,7 +1441,16 @@ function buildFrameworkDefinitions(vm) {
   );
 
   defs.push(nativeDef('Landroid/content/ContextWrapper;', { super: 'Landroid/content/Context;' }));
-  defs.push(nativeDef('Landroid/content/ContextThemeWrapper;', { super: 'Landroid/content/ContextWrapper;' }));
+  defs.push(nativeDef('Landroid/content/ContextThemeWrapper;', {
+    super: 'Landroid/content/ContextWrapper;',
+    ctor: class ContextThemeWrapperPeer { constructor(vm, context) { this.vm = vm; this.base = context ?? null; this.theme = null; } },
+    methods: {
+      '<init>(Landroid/content/Context;I)V': (self, [context]) => { self.base = context ?? null; },
+      '<init>(Landroid/content/Context;Landroid/content/res/Resources$Theme;)V': (self, [context, theme]) => { self.base = context ?? null; self.theme = theme ?? null; },
+      'getTheme()Landroid/content/res/Resources$Theme;': (self) => self.theme,
+      'setTheme(I)V': () => undefined,
+    },
+  }));
 
   defs.push(
     nativeDef('Landroid/app/Application;', {
@@ -3079,6 +3088,7 @@ function buildFrameworkDefinitions(vm) {
         }
       },
       methods: {
+        '<init>(Landroid/content/Context;)V': (self, [context]) => { self.context = context ?? null; },
         'inflate(ILandroid/view/Menu;)V': (self, [resId, menu]) => {
           if (!menu) return;
           const vm = self.vm;
@@ -5825,6 +5835,24 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/util/SparseBooleanArray;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class SparseBooleanArrayPeer { constructor() { this.map = new Map(); } },
+      methods: {
+        '<init>()V': (self) => { self.map = new Map(); },
+        '<init>(I)V': (self) => { self.map = new Map(); },
+        'put(IZ)V': (self, [key, value]) => { self.map.set(key | 0, !!value); },
+        'get(I)Z': (self, [key]) => (self.map.get(key | 0) ? 1 : 0),
+        'delete(I)V': (self, [key]) => { self.map.delete(key | 0); },
+        'clear()V': (self) => { self.map.clear(); },
+        'size()I': (self) => self.map.size,
+        'keyAt(I)I': (self, [index]) => [...self.map.keys()][index | 0] ?? 0,
+        'valueAt(I)Z': (self, [index]) => ([...self.map.values()][index | 0] ? 1 : 0),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/content/IntentFilter;', {
       super: 'Ljava/lang/Object;',
       ctor: class IntentFilterPeer { constructor() { this.actions = []; this.categories = []; } },
@@ -7309,6 +7337,7 @@ function vmShowChild(self, index) {
         },
         'isCharging()Z': () => true,
         'getStringProperty(I)Ljava/lang/String;': () => null,
+        'computeChargeTimeRemaining()J': () => BigInt(-1),
       },
     }),
     nativeDef('Landroid/hardware/usb/UsbManager;', {
