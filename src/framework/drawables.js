@@ -709,23 +709,36 @@ function drawXmlRoot(ctx, node, rect, options) {
     const drawableAttr = attrValue(node, 'drawable');
     const resolved = drawableFromAttr(vm, drawableAttr);
     if (!resolved) return false;
-    const target = firstChildNamed(node, 'target');
-    const animationValue = attrValue(target, 'animation');
-    const animationId = typeof animationValue === 'number' ? animationValue : animationValue?.reference;
     let rotation = null;
-    if (animationId && vm?.resources?.getLayout) {
+    const trim = {};
+    const targets = (node.children || []).filter((child) => child.name === 'target');
+    for (const target of targets) {
+      const targetName = attrValue(target, 'name');
+      const animationValue = attrValue(target, 'animation');
+      const animationId = typeof animationValue === 'number' ? animationValue : animationValue?.reference;
+      if (!animationId || !vm?.resources?.getLayout) continue;
       try {
         const animRoot = vm.resources.getLayout(animationId >>> 0);
         const animNode = elementChildren(animRoot)[0];
-        const property = attrValue(animNode, 'propertyName');
+        const property = String(attrValue(animNode, 'propertyName') || '');
+        const duration = Math.max(1, Number(attrValue(animNode, 'duration')) || 1000);
+        const startTime = Number(attrValue(animNode, 'startTime')) || 0;
+        const from = Number(attrValue(animNode, 'valueFrom'));
+        const to = Number(attrValue(animNode, 'valueTo'));
+        const progress = ((Date.now() - startTime) % duration) / duration;
+        const value = (Number.isFinite(from) ? from : 0) + ((Number.isFinite(to) ? to : 1) - (Number.isFinite(from) ? from : 0)) * progress;
         if (property === 'rotation' || property === 'rotationX' || property === 'rotationY') {
-          const duration = Number(attrValue(animNode, 'duration')) || 1000;
-          const from = Number(attrValue(animNode, 'valueFrom'));
-          const to = Number(attrValue(animNode, 'valueTo'));
           rotation = { duration, from: Number.isFinite(from) ? from : 0, to: Number.isFinite(to) ? to : 360 };
+        } else if (property === 'trimPathStart' || property === 'trimPathEnd' || property === 'trimPathOffset') {
+          const entry = trim[String(targetName)] || { start: 0, end: 1, offset: 0 };
+          if (property === 'trimPathStart') entry.start = value;
+          else if (property === 'trimPathEnd') entry.end = value;
+          else entry.offset = value;
+          trim[String(targetName)] = entry;
         }
       } catch { /* 动画资源不可用时保持静态 */ }
     }
+    const drawOptions = { ...options, trim };
     if (rotation) {
       const progress = (Date.now() % rotation.duration) / rotation.duration;
       const angle = rotation.from + (rotation.to - rotation.from) * progress;
@@ -735,11 +748,11 @@ function drawXmlRoot(ctx, node, rect, options) {
       ctx.translate(cx, cy);
       ctx.rotate((angle * Math.PI) / 180);
       ctx.translate(-cx, -cy);
-      const painted = drawDrawable(ctx, resolved, rect, options);
+      const painted = drawDrawable(ctx, resolved, rect, drawOptions);
       ctx.restore();
       return painted;
     }
-    return drawDrawable(ctx, resolved, rect, options);
+    return drawDrawable(ctx, resolved, rect, drawOptions);
   }
   const child = elementChildren(node)[0];
   if (child) return drawXmlRoot(ctx, child, rect, options);
@@ -1248,7 +1261,7 @@ PEER_DRAWERS.bitmap = (ctx, peer, rect, options) => {
 
 PEER_DRAWERS.vector = (ctx, peer, rect, options) => {
   if (!peer.root) return false;
-  return drawVectorRaw(ctx, 0, 0, { xml: peer.root, tint: peer.tint }, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+  return drawVectorRaw(ctx, 0, 0, { xml: peer.root, tint: peer.tint }, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, { trim: options.trim });
 };
 
 PEER_DRAWERS.color = (ctx, peer, rect, options) => {

@@ -98,6 +98,14 @@
 - [x] 演示页面改名为 `playground.html`，文档站设为默认入口
 - [x] AGENTS.md
 
+## 本轮新增完成
+
+- [x] 移除 APK 大小上限，默认 `Infinity`，文档同步。
+- [x] MaterialShapeDrawable 三段阴影（ambient/key/spot）与像素回归。
+- [x] AnimatedVectorDrawable trimPath 解析、路径裁剪与按时间动画。
+- [x] ListView 超长列表跳转限制前缀测量并回收窗口外视图，10 万行跳转回归。
+- [x] Dialog 圆角 Material 表面、阴影、三段按钮与 neutral 回调。
+
 ## 已知剩余缺口
 
 - [x] 相机页：修复 `getSupportedPictureFormats` 裸数字导致 ClassCast，页面已显示 2 台相机（需等待后台采集或下拉刷新）。

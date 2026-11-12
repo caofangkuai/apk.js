@@ -14,7 +14,7 @@
       height: 640,
       dpr: window.devicePixelRatio || 1,
       style: 'material',
-      maxApkSize: 50 * 1024 * 1024,
+      maxApkSize: Infinity,
     },
     onLog: (entry) => console.log(`[${entry.level}] ${entry.tag}: ${entry.message}`),
     onFinished: () => console.log('Activity finished'),

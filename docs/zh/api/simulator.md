@@ -12,7 +12,7 @@
 | `device.height` | number | `640` | 逻辑高度（像素） |
 | `device.dpr` | number | `window.devicePixelRatio`，上限 2 | 设备像素比 |
 | `device.style` | string | `'material'` | 主题风格 |
-| `device.maxApkSize` | number | `50 * 1024 * 1024` | APK 大小上限（字节） |
+| `device.maxApkSize` | number | `Infinity` | APK 大小上限（字节），默认不限制 |
 | `onLog` | `(entry) => void` | `null` | 日志回调，收到 `{ level, tag, message }` |
 | `onFinished` | `() => void` | `null` | Activity 结束时触发 |
 | `onError` | `(error) => void` | `null` | 加载或启动失败时触发 |
@@ -37,6 +37,6 @@ const DEFAULT_DEVICE = {
   height: 640,
   dpr: undefined,
   style: 'material',
-  maxApkSize: 50 * 1024 * 1024,
+  maxApkSize: Infinity,
 };
 ```

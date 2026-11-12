@@ -1369,7 +1369,9 @@ export class View {
     const radius = outline.radius || 0;
     const spotBlur = Math.max(1, elevation * 1.5);
     const ambientBlur = Math.max(1, elevation * 0.5);
+    const keyBlur = Math.max(1, elevation * 0.9);
     const spotOffsetY = Math.max(0, elevation * 0.3);
+    const keyOffsetY = Math.max(0, elevation * 0.12);
     const pad = Math.ceil(spotBlur + spotOffsetY + 2);
     const surfaceWidth = width + pad * 2;
     const surfaceHeight = height + pad * 2;
@@ -1403,11 +1405,13 @@ export class View {
       ctx.save();
       ctx.globalCompositeOperation = 'destination-over';
       drawPass(ctx, 0.039, ambientBlur, 0);
+      drawPass(ctx, 0.12, keyBlur, keyOffsetY);
       drawPass(ctx, 0.19, spotBlur, spotOffsetY);
       ctx.restore();
       return;
     }
     drawPass(offscreen, 0.039, ambientBlur, 0);
+    drawPass(offscreen, 0.12, keyBlur, keyOffsetY);
     drawPass(offscreen, 0.19, spotBlur, spotOffsetY);
     offscreen.save();
     offscreen.globalCompositeOperation = 'destination-out';

@@ -1378,7 +1378,8 @@ export class ListView extends ViewGroup {
     }
     const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
     const estimatedStart = Math.max(0, Math.floor(((this.scrollY | 0) - viewportHeight) / rowHeight) + 1);
-    if (estimatedStart > 0) this.measureLazyHeights(estimatedStart, width);
+    // 超长列表跳转时只测量有限前缀，避免 O(n) 卡死；剩余行按平均行高估算。
+    if (estimatedStart > 0 && estimatedStart <= 240) this.measureLazyHeights(estimatedStart, width);
     const top = Math.max(0, (this.scrollY | 0) - viewportHeight);
     const bottom = (this.scrollY | 0) + viewportHeight * 2;
     let start = Math.max(0, Math.min((this.$itemCount | 0) - 1, Math.floor(top / rowHeight) - 1));
@@ -1396,6 +1397,11 @@ export class ListView extends ViewGroup {
     }
     this.$items = visible;
     this.children = visible;
+    const keepFrom = Math.max(0, start - 24);
+    const keepTo = Math.min(this.$itemCount | 0, end + 24);
+    for (const position of this.$lazyViews.keys()) {
+      if (position < keepFrom || position >= keepTo) this.$lazyViews.delete(position);
+    }
   }
 
   onMeasure(widthSpec, heightSpec) {

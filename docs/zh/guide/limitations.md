@@ -6,7 +6,7 @@
 
 ## 体积
 
-APK 默认上限 50MB。可以通过 `device.maxApkSize` 调高，需要注意解析过程占用内存。
+APK 默认不限制大小；仍受浏览器可用内存约束。
 
 ## Framework 覆盖
 

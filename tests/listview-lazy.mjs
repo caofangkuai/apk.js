@@ -85,3 +85,26 @@ assert.ok(gridItems.length >= 4, '网格应布局 4 项');
 assert.equal(gridItems[1].top, gridItems[0].top, '同一行 top 应一致');
 assert.ok(gridItems[1].left > gridItems[0].left, '第二列应在右侧');
 console.log('gridview OK', { items: gridItems.length, rowTop: gridItems[0].top, secondLeft: gridItems[1].left });
+
+const huge = new ListView(null);
+let hugeCalls = 0;
+huge.$vm = {
+  invokeByName(name) {
+    if (name === 'getCount') return 100000;
+    if (name === 'getView') {
+      hugeCalls += 1;
+      const view = new TextView(null);
+      view.setText('row');
+      return { $view: view };
+    }
+    return null;
+  },
+};
+huge.adapter = {};
+huge.onMeasure(MeasureSpec.makeMeasureSpec(320, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(480, MeasureSpec.EXACTLY));
+huge.scrollTo(0, 900000);
+huge.onLayout(true, 0, 0, 320, 480);
+assert.ok(hugeCalls < 600, '超长列表跳转不应全量测量，实际 ' + hugeCalls);
+assert.ok(huge.children.length < 80, '超长列表窗口应保持少量子视图');
+assert.ok(huge.$lazyViews.size < 120, '超长列表应回收窗口外视图');
+console.log('listview huge jump OK', { calls: hugeCalls, children: huge.children.length, cached: huge.$lazyViews.size });

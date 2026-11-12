@@ -145,7 +145,7 @@ npm run site
 ## 已知约束
 
 - 含 `lib/` 原生库的 APK 无法运行。
-- APK 默认上限 50MB。
+- APK 默认不限制大小，实际受浏览器可用内存约束。
 - Framework 覆盖有限，大型应用常在 `onStart` 阶段失败。
 - `startActivity` 只支持应用内部跳转。
 
@@ -155,7 +155,7 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，最新 HEAD `ac9a743`；2026-11-12 多轮改动已推送。
+- 分支 `main`；2026-11-12 多轮改动已推送，最新 HEAD 以 `git log -1` 为准。
 - 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
 - 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
 - 本轮验证通过：`npm run test:all`（含 format/diagnose/interaction/widgets/drawables）、`npm run build`、`npm run site`。
@@ -292,21 +292,17 @@ npm run site
 
 ### 仍待修复的系统性 UI 差异
 
-1. **MaterialShapeDrawable 阴影**：Shader/Matrix/clipPath 基元已具备，三段渐变阴影仍需真机像素对照。
-2. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。
-3. **AnimatedVectorDrawable**：已支持 rotation 类 target；trimPath/路径动画仍缺失。
-4. **ListView 窗口化**：适配器 >300 行进入懒创建，按逐行高度缓存修正偏移；超长跳转仍需继续测量。
-5. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
-6. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
-7. **Dialog/AlertDialog**：框架 host 已完成 show/dismiss/getWindow/布局解析；AppCompat 复杂主题布局仍需验证。
+1. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。
+2. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
+3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
+4. **Dialog/AlertDialog**：已补 Material 圆角表面、阴影、neutral/negative/positive 三段按钮；复杂 AppCompat 主题仍建议真机对照。
 
 ### 建议接手顺序
 
-1. MaterialShapeDrawable `ShadowRenderer` 三段渐变阴影。
-2. AnimatedVectorDrawable 属性动画。
-3. ListView 回收/局部布局与 RecyclerView 回归样例。
-4. elevation overlay 与深色主题。
-5. 继续用 `node tools/render-apk.mjs <apk> <名称>` 对照原生截图。
+1. elevation overlay 与深色主题。
+2. RecyclerView 回归样例。
+3. Dialog/AppCompat 复杂主题真机像素对照。
+4. 继续用 `node tools/render-apk.mjs <apk> <名称>` 对照原生截图。
 
 ### 调试与复现
 
@@ -325,6 +321,11 @@ npm run site
 3. 相机页：Camera1/2 host、装箱 formats/characteristics；页面显示 2 台相机。
 4. 应用程序页：PackageItemInfo.loadLabel、ColorStateList 包装、应用名称解析。
 5. SearchView：ColorStateList 不再 ClassCast，诊断 interesting=0。
+6. APK 大小默认不限制。
+7. MaterialShapeDrawable ambient/key/spot 三段阴影。
+8. AnimatedVectorDrawable trimPath 路径裁剪与时间动画。
+9. ListView 超长列表跳转窗口化与视图回收。
+10. Dialog Material 圆角表面/阴影/三段按钮。
 
 ### 待用户确认
 

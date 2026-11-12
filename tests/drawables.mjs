@@ -409,3 +409,46 @@ console.log('drawables OK');
   const right = pixel(canvas, 190, 10);
   assert(left[0] !== right[0] || left[3] !== right[3], 'ProgressBar 进度未绘制');
 }
+
+// 16. Material 三段阴影
+{
+  const { View } = await import('../src/framework/view.js');
+  const view = new View(null);
+  view.vm = vm;
+  view.background = gradient(0xff3366cc, 12);
+  view.background.$peer.bounds = { left: 0, top: 0, right: 80, bottom: 80 };
+  view.elevation = 16;
+  view.setMeasuredDimension(80, 80);
+  view.layout(20, 20, 100, 100);
+  const { canvas, ctx } = surface(160);
+  ctx.clearRect(0, 0, 160, 160);
+  ctx.save();
+  ctx.translate(20, 20);
+  view.drawElevation({ context: ctx });
+  ctx.restore();
+  const below = pixel(canvas, 60, 110);
+  assert(below[3] > 0, 'Material 阴影未绘制到 View 下方');
+}
+
+// 17. Vector trimPath
+{
+  const { drawVectorRaw } = await import('../src/framework/graphics.js');
+  const { canvas, ctx } = surface(100);
+  ctx.clearRect(0, 0, 100, 100);
+  const xml = {
+    name: 'vector',
+    attrs: [{ name: 'viewportWidth', value: 100 }, { name: 'viewportHeight', value: 100 }],
+    children: [{
+      name: 'path',
+      attrs: [
+        { name: 'name', value: 'p' },
+        { name: 'pathData', value: 'M0,50 L100,50' },
+        { name: 'strokeColor', value: 0xffff0000 },
+        { name: 'strokeWidth', value: 10 },
+      ],
+    }],
+  };
+  drawVectorRaw(ctx, 0, 0, { xml }, 0, 0, 100, 100, { trim: { p: { start: 0.5, end: 1, offset: 0 } } });
+  assert(pixel(canvas, 10, 50)[3] === 0, 'trimPath 起点前应透明');
+  assert(pixel(canvas, 90, 50)[3] > 0, 'trimPath 终点区域应绘制');
+}

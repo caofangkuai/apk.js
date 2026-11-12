@@ -801,7 +801,7 @@ function roundedRectPath(ctx, x, y, w, h, rx, ry = rx) {
   ctx.closePath();
 }
 
-export function drawVectorRaw(ctx, originX, originY, drawable, left, top, width, height) {
+export function drawVectorRaw(ctx, originX, originY, drawable, left, top, width, height, options = {}) {
   const root = drawable?.xml;
   if (!root || root.name !== 'vector') return false;
   const attrs = attrsToMap(root.attrs);
@@ -812,7 +812,7 @@ export function drawVectorRaw(ctx, originX, originY, drawable, left, top, width,
   ctx.translate(originX + left, originY + top);
   ctx.scale(width / viewportWidth, height / viewportHeight);
   const tint = drawable?.tint;
-  for (const child of root.children || []) drawVectorNode(ctx, child, tint);
+  for (const child of root.children || []) drawVectorNode(ctx, child, tint, options.trim || null);
   ctx.restore();
   return true;
 }
@@ -832,7 +832,7 @@ function attrsToMap(attrs) {
   return map;
 }
 
-function drawVectorNode(ctx, node, tint) {
+function drawVectorNode(ctx, node, tint, trim) {
   if (!node) return;
   if (node.name === 'group') {
     const attrs = attrsToMap(node.attrs);
@@ -855,16 +855,143 @@ function drawVectorNode(ctx, node, tint) {
       ctx.scale(scaleX, scaleY);
       ctx.translate(-pivotX, -pivotY);
     }
-    for (const child of node.children || []) drawVectorNode(ctx, child, tint);
+    for (const child of node.children || []) drawVectorNode(ctx, child, tint, trim);
     ctx.restore();
     return;
   }
   if (node.name === 'path') {
-    drawVectorPath(ctx, node, tint);
+    drawVectorPath(ctx, node, tint, trim);
   }
 }
 
-function drawVectorPath(ctx, node, tint) {
+function flattenVectorPath(data) {
+  const tokens = tokenizePathData(data);
+  const subpaths = [];
+  let points = [];
+  let i = 0;
+  let command = null;
+  let x = 0;
+  let y = 0;
+  let startX = 0;
+  let startY = 0;
+  let cx = 0;
+  let cy = 0;
+  let lastCommand = '';
+  const number = () => Number(tokens[i++]);
+  const push = (px, py) => { points.push([px, py]); x = px; y = py; };
+  const finish = () => { if (points.length) subpaths.push(points); points = []; };
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (typeof token === 'string') { command = token; i++; }
+    else if (!command) { i++; continue; }
+    const upper = command.toUpperCase();
+    const relative = command !== upper;
+    if (upper === 'Z') {
+      if (points.length) { push(startX, startY); finish(); }
+      command = null;
+      continue;
+    }
+    if (upper === 'M') {
+      const nx = number() + (relative ? x : 0);
+      const ny = number() + (relative ? y : 0);
+      if (points.length) finish();
+      startX = nx; startY = ny; push(nx, ny);
+      command = relative ? 'l' : 'L';
+      continue;
+    }
+    if (upper === 'L' || upper === 'H' || upper === 'V') {
+      let nx = x;
+      let ny = y;
+      if (upper === 'L') { nx = number() + (relative ? x : 0); ny = number() + (relative ? y : 0); }
+      else if (upper === 'H') nx = number() + (relative ? x : 0);
+      else ny = number() + (relative ? y : 0);
+      push(nx, ny);
+      lastCommand = upper;
+      continue;
+    }
+    if (upper === 'C' || upper === 'S') {
+      let x1 = x;
+      let y1 = y;
+      if (upper === 'C') { x1 = number() + (relative ? x : 0); y1 = number() + (relative ? y : 0); }
+      const x2 = number() + (relative ? x : 0);
+      const y2 = number() + (relative ? y : 0);
+      const nx = number() + (relative ? x : 0);
+      const ny = number() + (relative ? y : 0);
+      for (let step = 1; step <= 12; step++) {
+        const t = step / 12;
+        const mt = 1 - t;
+        const px = mt * mt * mt * x + 3 * mt * mt * t * x1 + 3 * mt * t * t * x2 + t * t * t * nx;
+        const py = mt * mt * mt * y + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * ny;
+        points.push([px, py]);
+      }
+      cx = x2; cy = y2; x = nx; y = ny; lastCommand = upper;
+      continue;
+    }
+    if (upper === 'Q' || upper === 'T') {
+      let qx = cx;
+      let qy = cy;
+      if (upper === 'Q') { qx = number() + (relative ? x : 0); qy = number() + (relative ? y : 0); }
+      const nx = number() + (relative ? x : 0);
+      const ny = number() + (relative ? y : 0);
+      for (let step = 1; step <= 12; step++) {
+        const t = step / 12;
+        const mt = 1 - t;
+        points.push([mt * mt * x + 2 * mt * t * qx + t * t * nx, mt * mt * y + 2 * mt * t * qy + t * t * ny]);
+      }
+      cx = qx; cy = qy; x = nx; y = ny; lastCommand = upper;
+      continue;
+    }
+    // 近似 arc 等复杂命令：只取终点
+    const nx = number();
+    const ny = number();
+    if (Number.isFinite(nx) && Number.isFinite(ny)) push(relative ? x + nx : nx, relative ? y + ny : ny);
+  }
+  if (points.length) finish();
+  return subpaths;
+}
+
+function drawTrimmedVectorPath(ctx, data, trim) {
+  const subpaths = flattenVectorPath(data);
+  const points = subpaths.flat();
+  if (points.length < 2) return;
+  const lengths = [0];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    lengths.push(total);
+  }
+  if (!total) return;
+  let start = Number(trim.start);
+  let end = Number(trim.end);
+  start = Number.isFinite(start) ? start : 0;
+  end = Number.isFinite(end) ? end : 1;
+  let offset = Number(trim.offset);
+  offset = Number.isFinite(offset) ? offset : 0;
+  const from = (start + offset) * total;
+  const to = (end + offset) * total;
+  const lo = Math.max(0, Math.min(total, Math.min(from, to)));
+  const hi = Math.max(0, Math.min(total, Math.max(from, to)));
+  if (hi <= lo) return;
+  const sample = (distance) => {
+    let index = 1;
+    while (index < lengths.length && lengths[index] < distance) index++;
+    if (index >= points.length) return points[points.length - 1];
+    const span = lengths[index] - lengths[index - 1] || 1;
+    const t = (distance - lengths[index - 1]) / span;
+    return [points[index - 1][0] + (points[index][0] - points[index - 1][0]) * t, points[index - 1][1] + (points[index][1] - points[index - 1][1]) * t];
+  };
+  ctx.beginPath();
+  const first = sample(lo);
+  ctx.moveTo(first[0], first[1]);
+  for (let distance = lo + 1; distance < hi; distance += 1) {
+    const point = sample(distance);
+    ctx.lineTo(point[0], point[1]);
+  }
+  const last = sample(hi);
+  ctx.lineTo(last[0], last[1]);
+}
+
+function drawVectorPath(ctx, node, tint, trim) {
   const attrs = attrsToMap(node.attrs);
   const pathData = attrs.pathData;
   if (!pathData) return;
@@ -877,8 +1004,14 @@ function drawVectorPath(ctx, node, tint) {
   const strokeLineJoin = attrs.strokeLineJoin;
   const fillType = attrs.fillType;
   ctx.save();
-  ctx.beginPath();
-  applyPathData(ctx, pathData);
+  const trimKey = attrs.name !== undefined ? String(attrs.name) : '';
+  const trimValue = trim && trimKey ? trim[trimKey] : null;
+  if (trimValue) {
+    drawTrimmedVectorPath(ctx, pathData, trimValue);
+  } else {
+    ctx.beginPath();
+    applyPathData(ctx, pathData);
+  }
   if (fillColor !== undefined && fillColor !== null && fillAlpha > 0) {
     ctx.globalAlpha = fillAlpha;
     ctx.fillStyle = cssColor(tint === undefined || tint === null ? normalizeColor(fillColor) : normalizeColor(tint));

@@ -6,7 +6,7 @@ APKs with native code under `lib/` cannot run. The interpreter executes Dalvik b
 
 ## Size
 
-The default APK size limit is 50MB. Raise it through `device.maxApkSize` if you need to, keeping in mind that parsing happens in memory.
+APKs are unlimited by default; practical limits come from available browser memory.
 
 ## Framework coverage
 

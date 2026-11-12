@@ -6,7 +6,7 @@ const DEFAULT_DEVICE = {
   dpr: undefined,
   style: 'default',
   nightMode: null,
-  maxApkSize: 50 * 1024 * 1024,
+  maxApkSize: Infinity,
 };
 
 const DEFAULT_OPTIONS = {
@@ -67,9 +67,9 @@ export class ApkSimulator {
   }
 
   assertSize(size) {
-    if (Number(size) > this.device.maxApkSize) {
-      const limit = (this.device.maxApkSize / 1024 / 1024).toFixed(0);
-      throw new Error(`APK 超过大小上限（${limit}MB）`);
+    const limit = this.device.maxApkSize;
+    if (Number.isFinite(limit) && Number(size) > limit) {
+      throw new Error(`APK 超过大小上限（${(limit / 1024 / 1024).toFixed(0)}MB）`);
     }
   }
 
@@ -109,7 +109,7 @@ export class ApkSimulator {
     if (await hasNativeLibs(zip)) {
       throw new Error('APK 含原生库（lib/），无法模拟');
     }
-    const apk = await loadApkFiles(zip, { maxTotalSize: Math.max(this.device.maxApkSize * 4, 256 * 1024 * 1024), maxEntries: 50000 });
+    const apk = await loadApkFiles(zip, { maxTotalSize: Number.isFinite(this.device.maxApkSize) ? Math.max(this.device.maxApkSize * 4, 256 * 1024 * 1024) : 2 * 1024 * 1024 * 1024, maxEntries: 50000 });
     return this.start(apk);
   }
 

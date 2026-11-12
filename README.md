@@ -78,7 +78,7 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
       height: 640,
       dpr: window.devicePixelRatio || 1,
       style: 'material',
-      maxApkSize: 50 * 1024 * 1024,
+      maxApkSize: Infinity,
     },
     onLog: (entry) => console.log(`[${entry.level}] ${entry.tag}: ${entry.message}`),
     onFinished: () => console.log('Activity finished'),
@@ -105,7 +105,7 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 | `device.width` / `device.height` | Logical resolution. Defaults to 360×640. |
 | `device.dpr` | Device pixel ratio. Defaults to `window.devicePixelRatio` capped at 2. The canvas backing size is logical size × dpr. |
 | `device.style` | Theme style. Defaults to `default`. |
-| `device.maxApkSize` | APK size limit. Defaults to 50MB. |
+| `device.maxApkSize` | APK size limit. Defaults to unlimited. |
 | `onLog` / `onFinished` / `onError` | Log, finish and error callbacks. |
 
 | Method | Description |
@@ -172,7 +172,7 @@ Set `RENDER_WIDTH`, `RENDER_HEIGHT` or `RENDER_DENSITY` to change the output siz
 ## Scope and limits
 
 - **Java/Kotlin APKs only.** APKs containing native libraries under `lib/` cannot run.
-- APK size limit is 50MB.
+- APK size is unlimited by default.
 - The framework is a small subset of Android and keeps growing. Unimplemented framework classes or methods surface as log errors.
 - `startActivity` only resolves activities inside the same app. Launching another app throws `ActivityNotFoundException`.
 - The demo renders at 360×640.

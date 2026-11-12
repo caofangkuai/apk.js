@@ -12,7 +12,7 @@
 | `device.height` | number | `640` | Logical height in pixels |
 | `device.dpr` | number | `window.devicePixelRatio` capped at 2 | Device pixel ratio |
 | `device.style` | string | `'material'` | Theme style |
-| `device.maxApkSize` | number | `50 * 1024 * 1024` | APK size limit in bytes |
+| `device.maxApkSize` | number | `Infinity` | APK size limit in bytes; unlimited by default |
 | `onLog` | `(entry) => void` | `null` | Log callback, receives `{ level, tag, message }` |
 | `onFinished` | `() => void` | `null` | Fired when the activity finishes |
 | `onError` | `(error) => void` | `null` | Fired on load or start failure |
@@ -37,6 +37,6 @@ const DEFAULT_DEVICE = {
   height: 640,
   dpr: undefined,
   style: 'material',
-  maxApkSize: 50 * 1024 * 1024,
+  maxApkSize: Infinity,
 };
 ```

@@ -471,15 +471,39 @@ function dialogEnsureWindow(peer, vm) {
   }
   return peer.windowObject;
 }
+function dialogRoundRect(ctx, x, y, width, height, radius) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function dialogLayout(peer, screen) {
-  const width = Math.min(screen?.width || 360, Math.round((screen?.width || 360) * 0.86));
+  const sw = screen?.width || 360;
+  const sh = screen?.height || 640;
+  const density = Number(peer.vm?.resources?.displayMetrics?.density) || 1;
+  const margin = 24 * density;
+  const maxWidth = Math.max(1, sw - margin * 2);
+  const width = Math.min(maxWidth, Math.max(280 * density, Math.round(sw * 0.86)));
   const message = String(peer.message ?? '');
-  const lines = Math.max(1, Math.ceil(message.length / 22));
-  const contentHeight = peer.contentView ? Math.min(Math.round((screen?.height || 640) * 0.7), 480) : 0;
+  const messageLines = Math.max(1, Math.ceil(message.length / Math.max(16, Math.floor((width - 48 * density) / (8 * density)))));
+  const titleHeight = peer.title ? 56 * density : 0;
+  const messageHeight = message ? messageLines * 22 * density + 8 * density : 0;
+  const contentHeight = peer.contentView ? Math.min(Math.round(sh * 0.56), 420 * density) : 0;
   const itemCount = Array.isArray(peer.items) ? peer.items.length : (peer.adapter ? Number(peer.adapterCount) || 0 : 0);
-  const itemHeight = itemCount * 44;
-  const height = Math.max(contentHeight, itemHeight, Math.min(screen?.height || 640, 96 + lines * 20 + (peer.positiveText || peer.negativeText ? 56 : 16)));
-  return { width, height, left: Math.round(((screen?.width || 360) - width) / 2), top: Math.round(((screen?.height || 640) - height) / 2) };
+  const itemHeight = Math.min(Math.round(sh * 0.56), itemCount * 48 * density);
+  const buttons = [peer.neutralText, peer.negativeText, peer.positiveText].filter(Boolean).length;
+  const buttonHeight = buttons ? 52 * density : 0;
+  const height = Math.min(sh - margin * 2, Math.max(96 * density, titleHeight + messageHeight + contentHeight + itemHeight + buttonHeight + 24 * density));
+  return { width, height, left: Math.round((sw - width) / 2), top: Math.round((sh - height) / 2), density, titleHeight, messageHeight, buttonHeight, contentHeight, itemHeight };
 }
 function dialogDismiss(peer) {
   if (!peer.showing) return;
@@ -499,12 +523,19 @@ function dialogShow(peer) {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.42)';
       ctx.fillRect(0, 0, screen.width, screen.height);
+      const radius = 28 * (layout.density || 1);
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.28)';
+      ctx.shadowBlur = 24 * (layout.density || 1);
+      ctx.shadowOffsetY = 8 * (layout.density || 1);
       ctx.fillStyle = peer.night ? '#1e1e1e' : '#ffffff';
-      ctx.fillRect(layout.left, layout.top, layout.width, layout.height);
+      dialogRoundRect(ctx, layout.left, layout.top, layout.width, layout.height, radius);
+      ctx.fill();
+      ctx.restore();
       ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
-      ctx.font = 'bold 18px sans-serif';
-      if (peer.title) ctx.fillText(String(peer.title), layout.left + 20, layout.top + 34);
-      ctx.font = '16px sans-serif';
+      ctx.font = 'bold ' + Math.round(20 * (layout.density || 1)) + 'px sans-serif';
+      if (peer.title) ctx.fillText(String(peer.title), layout.left + 24 * (layout.density || 1), layout.top + 38 * (layout.density || 1));
+      ctx.font = Math.round(14 * (layout.density || 1)) + 'px sans-serif';
       const message = String(peer.message ?? '');
       const words = message.split(/\s+/);
       let line = '';
@@ -551,16 +582,21 @@ function dialogShow(peer) {
           peer.itemRects.push({ left: layout.left, top, right: layout.left + layout.width, bottom: top + 44, index });
         });
       }
-      const labels = [peer.negativeText, peer.positiveText].filter(Boolean).map(String);
+      const buttons = [
+        peer.neutralText ? { label: String(peer.neutralText), kind: 'neutral' } : null,
+        peer.negativeText ? { label: String(peer.negativeText), kind: 'negative' } : null,
+        peer.positiveText ? { label: String(peer.positiveText), kind: 'positive' } : null,
+      ].filter(Boolean);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#00796b';
-      let bx = layout.left + layout.width - 20;
+      const density = layout.density || 1;
+      let bx = layout.left + layout.width - 20 * density;
       peer.buttonRects = [];
-      for (const label of labels.reverse()) {
-        const w = ctx.measureText(label).width;
-        ctx.fillText(label, bx, layout.top + layout.height - 20);
-        peer.buttonRects.push({ left: bx - w - 10, top: layout.top + layout.height - 44, right: bx + 4, bottom: layout.top + layout.height - 10, label });
-        bx -= w + 36;
+      for (const button of buttons.reverse()) {
+        const w = ctx.measureText(button.label).width;
+        ctx.fillText(button.label, bx, layout.top + layout.height - 18 * density);
+        peer.buttonRects.push({ left: bx - w - 12 * density, top: layout.top + layout.height - 48 * density, right: bx + 4, bottom: layout.top + layout.height - 8 * density, label: button.label, kind: button.kind });
+        bx -= w + 32 * density;
       }
       ctx.textAlign = 'left';
       ctx.restore();
@@ -592,10 +628,10 @@ function dialogShow(peer) {
         }
         for (const rect of peer.buttonRects || []) {
           if (event.x >= rect.left && event.x <= rect.right && event.y >= rect.top && event.y <= rect.bottom) {
-            const positive = rect.label === String(peer.positiveText ?? '');
-            const listener = positive ? peer.positiveListener : peer.negativeListener;
+            const kind = rect.kind || 'positive';
+            const listener = kind === 'positive' ? peer.positiveListener : (kind === 'negative' ? peer.negativeListener : peer.neutralListener);
             dialogDismiss(peer);
-            try { peer.vm.invokeInterface(listener, 'onClick', '(Landroid/content/DialogInterface;I)V', [peer.dialogObject || peer, positive ? -1 : -2]); } catch (_) {}
+            try { peer.vm.invokeInterface(listener, 'onClick', '(Landroid/content/DialogInterface;I)V', [peer.dialogObject || peer, kind === 'positive' ? -1 : (kind === 'negative' ? -2 : -3)]); } catch (_) {}
             return true;
           }
         }

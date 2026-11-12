@@ -78,7 +78,7 @@ npm run serve
       height: 640,
       dpr: window.devicePixelRatio || 1,
       style: 'material',
-      maxApkSize: 50 * 1024 * 1024,
+      maxApkSize: Infinity,
     },
     onLog: (entry) => console.log(`[${entry.level}] ${entry.tag}: ${entry.message}`),
     onFinished: () => console.log('Activity 已结束'),
@@ -105,7 +105,7 @@ npm run serve
 | `device.width` / `device.height` | 逻辑分辨率，默认 360×640。 |
 | `device.dpr` | 设备像素比，默认取 `window.devicePixelRatio` 且上限为 2。canvas 物理尺寸为逻辑尺寸乘 dpr。 |
 | `device.style` | 主题风格，默认 `default`。 |
-| `device.maxApkSize` | APK 大小上限，默认 50MB。 |
+| `device.maxApkSize` | APK 大小上限，默认不限制。 |
 | `onLog` / `onFinished` / `onError` | 日志、结束、错误回调。 |
 
 | 方法 | 说明 |
@@ -172,7 +172,7 @@ npm run render -- /path/to/app.apk my-app
 ## 支持范围与限制
 
 - 只支持**纯 Java/Kotlin APK**。含 `lib/` 原生库的 APK 无法运行。
-- APK 大小上限 50MB。
+- APK 大小默认不限制。
 - Framework 只覆盖 Android 的一小部分，还在持续扩充。未实现的类或方法会以日志形式报错。
 - `startActivity` 只能解析应用内部的 Activity，启动其他应用会抛 `ActivityNotFoundException`。
 - 演示页面按 360×640 渲染。
