@@ -5961,6 +5961,8 @@ function vmShowChild(self, index) {
       ctor: class CameraSizePeer { constructor(width = 0, height = 0) { this.width = width | 0; this.height = height | 0; } },
       methods: {
         '<init>(II)V': (self, [width, height]) => { self.width = width | 0; self.height = height | 0; },
+        'getWidth()I': (self) => self.width | 0,
+        'getHeight()I': (self) => self.height | 0,
       },
     }),
     nativeDef('Landroid/hardware/Camera$Parameters;', {
@@ -5970,6 +5972,9 @@ function vmShowChild(self, index) {
         'getSupportedPreviewSizes()Ljava/util/List;': (self, _args, vm) => cameraSizeList(vm, [[4000, 3000], [1920, 1080], [1280, 720]]),
         'getSupportedPictureSizes()Ljava/util/List;': (self, _args, vm) => cameraSizeList(vm, [[4000, 3000], [1920, 1080], [1280, 720]]),
         'getPreviewSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 1920, 1080),
+        'getPreviewFormat()I': () => 17,
+        'getPictureFormat()I': () => 256,
+        'getSupportedPreviewFormats()Ljava/util/List;': (self, _args, vm) => { const list = vm.allocateRawObject('Ljava/util/ArrayList;'); list.$peer = { items: [17] }; return list; },
         'getPictureSize()Landroid/hardware/Camera$Size;': (self, _args, vm) => cameraSize(vm, 4000, 3000),
         'getSupportedFocusModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['auto', 'continuous-picture', 'fixed']),
         'getFocusMode()Ljava/lang/String;': () => 'auto',
