@@ -5929,6 +5929,12 @@ function vmShowChild(self, index) {
         'getFlashMode()Ljava/lang/String;': () => 'off',
         'getSupportedFlashModes()Ljava/util/List;': (self, _args, vm) => cameraStringList(vm, ['off', 'auto', 'on']),
         'getPreviewFpsRange([I)V': (_self, [range]) => { if (range?.$data) { range.$data[0] = 30000; range.$data[1] = 30000; } },
+        'getFocalLength()F': () => 4.2,
+        'getSupportedPictureFormats()Ljava/util/List;': (self, _args, vm) => {
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: [256] };
+          return list;
+        },
         'getHorizontalViewAngle()F': () => 65,
         'getVerticalViewAngle()F': () => 40,
         'flatten()Ljava/lang/String;': () => 'preview-size=1920x1080;picture-size=4000x3000',
