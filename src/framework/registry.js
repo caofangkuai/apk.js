@@ -7087,7 +7087,6 @@ function vmShowChild(self, index) {
         },
         'getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;': (self, [pkg], vm) => {
           const requested = jsString(pkg);
-          if (vm.packageName && requested && requested !== vm.packageName) return null;
           const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
           info.$peer = {
             vm,
@@ -7116,7 +7115,6 @@ function vmShowChild(self, index) {
         'hasSystemFeature(Ljava/lang/String;I)Z': (_self, [name]) => systemFeatureNames().includes(jsString(name)),
         'getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;': (self, [pkg], vm) => {
           const requested = jsString(pkg);
-          if (vm.packageName && requested && requested !== vm.packageName) return null;
           const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
           info.$peer = { vm, constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' } };
           return info;
