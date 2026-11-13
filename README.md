@@ -233,6 +233,12 @@ npm run render -- /path/to/app.apk my-app
 
 Set `RENDER_WIDTH`, `RENDER_HEIGHT` or `RENDER_DENSITY` to change the output size.
 
+`tools/hook-apk.mjs` does the same with a hook module installed first, which is the quickest way to verify that a hook changes what the app renders:
+
+```bash
+npm run hook:apk -- samples/hello-dex.apk samples/hooks/rename-title.mjs demo-hooked
+```
+
 ## Scope and limits
 
 - **Java/Kotlin APKs only.** APKs containing native libraries under `lib/` cannot run.

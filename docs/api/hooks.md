@@ -116,6 +116,32 @@ bridge.hookAllMethods('android.app.Activity', 'finish', {
 
 The engine then unwinds normally: `try/catch` blocks inside the DEX method see the exception, and an uncaught one surfaces through the usual crash path.
 
+## Rendering with hooks from the CLI
+
+`tools/hook-apk.mjs` loads an APK, installs a hook module, pumps a few frames and writes a PNG. It is the quickest way to check that a hook actually changes what the app shows:
+
+```bash
+npm run hook:apk -- samples/hello-dex.apk samples/hooks/rename-title.mjs demo-hooked
+```
+
+The hook module default-exports a function that receives the API objects. It runs before the VM exists, so registrations simply queue up:
+
+```js
+// samples/hooks/rename-title.mjs
+export default function ({ bridge, log }) {
+  bridge.hookAllMethods('android.widget.TextView', 'setText', {
+    beforeHookedMethod(param) {
+      const value = param.args[0];
+      if (typeof value !== 'string') return;
+      log('setText(' + value + ')');
+      if (value === 'Hello World') param.args[0] = '[hook] Hello World';
+    },
+  });
+}
+```
+
+Environment knobs: `RENDER_WIDTH`, `RENDER_HEIGHT`, `RENDER_DENSITY`, `RENDER_NIGHT`, `HOOK_FRAMES`. The tool prints the rewritten view texts and a summary (`registered` hooks, intercepted `events`, leftover `pending`).
+
 ## Notes and limits
 
 - Host constructors run inside the native `ctor`, before any `<init>` method exists. `hookAllConstructors` therefore works for DEX classes and for host classes that declare `<init>`; on a pure host class it reports that there is no `<init>` to hook.

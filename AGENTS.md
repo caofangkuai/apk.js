@@ -44,6 +44,9 @@ npm run test:ui
 npm run test:all
 
 
+# 带 hook 渲染（先装 hook 模块，再出图）
+npm run hook:apk -- samples/hello-dex.apk samples/hooks/rename-title.mjs demo-hooked
+
 # 渲染性能基准（120 帧）
 npm run bench:render -- /path/to/app.apk
 

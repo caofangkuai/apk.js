@@ -233,6 +233,12 @@ npm run render -- /path/to/app.apk my-app
 
 改 `RENDER_WIDTH`、`RENDER_HEIGHT` 或 `RENDER_DENSITY` 可以调整输出尺寸。
 
+`tools/hook-apk.mjs` 在此基础上先装一个 hook 模块再渲染，是确认 hook 真的改变界面最快的办法：
+
+```bash
+npm run hook:apk -- samples/hello-dex.apk samples/hooks/rename-title.mjs demo-hooked
+```
+
 ## 支持范围与限制
 
 - 只支持**纯 Java/Kotlin APK**。含 `lib/` 原生库的 APK 无法运行。

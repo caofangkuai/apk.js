@@ -116,6 +116,32 @@ bridge.hookAllMethods('android.app.Activity', 'finish', {
 
 引擎随后按正常流程展开：DEX 方法内的 `try/catch` 能捕获它，未捕获则走常规崩溃路径。
 
+## 从命令行带 hook 渲染
+
+`tools/hook-apk.mjs` 会加载 APK、装好 hook 模块、推进若干帧并输出图片，用来快速确认某个 hook 是否真的改变了界面：
+
+```bash
+npm run hook:apk -- samples/hello-dex.apk samples/hooks/rename-title.mjs demo-hooked
+```
+
+hook 模块默认导出一个函数，收到 API 对象。它在 VM 创建之前执行，注册会自动排队：
+
+```js
+// samples/hooks/rename-title.mjs
+export default function ({ bridge, log }) {
+  bridge.hookAllMethods('android.widget.TextView', 'setText', {
+    beforeHookedMethod(param) {
+      const value = param.args[0];
+      if (typeof value !== 'string') return;
+      log('setText(' + value + ')');
+      if (value === 'Hello World') param.args[0] = '[hook] Hello World';
+    },
+  });
+}
+```
+
+可用环境变量：`RENDER_WIDTH`、`RENDER_HEIGHT`、`RENDER_DENSITY`、`RENDER_NIGHT`、`HOOK_FRAMES`。脚本会打印被改写的视图文案，以及 `registered`（已注册 hook 数）、`events`（拦截次数）、`pending`（尚未回放）的统计。
+
 ## 说明与限制
 
 - 宿主类的构造发生在原生 `ctor` 里，那时还不存在 `<init>` 方法。所以 `hookAllConstructors` 对 DEX 类和声明了 `<init>` 的宿主类有效；对纯宿主类会明确提示没有可拦截的 `<init>`。
