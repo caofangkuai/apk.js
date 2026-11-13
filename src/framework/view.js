@@ -220,7 +220,8 @@ export class View {
     this.accessibilityLiveRegion = 0;
     this.importantForAccessibility = 0;
     this.nestedScrollingEnabled = false;
-    this.isLayoutRequested = false;
+    // 用 $layoutRequested 存状态：直接叫 isLayoutRequested 会遮蔽同名方法。
+    this.$layoutRequested = false;
     this.animation = null;
     this.onLayoutChangeListeners = [];
     this.onAttachStateListeners = [];
@@ -525,6 +526,15 @@ export class View {
   }
 
   requestLayout() {
+    // AOSP 语义：从本视图到根一路标记，直到 layout 走完才清除。
+    // 应用侧会用 isLayoutRequested() 判断是否需要重新排布，标记必须沿父链传播。
+    let cursor = this;
+    const visited = new Set();
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      cursor.$layoutRequested = true;
+      cursor = cursor.parent || null;
+    }
     const root = this.getRootView();
     if (root && root.$scheduleLayout) root.$scheduleLayout();
     else this.invalidate();
@@ -533,6 +543,14 @@ export class View {
 
   isLayoutRequested() {
     return !!this.$layoutRequested;
+  }
+
+  /** 本视图完成 layout 后清标记；子树仍有请求时保留。 */
+  clearLayoutRequested(deep = true) {
+    this.$layoutRequested = false;
+    if (!deep) return;
+    for (const child of this.children || []) child.clearLayoutRequested?.(true);
+    if (this.child && this.child !== this) this.child.clearLayoutRequested?.(true);
   }
 
   invalidate() {
@@ -930,7 +948,7 @@ export class View {
   }
 
   isLayoutRequestedFlag() {
-    return this.isLayoutRequested;
+    return !!this.$layoutRequested;
   }
 
   isLaidOut() {
@@ -1207,8 +1225,13 @@ export class View {
     this.top = top;
     this.right = right;
     this.bottom = bottom;
-    if (this.layoutWithDex(changed, left, top, right, bottom)) return;
-    this.onLayout(changed, left, top, right, bottom);
+    try {
+      if (this.layoutWithDex(changed, left, top, right, bottom)) return;
+      this.onLayout(changed, left, top, right, bottom);
+    } finally {
+      // 只清自己：子视图是否还有请求由它们自己的 layout 负责。
+      this.$layoutRequested = false;
+    }
   }
 
   layoutWithDex(changed, left, top, right, bottom) {

@@ -9054,7 +9054,8 @@ function viewMethods() {
     'dispatchApplyWindowInsets(Landroid/view/WindowInsets;)Landroid/view/WindowInsets;': (_self, [insets]) => insets ?? null,
     'hasOnClickListeners()Z': (self) => self.view?.hasOnClickListener() ?? false,
     'forceLayout()V': (self) => {
-      self.view && (self.view.isLayoutRequested = true);
+      // 只置标记，不触发遍历，和 AOSP 的 forceLayout 一致。
+      if (self.view) self.view.$layoutRequested = true;
     },
     'isLayoutRequested()Z': (self) => self.view?.isLayoutRequestedFlag() ?? false,
     'jumpDrawablesToCurrentState()V': () => undefined,

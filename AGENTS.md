@@ -40,7 +40,7 @@ npm run check:duplicates
 # 本地 UI/触摸回归（需要字体）
 npm run test:ui
 
-# 全部回归一起跑（coverage + duplicates + playground + refs + api + hooks + hooks-apk + bundles + zip + listview + format + diagnose + touch + interaction + widgets + drawables）
+# 全部回归一起跑（coverage + duplicates + playground + refs + api + hooks + hooks-apk + bundles + layout-flag + zip + listview + format + diagnose + touch + interaction + widgets + drawables）
 npm run test:all
 
 
@@ -165,7 +165,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
