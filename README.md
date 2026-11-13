@@ -47,7 +47,7 @@ npm run serve
 
 Open <http://localhost:8080>, then click **Choose APK** or drop an APK onto the page.
 
-The build output `dist/apk.min.js` and `dist/android-framework.min.js` is committed, so you can also copy `index.html`, `dist/`, `vendor/` and `samples/` onto any static host and skip the build step.
+The build output `dist/apk.min.js` and `dist/android-framework.min.js` is committed, so you can also copy `playground.html`, `dist/`, `vendor/` and `samples/` onto any static host and skip the build step.
 
 ## Build output
 
@@ -55,19 +55,19 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 
 | Artifact | Contents |
 | --- | --- |
-| `dist/android-framework.min.js` | Framework only: DEX parsing, runtime, resource parsing, Canvas Android Framework subset. No DOM or page logic. |
-| `dist/apk.min.js` | Caller layer: device info, render target, file loading, status and log callbacks. Depends on the file above. |
+| `dist/apk.min.js` | Core engine: DEX parser, AXML/ARSC parsers, APK file loader, VM and interpreter, Xposed hook runtime. No Android host classes, no DOM. |
+| `dist/android-framework.min.js` | Java/Android host classes plus `ApkSimulator` / `EmulatorEngine`. Imports the core engine above. |
 
-`index.html` loads `dist/apk.min.js` through `<script type="module">`, which pulls in `android-framework.min.js`. JSZip is provided as a global from `vendor/jszip.min.js`.
+`dist/android-framework.min.js` imports `./apk.min.js`, so load the simulator bundle and the browser pulls in the engine. If you only parse APKs (DEX, manifest, resources) you can import `dist/apk.min.js` on its own. JSZip is provided as a global from `vendor/jszip.min.js`.
 
 ## Using it on a page
 
-`apk.min.js` exports `createSimulator` and `ApkSimulator`. The caller supplies the device info and the render target:
+`android-framework.min.js` exports `createSimulator` and `ApkSimulator`. The caller supplies the device info and the render target:
 
 ```html
 <script src="vendor/jszip.min.js"></script>
 <script type="module">
-  import { createSimulator } from './dist/apk.min.js';
+  import { createSimulator } from './dist/android-framework.min.js';
 
   const sim = createSimulator({
     // Render target: a CSS selector, a DOM element, or an existing canvas
@@ -122,13 +122,11 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 `sim.on(event, handler)` returns a disposer; `sim.once` and `sim.off` are also available. `sim.hooks` exposes the raw `HookBus`.
 
 ```js
-import { createSimulator, hookResult } from './dist/apk.min.js';
+import { createSimulator } from './dist/android-framework.min.js';
 const sim = createSimulator({ element: '#screen' });
 
-const off = sim.on('invoke:before', (ctx) => {
-  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
-});
-sim.on('log', (entry) => console.log(entry.level, entry.message));
+const off = sim.on('log', (entry) => console.log(entry.level, entry.message));
+sim.on('activity:finish', () => console.log('done'));
 off();
 ```
 
@@ -138,10 +136,50 @@ Events:
 | --- | --- |
 | `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
 | `start:before` / `start:after` | `{ engine, apk, vm? }` |
-| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }`; return `hookResult(value)` to skip the call |
-| `invoke:after` | Same context plus `result`; return `hookResult(value)` to replace it |
 | `log` | `{ level, tag, message, time }` |
 | `activity:finish` | `{ engine, vm, activity }` |
+
+## Hooking methods
+
+Method interception uses the Xposed API. Hooks are matched on the resolved method, so DEX methods, host (`android.*` / `java.*`) methods and constructors all work.
+
+```js
+import { createSimulator } from './dist/android-framework.min.js';
+
+const sim = createSimulator({ element: '#screen' });
+
+// Hooks can be registered before the VM exists; they are applied on start.
+const { bridge, helpers } = sim.xposed;
+
+bridge.hookAllMethods('android.widget.TextView', 'setText', {
+  beforeHookedMethod(param) {
+    param.args[0] = 'rewritten';
+  },
+});
+
+helpers.findAndHookMethod('java.lang.String', null, 'trim', {
+  afterHookedMethod(param) {
+    param.setResult(param.getResult() + '!');
+  },
+});
+
+await sim.loadFromFile(file);
+```
+
+| API | Description |
+| --- | --- |
+| `XposedBridge.hookAllMethods(className, methodName, callback)` | Hook every overload declared on that class. Returns a set of `Unhook` handles. |
+| `XposedBridge.hookAllConstructors(className, callback)` | Hook `<init>` overloads. |
+| `XposedBridge.hookMethod(methodInfo, callback)` | Hook a method object returned by `XposedHelpers.findMethodExact`. |
+| `XposedHelpers.findAndHookMethod(className, classLoader, methodName, ...paramTypes, callback)` | Hook one exact overload; `classLoader` is accepted for API parity and may be `null`. |
+| `XposedHelpers.findClass(className)` | Class info (`getName`, `getDescriptor`). |
+| `XposedHelpers.getObjectField` / `setObjectField` and the `Int`/`Long`/`Boolean`/`Float`/`Double` variants | Read and write fields directly. |
+| `XposedHelpers.callMethod` / `callStaticMethod` / `newInstance` | Invoke methods and constructors from JS. |
+| `unhook()` | Registered handles expose it to remove the hook. |
+
+`beforeHookedMethod` / `afterHookedMethod` receive a `MethodHookParam` with `method`, `thisObject`, `args`, and `setResult(value)` / `getResult()` / `setThrowable(error)` / `getThrowable()`. Calling `setResult` in the "before" phase skips the original method entirely.
+
+The callback may be an `XC_MethodHook` instance, a subclass of it, or a plain `{ beforeHookedMethod, afterHookedMethod }` object. `XC_MethodHook` is exported by the bundle if you prefer subclassing.
 
 During development, `npm run build:dev` produces an unminified bundle with source maps.
 
@@ -149,8 +187,9 @@ During development, `npm run build:dev` produces an unminified bundle with sourc
 
 ```
 .
-├── apk.js                    # Public entry source (webpack entry)
-├── index.html                # Demo page
+├── apk.js                    # Core engine entry (webpack base chunk)
+├── android-framework.js      # Simulator entry: host classes + ApkSimulator
+├── playground.html           # Playground / demo page
 ├── webpack.config.js         # Build configuration
 ├── dist/                     # Build output (committed)
 │   ├── apk.min.js
@@ -159,10 +198,11 @@ During development, `npm run build:dev` produces an unminified bundle with sourc
 │   ├── hello-dex.apk         # Runnable sample APK
 │   └── apk-src/              # Sample APK source
 ├── src/
+│   ├── core/apk-file.js      # APK file loader (framework-free)
 │   ├── core/binary.js        # Binary reading helpers
 │   ├── dex/                  # DEX parsing and instruction definitions
 │   ├── res/                  # AXML / ARSC parsing
-│   ├── runtime/              # VM, interpreter, class registry, value model
+│   ├── runtime/              # VM, interpreter, class registry, value model, hooks
 │   └── framework/            # Canvas Android Framework subset
 ├── tests/                    # Regression tests
 │   └── debug/                # Ad-hoc debugging scripts kept for reference
@@ -176,10 +216,10 @@ During development, `npm run build:dev` produces an unminified bundle with sourc
 
 | Directory | Responsibility |
 | --- | --- |
-| `core/` | Endian-safe binary reading. |
+| `core/` | Endian-safe binary reading, plus the framework-free APK loader (`apk-file.js`). |
 | `dex/` | DEX header, string pool, types, methods, fields, class definitions and bytecode. |
 | `res/` | Binary parsing of `AndroidManifest.xml` and `resources.arsc`. |
-| `runtime/` | `JavaVM`, `DexInterpreter`, `ClassRegistry`, the `JavaObject` / `JavaArray` value model. |
+| `runtime/` | `JavaVM`, `DexInterpreter`, `ClassRegistry`, the `JavaObject` / `JavaArray` value model, `HookBus` and the Xposed hook runtime. |
 | `framework/` | `Engine` orchestration, `View` hierarchy, layout, widgets, resources, windows, `Context` / `Intent`, and native implementations of Java core classes. |
 
 ## Rendering a real APK to an image

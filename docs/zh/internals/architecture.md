@@ -17,7 +17,8 @@ APK zip
 | 解析层 | `src/dex`、`src/res` | 读取二进制格式：DEX、AXML、ARSC |
 | 运行时 | `src/runtime` | 类注册表、值模型、字节码解释器 |
 | Framework | `src/framework` | 用 Canvas 和 JavaScript 实现的 Android API |
-| 入口 | `apk.js` | 公开 API、设备设置、文件加载 |
+| 核心引擎 | `apk.js` | DEX/AXML/ARSC 解析、VM、APK 装载、拦截层 |
+| 模拟器入口 | `android-framework.js` | 公开 API、设备设置、文件加载、宿主类注册 |
 
 ## 运行时
 

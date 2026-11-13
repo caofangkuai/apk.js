@@ -47,7 +47,7 @@ npm run serve
 
 浏览器打开 <http://localhost:8080>，点击「选择 APK」或把 APK 拖进页面。
 
-打包产物 `dist/apk.min.js` 和 `dist/android-framework.min.js` 已经提交在仓库里。把 `index.html`、`dist/`、`vendor/`、`samples/` 放进任意静态服务器就能用，不必先打包。
+打包产物 `dist/apk.min.js` 和 `dist/android-framework.min.js` 已经提交在仓库里。把 `playground.html`、`dist/`、`vendor/`、`samples/` 放进任意静态服务器就能用，不必先打包。
 
 ## 产物说明
 
@@ -55,19 +55,19 @@ npm run serve
 
 | 产物 | 内容 |
 | --- | --- |
-| `dist/android-framework.min.js` | 纯框架实现：DEX 解析、运行时、资源解析、Canvas 版 Android Framework。不含任何页面或 DOM 逻辑。 |
-| `dist/apk.min.js` | 调用层：设备信息、渲染目标、文件加载、状态与日志回调。依赖上一个文件。 |
+| `dist/apk.min.js` | 核心引擎：DEX 解析器、AXML/ARSC 解析器、APK 文件装载、VM 与解释器、Xposed 拦截层。不含 Android 宿主类，不含任何页面或 DOM 逻辑。 |
+| `dist/android-framework.min.js` | Java/Android 宿主类模拟，以及 `ApkSimulator` / `EmulatorEngine`。依赖上面的核心引擎。 |
 
-`index.html` 通过 `<script type="module">` 引用 `dist/apk.min.js`，它会自动加载 `android-framework.min.js`。JSZip 以全局变量形式由 `vendor/jszip.min.js` 提供。
+`dist/android-framework.min.js` 会 `import` 同目录的 `apk.min.js`，所以页面引用模拟器包即可，核心引擎由浏览器自动加载。只做 APK 解析（DEX、清单、资源）时，可以单独引用 `dist/apk.min.js`。JSZip 以全局变量形式由 `vendor/jszip.min.js` 提供。
 
 ## 在页面中使用
 
-`apk.min.js` 对外暴露 `createSimulator` 和 `ApkSimulator`，由调用方指定设备信息和渲染目标：
+`android-framework.min.js` 对外暴露 `createSimulator` 和 `ApkSimulator`，由调用方指定设备信息和渲染目标：
 
 ```html
 <script src="vendor/jszip.min.js"></script>
 <script type="module">
-  import { createSimulator } from './dist/apk.min.js';
+  import { createSimulator } from './dist/android-framework.min.js';
 
   const sim = createSimulator({
     // 渲染目标：CSS 选择器、DOM 元素，或已有的 canvas
@@ -122,13 +122,11 @@ npm run serve
 `sim.on(event, handler)` 返回取消函数，另有 `sim.once`、`sim.off` 和原始 `sim.hooks`（`HookBus`）。
 
 ```js
-import { createSimulator, hookResult } from './dist/apk.min.js';
+import { createSimulator } from './dist/android-framework.min.js';
 const sim = createSimulator({ element: '#screen' });
 
-const off = sim.on('invoke:before', (ctx) => {
-  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
-});
-sim.on('log', (entry) => console.log(entry.level, entry.message));
+const off = sim.on('log', (entry) => console.log(entry.level, entry.message));
+sim.on('activity:finish', () => console.log('done'));
 off();
 ```
 
@@ -138,10 +136,50 @@ off();
 | --- | --- |
 | `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
 | `start:before` / `start:after` | `{ engine, apk, vm? }` |
-| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }`；返回 `hookResult(value)` 可短路调用 |
-| `invoke:after` | 同上并带 `result`；返回 `hookResult(value)` 可替换返回值 |
 | `log` | `{ level, tag, message, time }` |
 | `activity:finish` | `{ engine, vm, activity }` |
+
+## 拦截方法
+
+方法拦截使用 Xposed 风格 API。拦截挂在「方法解析完成之后、执行之前」，所以 DEX 方法、宿主（`android.*` / `java.*`）方法以及构造方法都能拦。
+
+```js
+import { createSimulator } from './dist/android-framework.min.js';
+
+const sim = createSimulator({ element: '#screen' });
+
+// VM 还没创建时就能注册，启动时自动生效
+const { bridge, helpers } = sim.xposed;
+
+bridge.hookAllMethods('android.widget.TextView', 'setText', {
+  beforeHookedMethod(param) {
+    param.args[0] = '被改写了';
+  },
+});
+
+helpers.findAndHookMethod('java.lang.String', null, 'trim', {
+  afterHookedMethod(param) {
+    param.setResult(param.getResult() + '!');
+  },
+});
+
+await sim.loadFromFile(file);
+```
+
+| API | 说明 |
+| --- | --- |
+| `XposedBridge.hookAllMethods(className, methodName, callback)` | 拦截该类声明的同名全部重载，返回一组 `Unhook`。 |
+| `XposedBridge.hookAllConstructors(className, callback)` | 拦截 `<init>` 重载。 |
+| `XposedBridge.hookMethod(methodInfo, callback)` | 拦截 `XposedHelpers.findMethodExact` 返回的方法对象。 |
+| `XposedHelpers.findAndHookMethod(className, classLoader, methodName, ...参数类型, callback)` | 精确拦截单个重载；`classLoader` 仅为对齐 Xposed 签名，可传 `null`。 |
+| `XposedHelpers.findClass(className)` | 类信息（`getName`、`getDescriptor`）。 |
+| `XposedHelpers.getObjectField` / `setObjectField` 及 `Int`/`Long`/`Boolean`/`Float`/`Double` 变体 | 直接读写字段。 |
+| `XposedHelpers.callMethod` / `callStaticMethod` / `newInstance` | 从 JS 调用方法和构造。 |
+| `unhook()` | 已注册的句柄调用它可摘除拦截。 |
+
+`beforeHookedMethod` / `afterHookedMethod` 收到 `MethodHookParam`：`method`、`thisObject`、`args`，以及 `setResult(value)` / `getResult()` / `setThrowable(error)` / `getThrowable()`。在 before 阶段调用 `setResult` 会完全跳过原方法。
+
+回调可以传 `XC_MethodHook` 实例、它的子类，或 `{ beforeHookedMethod, afterHookedMethod }` 对象；`XC_MethodHook` 也由包里导出。
 
 开发时用 `npm run build:dev` 生成带 source map 的未压缩版本。
 
@@ -149,8 +187,9 @@ off();
 
 ```
 .
-├── apk.js                    # 公开入口源码（webpack 入口）
-├── index.html                # 演示页面
+├── apk.js                    # 核心引擎入口（webpack 基础 chunk）
+├── android-framework.js      # 模拟器入口：宿主类 + ApkSimulator
+├── playground.html           # Playground / 演示页面
 ├── webpack.config.js         # 打包配置
 ├── dist/                     # 打包产物（已提交）
 │   ├── apk.min.js
@@ -159,10 +198,11 @@ off();
 │   ├── hello-dex.apk         # 可运行示例 APK
 │   └── apk-src/              # 示例 APK 源码
 ├── src/
+│   ├── core/apk-file.js      # APK 文件装载（不依赖框架）
 │   ├── core/binary.js        # 二进制读取工具
 │   ├── dex/                  # DEX 解析与指令定义
 │   ├── res/                  # AXML / ARSC 解析
-│   ├── runtime/              # VM、解释器、类注册表、值模型
+│   ├── runtime/              # VM、解释器、类注册表、值模型、拦截层
 │   └── framework/            # Canvas 版 Android Framework 子集
 ├── tests/                    # 回归测试
 │   └── debug/                # 开发期调试脚本，留作参考
@@ -176,10 +216,10 @@ off();
 
 | 目录 | 职责 |
 | --- | --- |
-| `core/` | 字节序安全的二进制读取。 |
+| `core/` | 字节序安全的二进制读取，以及不依赖框架的 APK 装载器（`apk-file.js`）。 |
 | `dex/` | DEX 头、字符串池、类型、方法、字段、类定义与字节码解析。 |
 | `res/` | `AndroidManifest.xml` 和 `resources.arsc` 的二进制格式解析。 |
-| `runtime/` | `JavaVM`、`DexInterpreter`、`ClassRegistry`，以及 `JavaObject` / `JavaArray` 值模型。 |
+| `runtime/` | `JavaVM`、`DexInterpreter`、`ClassRegistry`、`JavaObject` / `JavaArray` 值模型、`HookBus` 与 Xposed 拦截层。 |
 | `framework/` | `Engine` 编排、`View` 体系、布局、控件、资源、窗口、`Context` / `Intent`，以及 Java 核心类的 native 实现。 |
 
 ## 把真实 APK 渲染成图片

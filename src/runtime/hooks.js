@@ -1,5 +1,6 @@
 /**
- * 轻量事件钩子总线。没有监听器时 emit 直接返回 undefined，不引入额外开销。
+ * 轻量生命周期事件总线（load/start/log/activity:finish）。
+ * 没有监听器时 emit 直接返回，不引入额外开销；方法拦截见 src/runtime/xposed.js。
  */
 export class HookBus {
   constructor(initial = null) {
@@ -56,33 +57,23 @@ export class HookBus {
   }
 
   /**
-   * 依次执行监听器。返回第一个非 undefined 的结果，供 before/after 钩子短路或替换返回值。
+   * 依次执行全部监听器，单个监听器抛错不影响其余监听器。
+   * 生命周期事件只做通知，返回值不参与流程；方法拦截请用 Xposed API（`sim.xposed`）。
    */
   emit(event, payload) {
     const handlers = this._listeners.get(event);
     if (!handlers || !handlers.length) return undefined;
     for (const handler of handlers.slice()) {
-      let result;
       try {
-        result = handler(payload, this);
+        handler(payload, this);
       } catch (error) {
-        // 钩子异常不应中断应用执行；交给宿主日志。
+        // 监听器异常不应中断应用执行；交给宿主日志。
         if (typeof this.onError === 'function') this.onError(error, event);
-        else if (typeof console !== 'undefined') console.error(`[apk.js hook:${event}]`, error);
-        continue;
+        else if (typeof console !== 'undefined') console.error(`[apk.js event:${event}]`, error);
       }
-      if (result !== undefined) return result;
     }
     return undefined;
   }
-}
-
-export function hookResult(value) {
-  return { __apkjsHookResult: true, value };
-}
-
-export function isHookResult(value) {
-  return !!value && typeof value === 'object' && value.__apkjsHookResult === true;
 }
 
 export function createHookBus(initial) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ApkSimulator } from '../apk.js';
+import { ApkSimulator } from '../android-framework.js';
 
 const sim = new ApkSimulator({});
 await assert.rejects(() => sim.loadFromUrl('not a url'), /地址无效/);

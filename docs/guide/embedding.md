@@ -1,11 +1,11 @@
 # Embedding
 
-`dist/apk.min.js` exports `createSimulator` and `ApkSimulator`. Load JSZip first, then the bundle.
+`dist/android-framework.min.js` exports `createSimulator` and `ApkSimulator`. Load JSZip first, then the bundle. It imports `dist/apk.min.js` (the core engine: DEX/XML/resource parsers, VM, hook runtime), so the browser fetches both.
 
 ```html
 <script src="https://caofangkuai.github.io/apk.js/vendor/jszip.min.js"></script>
 <script type="module">
-  import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+  import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
   const sim = createSimulator({
     element: '#phone-screen',

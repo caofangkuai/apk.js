@@ -20,7 +20,7 @@
 ## Example
 
 ```js
-import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
 const sim = createSimulator({
   element: '#screen',
@@ -41,26 +41,52 @@ const DEFAULT_DEVICE = {
 };
 ```
 
-## Hooks
+## Events
 
-`sim.on(event, handler)` returns a disposer. `sim.once`, `sim.off` and `sim.clearHooks` are also available, and `sim.hooks` exposes the raw `HookBus` (`HookBus` / `hookResult` are exported by the bundle).
+`sim.on(event, handler)` returns a disposer. `sim.once`, `sim.off` and `sim.clearHooks` are also available, and `sim.hooks` exposes the raw `HookBus`.
 
 | Event | Payload |
 | --- | --- |
 | `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
 | `start:before` / `start:after` | `{ engine, apk, vm? }` |
-| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }` |
-| `invoke:after` | Same context plus `result` |
 | `log` | `{ level, tag, message, time }` |
 | `activity:finish` | `{ engine, vm, activity }` |
 
-Return `hookResult(value)` from `invoke:before` to skip the call, or from `invoke:after` to replace its result:
+## Hooking methods (Xposed API)
+
+`sim.xposed` is an `XposedRuntime` exposing `bridge` and `helpers`. Hooks may be registered before the VM exists; they are applied once the engine starts. Interception happens right after method resolution, so DEX methods, host (`android.*` / `java.*`) methods and constructors can all be hooked.
 
 ```js
-import { createSimulator, hookResult } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
 const sim = createSimulator({ element: '#screen' });
-sim.on('invoke:before', (ctx) => {
-  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
+const { bridge, helpers } = sim.xposed;
+
+bridge.hookAllMethods('android.widget.TextView', 'setText', {
+  beforeHookedMethod(param) {
+    param.args[0] = 'rewritten';
+  },
+});
+
+helpers.findAndHookMethod('java.lang.String', null, 'trim', {
+  afterHookedMethod(param) {
+    param.setResult(param.getResult() + '!');
+  },
 });
 ```
+
+| API | Description |
+| --- | --- |
+| `XposedBridge.hookAllMethods(className, methodName, callback)` | Hook every overload declared on that class; returns a set of `Unhook`. |
+| `XposedBridge.hookAllConstructors(className, callback)` | Hook the `<init>` overloads. |
+| `XposedBridge.hookMethod(methodInfo, callback)` | Hook a method object from `findMethodExact`. |
+| `XposedHelpers.findAndHookMethod(className, classLoader, methodName, ...paramTypes, callback)` | Hook one exact overload. `classLoader` mirrors the Xposed signature and may be `null`. |
+| `XposedHelpers.findMethodExact(className, methodName, ...paramTypes)` | Resolve a method without hooking it. |
+| `XposedHelpers.findClass(className)` | Class info (`getName`, `getDescriptor`). |
+| `XposedHelpers.getObjectField` / `setObjectField` plus the `Int` / `Long` / `Boolean` / `Float` / `Double` variants | Read and write fields directly. |
+| `XposedHelpers.callMethod` / `callStaticMethod` / `newInstance` | Call methods and constructors from JS. |
+| `unhook()` | Available on every returned handle to remove the hook. |
+
+`MethodHookParam` exposes `method`, `thisObject`, `args`, `isStatic`, `getResult()` / `setResult(value)`, `getThrowable()` / `setThrowable(error)` / `hasThrowable()`. Calling `setResult` inside `beforeHookedMethod` skips the original method entirely; `setThrowable` makes the call throw.
+
+The callback may be an `XC_MethodHook` instance, a subclass of it, or a plain `{ beforeHookedMethod, afterHookedMethod }` object.

@@ -1,4 +1,4 @@
-import { isHookResult } from './hooks.js';
+import { XposedRuntime, MethodHookParam, XposedMethodInfo, parseProtoDescriptor } from './xposed.js';
 import { DexFile, descriptorToName } from '../dex/dexfile.js';
 import { ClassRegistry, RuntimeClass } from './class-registry.js';
 import {
@@ -52,6 +52,8 @@ export class JavaVM {
     this.invocationCount = 0;
     this.nativeCallLog = [];
     this.hooks = options.hooks || null;
+    this.xposed = options.xposed instanceof XposedRuntime ? options.xposed : new XposedRuntime(this);
+    this.xposed.attach(this);
   }
 
   addDexFile(dexFile) {
@@ -354,26 +356,38 @@ export class JavaVM {
       const rc = this.registry.resolve(descriptor);
       if (!rc) break;
       this.ensureClassInitialized(rc);
+      // 运行时写入的值优先：sput 与宿主 setStaticField 都落在这里，dex/native 类通用。
+      if (rc.staticValues.has(key)) return rc.staticValues.get(key);
       if (rc.dexClass) {
-        if (rc.staticValues.has(key)) return rc.staticValues.get(key);
         const entry = rc.dexClass.staticFields.find((e) => e.field.name === field.name && e.field.type === field.type);
         if (entry) {
           if (entry.value !== undefined) return entry.value;
           return defaultValueFor(field.type);
         }
       }
-      if (rc.nativeDef?.staticFields?.has(key)) {
-        const value = rc.nativeDef.staticFields.get(key);
-        if (value && typeof value === 'object' && typeof value.lazy === 'function') {
-          const created = value.lazy.call(null, this);
-          rc.nativeDef.staticFields.set(key, created);
-          return created;
-        }
-        return value;
-      }
+      const nativeEntry = this.nativeStaticField(rc, key, field.name);
+      if (nativeEntry) return nativeEntry.value;
       descriptor = rc.superDescriptor;
     }
     return defaultValueFor(field.type);
+  }
+
+  /**
+   * 读取原生类的静态字段表。框架里两种键都有：`名字:类型`（如 `VISIBLE:I`）与裸名，
+   * 两种都认；`lazy` 值在首次读取时求值并回填。
+   */
+  nativeStaticField(rc, key, name) {
+    const map = rc.nativeDef?.staticFields;
+    if (!map) return null;
+    const found = map.has(key) ? key : map.has(name) ? name : null;
+    if (found === null) return null;
+    const value = map.get(found);
+    if (value && typeof value === 'object' && typeof value.lazy === 'function') {
+      const created = value.lazy.call(null, this);
+      map.set(found, created);
+      return { value: created };
+    }
+    return { value };
   }
 
   _rcId(rc) {
@@ -661,17 +675,15 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
-    const context = { ref, receiver, args, mode, currentMethod, native: false };
-    const before = this.hooks?.emit('invoke:before', context);
-    if (isHookResult(before)) return before.value;
-    const result = this._invoke(ref, receiver, args, mode, currentMethod, context);
-    const after = this.hooks?.emit('invoke:after', { ...context, result });
-    return isHookResult(after) ? after.value : result;
+    return this._invoke(ref, receiver, args, mode, currentMethod);
   }
 
-  _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null, hookContext = null) {
+  /**
+   * 方法调用主路径。Xposed 拦截挂在「解析完成之后、执行之前」，
+   * 因此 dex 方法、native 方法、构造方法都能被 hook。
+   */
+  _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
-    if (hookContext) hookContext.args = args;
     this.invocationCount++;
     if (!this._invokeStats) this._invokeStats = new Map();
     const _k = (ref.classDesc || '?') + '.' + ref.name;
@@ -720,6 +732,23 @@ export class JavaVM {
       if (DBG.missing && this.onMissingMethod) this.onMissingMethod(signature, ref, mode, receiver);
       return defaultValueFor(ref.proto.returnType);
     }
+    if (this.xposed.active) {
+      const entry = this.xposed.lookup(resolution, ref);
+      if (entry) {
+        const param = new MethodHookParam({
+          method: methodInfoOf(resolution, mode, ref),
+          thisObject: mode === 'static' ? null : receiver,
+          args,
+          isStatic: mode === 'static',
+        });
+        return this.xposed.run(entry, param, (nextArgs) => this._dispatchResolution(resolution, receiver, nextArgs, ref, mode));
+      }
+    }
+    return this._dispatchResolution(resolution, receiver, args, ref, mode);
+  }
+
+  /** 真正执行一个已解析的方法（dex 解释执行或 native 宿主实现）。 */
+  _dispatchResolution(resolution, receiver, args, ref, mode) {
     if (debugFlag('DBG_GLP') && ref.name === 'getLayoutParams') { console.error('INV-GLP recvDesc=', this.registry.classNameOf(receiver), 'resKind=', resolution.kind, 'def=', resolution.def?.descriptor, 'methodClass=', resolution.method?.classDesc); }
     if (resolution.kind === 'dex') {
       if (mode === 'static') this.ensureClassInitialized(this.registry.resolve(resolution.method.classDesc));
@@ -727,7 +756,6 @@ export class JavaVM {
       return this.executeMethod(resolution.method, mode === 'static' ? null : receiver, args);
     }
     if (debugFlag('DBG_INV') && ref.name === 'newInstance') { const same = this.registry.nativeDefs && this.registry.nativeDefs.get ? this.registry.nativeDefs.get('Ljava/lang/reflect/Constructor;') : null; console.error('INV-NAT ' + ref.classDesc + ' def=' + resolution.def?.descriptor + ' defIsCtor=' + (resolution.def === same)); }
-    if (hookContext) hookContext.native = true;
     return this.invokeNative(resolution, receiver, args, ref, mode);
   }
 
@@ -979,6 +1007,25 @@ export class JavaVM {
     }
     return application.findAll('activity')[0] || null;
   }
+}
+
+function methodInfoOf(resolution, mode, ref) {
+  if (resolution.kind === 'dex') {
+    const method = resolution.method;
+    return new XposedMethodInfo({
+      descriptor: method.classDesc,
+      name: method.name,
+      proto: method.proto,
+      isStatic: (method.accessFlags & 0x8) !== 0,
+    });
+  }
+  const def = resolution.def;
+  return new XposedMethodInfo({
+    descriptor: def?.descriptor || ref?.classDesc || '',
+    name: ref?.name || '',
+    proto: ref?.proto || parseProtoDescriptor('()V'),
+    isStatic: mode === 'static',
+  });
 }
 
 function normalizeReferenceArgs(args, parameters) {

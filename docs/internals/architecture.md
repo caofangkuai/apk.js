@@ -17,7 +17,8 @@ APK zip
 | Parser | `src/dex`, `src/res` | Read binary formats: DEX, AXML, ARSC |
 | Runtime | `src/runtime` | Class registry, value model, bytecode interpreter |
 | Framework | `src/framework` | Android API surface backed by Canvas and JavaScript |
-| Entry | `apk.js` | Public API, device setup, file loading |
+| Core engine | `apk.js` | DEX/AXML/ARSC parsing, VM, APK loading, hook runtime |
+| Simulator entry | `android-framework.js` | Public API, device setup, file loading, host class registration |
 
 ## Runtime
 

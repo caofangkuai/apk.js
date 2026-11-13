@@ -1,11 +1,11 @@
 # 嵌入页面
 
-`dist/apk.min.js` 导出 `createSimulator` 和 `ApkSimulator`。先加载 JSZip，再加载这个包。
+`dist/android-framework.min.js` 导出 `createSimulator` 和 `ApkSimulator`。先加载 JSZip，再加载这个包；它会 `import` 同目录的 `dist/apk.min.js`（核心引擎：DEX/XML/资源解析器、VM、拦截层），浏览器会自动拉取两个文件。
 
 ```html
 <script src="https://caofangkuai.github.io/apk.js/vendor/jszip.min.js"></script>
 <script type="module">
-  import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+  import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
   const sim = createSimulator({
     element: '#phone-screen',

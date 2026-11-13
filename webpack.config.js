@@ -21,8 +21,10 @@ for (const flag of debugFlags) {
 export default {
   mode: isProd ? 'production' : 'development',
   entry: {
-    'android-framework': { import: './src/framework/engine.js', runtime: false },
-    apk: { import: './apk.js', dependOn: 'android-framework' },
+    // 核心引擎：dex/axml/arsc 解析器、VM、Xposed 拦截层
+    apk: { import: './apk.js' },
+    // Java/Android 宿主类模拟 + ApkSimulator，依赖核心引擎
+    'android-framework': { import: './android-framework.js', dependOn: 'apk' },
   },
   output: {
     path: path.resolve(__dirname, 'dist'),

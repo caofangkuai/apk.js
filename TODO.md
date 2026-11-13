@@ -100,7 +100,9 @@
 
 ## 本轮新增完成
 
-- [x] Hook 接口：`HookBus`、`sim.on/once/off`、`invoke:before/after` 短路与改写、`tests/hooks.mjs`，README/API 文档同步。
+- [x] 拦截层改为 Xposed API：`XC_MethodHook`、`MethodHookParam`、`XposedBridge.hookAllMethods/hookAllConstructors/hookMethod`、`XposedHelpers.findAndHookMethod/get*Field/callMethod/newInstance`、`Unhook`；支持 VM 创建前延迟注册。
+- [x] 移除 `invoke:before/after` 与 `hookResult`，`HookBus` 只保留生命周期事件（`load:*`、`start:*`、`log`、`activity:finish`）。
+- [x] 打包结构重划：`apk.js` 为基础引擎（dex/axml/arsc 解析、APK 装载、VM、拦截层），`android-framework.js` 为宿主类模拟 + `ApkSimulator`，webpack 用 `dependOn` 分层。
 
 - [x] 移除 APK 大小上限，默认 `Infinity`，文档同步。
 - [x] MaterialShapeDrawable 三段阴影（ambient/key/spot）与像素回归。

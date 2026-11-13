@@ -70,12 +70,13 @@ npm run docs:dev
 
 | 路径 | 内容 |
 | --- | --- |
-| `apk.js` | 公开入口，导出 `createSimulator` / `ApkSimulator` |
+| `apk.js` | 核心引擎入口：dex/axml/arsc 解析、APK 装载、VM、Xposed 拦截层（不依赖 Android 宿主类） |
+| `android-framework.js` | 模拟器入口：Java/Android 宿主类 + `createSimulator` / `ApkSimulator`，依赖 `apk.js` |
 | `src/dex/` | DEX 解析与指令表 |
 | `src/res/` | AXML / ARSC 解析 |
 | `src/runtime/` | VM、解释器、类注册表、值模型 |
 | `src/framework/` | Canvas 版 Android Framework 子集 |
-| `src/core/` | 二进制读取工具 |
+| `src/core/` | 二进制读取工具、框架无关的 APK 装载器（`apk-file.js`） |
 | `tests/` | 回归测试；`tests/debug/` 是历史调试脚本 |
 | `tools/` | 构建与渲染脚本 |
 | `image-debug/` | node-canvas 出图，用于视觉对照 |
@@ -322,7 +323,7 @@ npm run site
 4. 应用程序页：PackageItemInfo.loadLabel、ColorStateList 包装、应用名称解析。
 5. SearchView：ColorStateList 不再 ClassCast，诊断 interesting=0。
 6. APK 大小默认不限制。
-7. Hook 接口：`src/runtime/hooks.js` 的 `HookBus`，`sim.on/once/off`，`invoke:before/after` + `hookResult` 短路/改写；`npm run test:hooks`。
+7. 拦截层：`src/runtime/xposed.js` 的 Xposed API（`XC_MethodHook`、`MethodHookParam`、`XposedBridge`、`XposedHelpers`），拦截点移到 `JavaVM._invoke` 解析之后；`HookBus` 只保留生命周期事件；`npm run test:hooks`。打包重划为 `apk.js`（核心引擎）+ `android-framework.js`（宿主类与模拟器）。
 8. MaterialShapeDrawable ambient/key/spot 三段阴影。
 9. AnimatedVectorDrawable trimPath 路径裁剪与时间动画。
 10. ListView 超长列表跳转窗口化与视图回收。
