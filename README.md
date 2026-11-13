@@ -119,6 +119,30 @@ The build output `dist/apk.min.js` and `dist/android-framework.min.js` is commit
 | `stop()` / `destroy()` | Stop running / stop and clean up the canvas. |
 | `vm` | The current `JavaVM` instance (read-only). |
 
+`sim.on(event, handler)` returns a disposer; `sim.once` and `sim.off` are also available. `sim.hooks` exposes the raw `HookBus`.
+
+```js
+import { createSimulator, hookResult } from './dist/apk.min.js';
+const sim = createSimulator({ element: '#screen' });
+
+const off = sim.on('invoke:before', (ctx) => {
+  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
+});
+sim.on('log', (entry) => console.log(entry.level, entry.message));
+off();
+```
+
+Events:
+
+| Event | Payload |
+| --- | --- |
+| `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
+| `start:before` / `start:after` | `{ engine, apk, vm? }` |
+| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }`; return `hookResult(value)` to skip the call |
+| `invoke:after` | Same context plus `result`; return `hookResult(value)` to replace it |
+| `log` | `{ level, tag, message, time }` |
+| `activity:finish` | `{ engine, vm, activity }` |
+
 During development, `npm run build:dev` produces an unminified bundle with source maps.
 
 ## Project layout

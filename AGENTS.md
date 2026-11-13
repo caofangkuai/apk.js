@@ -322,10 +322,11 @@ npm run site
 4. 应用程序页：PackageItemInfo.loadLabel、ColorStateList 包装、应用名称解析。
 5. SearchView：ColorStateList 不再 ClassCast，诊断 interesting=0。
 6. APK 大小默认不限制。
-7. MaterialShapeDrawable ambient/key/spot 三段阴影。
-8. AnimatedVectorDrawable trimPath 路径裁剪与时间动画。
-9. ListView 超长列表跳转窗口化与视图回收。
-10. Dialog Material 圆角表面/阴影/三段按钮。
+7. Hook 接口：`src/runtime/hooks.js` 的 `HookBus`，`sim.on/once/off`，`invoke:before/after` + `hookResult` 短路/改写；`npm run test:hooks`。
+8. MaterialShapeDrawable ambient/key/spot 三段阴影。
+9. AnimatedVectorDrawable trimPath 路径裁剪与时间动画。
+10. ListView 超长列表跳转窗口化与视图回收。
+11. Dialog Material 圆角表面/阴影/三段按钮。
 
 ### 待用户确认
 

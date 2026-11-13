@@ -100,6 +100,8 @@
 
 ## 本轮新增完成
 
+- [x] Hook 接口：`HookBus`、`sim.on/once/off`、`invoke:before/after` 短路与改写、`tests/hooks.mjs`，README/API 文档同步。
+
 - [x] 移除 APK 大小上限，默认 `Infinity`，文档同步。
 - [x] MaterialShapeDrawable 三段阴影（ambient/key/spot）与像素回归。
 - [x] AnimatedVectorDrawable trimPath 解析、路径裁剪与按时间动画。

@@ -1,4 +1,5 @@
 import { loadApkFiles, EmulatorEngine } from './src/framework/engine.js';
+import { createHookBus, HookBus, hookResult } from './src/runtime/hooks.js';
 
 const DEFAULT_DEVICE = {
   width: 360,
@@ -42,6 +43,23 @@ export class ApkSimulator {
     this.canvas = null;
     this.host = null;
     this.running = false;
+    this.hooks = createHookBus(options.hooks);
+  }
+
+  on(event, handler) {
+    return this.hooks.on(event, handler);
+  }
+
+  once(event, handler) {
+    return this.hooks.once(event, handler);
+  }
+
+  off(event, handler) {
+    return this.hooks.off(event, handler);
+  }
+
+  clearHooks(event) {
+    this.hooks.clear(event);
   }
 
   ensureCanvas() {
@@ -103,6 +121,7 @@ export class ApkSimulator {
   }
 
   async loadFromZip(zip) {
+    this.hooks.emit('load:before', { simulator: this, zip });
     if (!zip.file('AndroidManifest.xml')) {
       throw new Error('不是有效的 APK：缺少 AndroidManifest.xml');
     }
@@ -110,7 +129,9 @@ export class ApkSimulator {
       throw new Error('APK 含原生库（lib/），无法模拟');
     }
     const apk = await loadApkFiles(zip, { maxTotalSize: Number.isFinite(this.device.maxApkSize) ? Math.max(this.device.maxApkSize * 4, 256 * 1024 * 1024) : 2 * 1024 * 1024 * 1024, maxEntries: 50000 });
-    return this.start(apk);
+    const result = await this.start(apk);
+    this.hooks.emit('load:after', { simulator: this, apk, result });
+    return result;
   }
 
   async loadFromArrayBuffer(buffer) {
@@ -129,6 +150,7 @@ export class ApkSimulator {
       dpr: this.device.dpr,
       style: this.device.style,
       nightMode: this.device.nightMode,
+      hooks: this.hooks,
       onLog: (entry) => this.options.onLog?.(entry),
       onFinished: () => {
         this.activityFinished = true;
@@ -193,7 +215,7 @@ export function createSimulator(options = {}) {
   return new ApkSimulator(options);
 }
 
-export { loadApkFiles, EmulatorEngine };
+export { loadApkFiles, EmulatorEngine, HookBus, hookResult };
 
 function autoInitDemo() {
   if (typeof document === 'undefined') return;

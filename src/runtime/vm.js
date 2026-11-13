@@ -1,3 +1,4 @@
+import { isHookResult } from './hooks.js';
 import { DexFile, descriptorToName } from '../dex/dexfile.js';
 import { ClassRegistry, RuntimeClass } from './class-registry.js';
 import {
@@ -50,6 +51,7 @@ export class JavaVM {
     this.pendingException = null;
     this.invocationCount = 0;
     this.nativeCallLog = [];
+    this.hooks = options.hooks || null;
   }
 
   addDexFile(dexFile) {
@@ -64,7 +66,9 @@ export class JavaVM {
   }
 
   log(level, tag, message) {
-    this.logger({ level, tag, message, time: Date.now() });
+    const entry = { level, tag, message, time: Date.now() };
+    this.logger(entry);
+    this.hooks?.emit('log', entry);
   }
 
   allocateObject(runtimeClass) {
@@ -657,7 +661,17 @@ export class JavaVM {
   }
 
   invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
+    const context = { ref, receiver, args, mode, currentMethod, native: false };
+    const before = this.hooks?.emit('invoke:before', context);
+    if (isHookResult(before)) return before.value;
+    const result = this._invoke(ref, receiver, args, mode, currentMethod, context);
+    const after = this.hooks?.emit('invoke:after', { ...context, result });
+    return isHookResult(after) ? after.value : result;
+  }
+
+  _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null, hookContext = null) {
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
+    if (hookContext) hookContext.args = args;
     this.invocationCount++;
     if (!this._invokeStats) this._invokeStats = new Map();
     const _k = (ref.classDesc || '?') + '.' + ref.name;
@@ -713,6 +727,7 @@ export class JavaVM {
       return this.executeMethod(resolution.method, mode === 'static' ? null : receiver, args);
     }
     if (debugFlag('DBG_INV') && ref.name === 'newInstance') { const same = this.registry.nativeDefs && this.registry.nativeDefs.get ? this.registry.nativeDefs.get('Ljava/lang/reflect/Constructor;') : null; console.error('INV-NAT ' + ref.classDesc + ' def=' + resolution.def?.descriptor + ' defIsCtor=' + (resolution.def === same)); }
+    if (hookContext) hookContext.native = true;
     return this.invokeNative(resolution, receiver, args, ref, mode);
   }
 

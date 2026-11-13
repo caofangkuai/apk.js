@@ -40,3 +40,27 @@ const DEFAULT_DEVICE = {
   maxApkSize: Infinity,
 };
 ```
+
+## Hooks
+
+`sim.on(event, handler)` returns a disposer. `sim.once`, `sim.off` and `sim.clearHooks` are also available, and `sim.hooks` exposes the raw `HookBus` (`HookBus` / `hookResult` are exported by the bundle).
+
+| Event | Payload |
+| --- | --- |
+| `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
+| `start:before` / `start:after` | `{ engine, apk, vm? }` |
+| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }` |
+| `invoke:after` | Same context plus `result` |
+| `log` | `{ level, tag, message, time }` |
+| `activity:finish` | `{ engine, vm, activity }` |
+
+Return `hookResult(value)` from `invoke:before` to skip the call, or from `invoke:after` to replace its result:
+
+```js
+import { createSimulator, hookResult } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+
+const sim = createSimulator({ element: '#screen' });
+sim.on('invoke:before', (ctx) => {
+  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
+});
+```

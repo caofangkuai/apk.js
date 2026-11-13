@@ -119,6 +119,30 @@ npm run serve
 | `stop()` / `destroy()` | 停止运行 / 停止并清理 canvas。 |
 | `vm` | 当前 `JavaVM` 实例（只读）。 |
 
+`sim.on(event, handler)` 返回取消函数，另有 `sim.once`、`sim.off` 和原始 `sim.hooks`（`HookBus`）。
+
+```js
+import { createSimulator, hookResult } from './dist/apk.min.js';
+const sim = createSimulator({ element: '#screen' });
+
+const off = sim.on('invoke:before', (ctx) => {
+  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
+});
+sim.on('log', (entry) => console.log(entry.level, entry.message));
+off();
+```
+
+事件：
+
+| 事件 | payload |
+| --- | --- |
+| `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
+| `start:before` / `start:after` | `{ engine, apk, vm? }` |
+| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }`；返回 `hookResult(value)` 可短路调用 |
+| `invoke:after` | 同上并带 `result`；返回 `hookResult(value)` 可替换返回值 |
+| `log` | `{ level, tag, message, time }` |
+| `activity:finish` | `{ engine, vm, activity }` |
+
 开发时用 `npm run build:dev` 生成带 source map 的未压缩版本。
 
 ## 目录结构

@@ -11,6 +11,7 @@ import { installSensorSources } from './sensors.js';
 import { contextFacade, viewObject } from './bridge.js';
 import { Looper, Handler } from './os.js';
 import { DBG } from '../runtime/debug.js';
+import { createHookBus } from '../runtime/hooks.js';
 
 function toPackageDescriptor(name, packageName = '') {
   if (!name) return null;
@@ -169,6 +170,7 @@ export class EmulatorEngine {
     this.options = options;
     this.onLog = options.onLog || (() => {});
     this.onFinished = options.onFinished || (() => {});
+    this.hooks = createHookBus(options.hooks);
     this.vm = null;
     this.screen = null;
     this.activity = null;
@@ -266,12 +268,14 @@ export class EmulatorEngine {
   }
 
   async start(apk) {
+    this.hooks.emit('start:before', { engine: this, apk });
     const vm = new JavaVM({
       dexFiles: apk.dexFiles,
       logger: (entry) => this.onLog(entry),
       screen: this.screen,
       packageName: apk.packageName,
       maxFrames: this.options.maxFrames || 512,
+      hooks: this.hooks,
     });
     this.vm = vm;
     vm.nightMode = this.options.nightMode ?? null;
@@ -279,6 +283,7 @@ export class EmulatorEngine {
     apk.invalidate = () => this.screen?.invalidate?.();
     vm.interpreter = new DexInterpreter(vm);
     vm.engine = this;
+    this.hooks.emit('start:after', { engine: this, apk, vm });
     const resources = new Resources(apk, vm);
     vm.resources = resources;
     for (const cls of Object.values(JAVA_CORE_CLASSES)) vm.registry.registerNative(cls);
@@ -318,7 +323,10 @@ export class EmulatorEngine {
       const notify = () => {
         const stack = vm.activityStack || [];
         const activeMain = !peer || peer?.object === vm.activity;
-        if (stack.length === 0 && activeMain && (!peer || peer.finished !== false)) this.onFinished();
+        if (stack.length === 0 && activeMain && (!peer || peer.finished !== false)) {
+          this.hooks.emit('activity:finish', { engine: this, vm, activity: peer });
+          this.onFinished();
+        }
       };
       setTimeout(notify, 0);
     };

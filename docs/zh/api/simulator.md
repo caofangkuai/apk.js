@@ -40,3 +40,27 @@ const DEFAULT_DEVICE = {
   maxApkSize: Infinity,
 };
 ```
+
+## Hook 接口
+
+`sim.on(event, handler)` 返回取消函数，另有 `sim.once`、`sim.off`、`sim.clearHooks`；`sim.hooks` 是原始 `HookBus`（产物同时导出 `HookBus` 与 `hookResult`）。
+
+| 事件 | payload |
+| --- | --- |
+| `load:before` / `load:after` | `{ simulator, zip, apk?, result? }` |
+| `start:before` / `start:after` | `{ engine, apk, vm? }` |
+| `invoke:before` | `{ ref, receiver, args, mode, currentMethod, native }` |
+| `invoke:after` | 同上并带 `result` |
+| `log` | `{ level, tag, message, time }` |
+| `activity:finish` | `{ engine, vm, activity }` |
+
+在 `invoke:before` 返回 `hookResult(value)` 可短路调用，在 `invoke:after` 返回它可替换返回值：
+
+```js
+import { createSimulator, hookResult } from 'https://caofangkuai.github.io/apk.js/dist/apk.min.js';
+
+const sim = createSimulator({ element: '#screen' });
+sim.on('invoke:before', (ctx) => {
+  if (ctx.ref.name === 'getDeviceModel') return hookResult('Hooked Device');
+});
+```
