@@ -9,7 +9,7 @@ const isProd = process.env.NODE_ENV !== 'development';
 
 const debugFlags = [
   'DBG_CAST', 'DBG_INV', 'CAS_DBG', 'FV_DBG', 'DBG_GLP',
-  'DBG_NPE', 'DBG_EXC', 'DBG_MISSING', 'NO_THEME_APPLY',
+  'DBG_NPE', 'DBG_EXC', 'DBG_MISSING', 'DBG_INVSTATS', 'NO_THEME_APPLY',
 ];
 const defines = {
   'process.env.NODE_ENV': JSON.stringify(isProd ? 'production' : 'development'),

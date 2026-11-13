@@ -289,6 +289,8 @@ npm run site
 
 ### 关键实现陷阱（务必先读）
 
+- **`_invoke` 热路径不要新增无条件记账**。调用计数已由 `DBG_INVSTATS` 开关控制（默认关，开启后单次调用约慢 30%，真实 APK 启动中位数 78.9ms → 113.5ms）。需要剖析用 `npm run profile:apk`。
+
 - **float 字段存的是 IEEE 位**，不是数值。运行时约定：`iget/iput` 的 `F` 字段保存 `numberToFloatBits` 结果。`RectF` peer 因此存位；原生读取必须用 `floatBitsToNumber`，写入用 `numberToFloatBits`。`Path.arcTo/addRect`、`Canvas.readRectF` 已按此转换。
 - **native 方法的 `F` 参数已被 `decodeNativeArgs` 解码**，host 里直接 `Number(x)` 即可；只有数组 `[F` 与字段仍是位。
 - **Java 枚举必须返回 JavaObject 单例**。`Paint$Style/Join/Cap`、`PorterDuff$Mode` 若返回裸整数，dex 的 `if-eq` 引用比较会失配（曾导致填充分支被跳过）。

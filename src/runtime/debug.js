@@ -9,4 +9,5 @@ export const DBG = {
   exc: debugFlag('DBG_EXC'),
   missing: debugFlag('DBG_MISSING'),
   noThemeApply: env.NO_THEME_APPLY === '1',
+  invokeStats: debugFlag('DBG_INVSTATS'),
 };

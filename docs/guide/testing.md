@@ -42,6 +42,7 @@ Some debug output is gated behind environment variables or global flags:
 | `DBG_INV` | Trace method invocations |
 | `DBG_CAST` | Trace type cast failures |
 | `DBG_LP` | Trace layout params resolution |
+| `DBG_INVSTATS` | Collect per-method invocation counts into `vm._invokeStats` (off by default, it costs about 30% per call) |
 | `__DBG_NPE_RV` | Trace RecyclerView null dereferences |
 
 These are stripped to `false` in production builds.

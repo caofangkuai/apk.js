@@ -685,9 +685,12 @@ export class JavaVM {
   _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
     this.invocationCount++;
-    if (!this._invokeStats) this._invokeStats = new Map();
-    const _k = (ref.classDesc || '?') + '.' + ref.name;
-    this._invokeStats.set(_k, (this._invokeStats.get(_k) || 0) + 1);
+    // 调用计数只用于调试剖析（DBG_INVSTATS=1）；生产构建里这段会被摇掉。
+    if (DBG.invokeStats) {
+      if (!this._invokeStats) this._invokeStats = new Map();
+      const statKey = (ref.classDesc || '?') + '.' + ref.name;
+      this._invokeStats.set(statKey, (this._invokeStats.get(statKey) || 0) + 1);
+    }
     if (this.invocationCount > 8_000_000) {
       throw new Error('执行指令超限，疑似死循环');
     }

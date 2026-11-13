@@ -42,6 +42,7 @@ PROFILE_FRAMES=60 npm run profile:apk -- /path/to/app.apk 20
 | `DBG_INV` | 跟踪方法调用 |
 | `DBG_CAST` | 跟踪类型转换失败 |
 | `DBG_LP` | 跟踪布局参数解析 |
+| `DBG_INVSTATS` | 把每个方法的调用次数记进 `vm._invokeStats`（默认关闭，开启后单次调用约慢 30%） |
 | `__DBG_NPE_RV` | 跟踪 RecyclerView 空引用 |
 
 生产构建里这些开关会固定为 `false`。
