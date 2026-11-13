@@ -39,7 +39,7 @@
 ### 文档
 
 - [x] Framework 覆盖矩阵（`npm run docs:coverage` 生成 `docs/framework-coverage.md`）
-- [ ] 文档站接入搜索（`vitepress-plugin-search` 或本地索引）
+- [x] 文档站接入搜索（VitePress `search.provider = 'local'`，中英文各一份索引）
 - [ ] 增加录屏式 GIF 演示，放进 README
 
 ### 站点

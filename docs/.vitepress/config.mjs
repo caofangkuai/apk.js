@@ -12,6 +12,7 @@ export default defineConfig({
   ],
   themeConfig: {
     logo: '/logo.svg',
+    search: { provider: 'local' },
     nav: [
       { text: 'Guide', link: '/guide/introduction', activeMatch: '^/guide/' },
       { text: 'API', link: '/api/simulator', activeMatch: '^/api/' },
@@ -81,6 +82,20 @@ export default defineConfig({
       title: 'apk.js',
       description: '在浏览器中运行 Android APK 的 JavaScript 模拟器',
       themeConfig: {
+        search: {
+          provider: 'local',
+          options: {
+            translations: {
+              button: { buttonText: '搜索文档', buttonAriaLabel: '搜索文档' },
+              modal: {
+                displayDetails: '显示详情',
+                resetButtonTitle: '清除查询',
+                noResultsText: '没有找到结果',
+                footer: { selectText: '选择', navigateText: '切换', closeText: '关闭' },
+              },
+            },
+          },
+        },
         nav: [
           { text: '指南', link: '/zh/guide/introduction', activeMatch: '^/zh/guide/' },
           { text: 'API', link: '/zh/api/simulator', activeMatch: '^/zh/api/' },
