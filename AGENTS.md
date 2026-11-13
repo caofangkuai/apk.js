@@ -310,6 +310,11 @@ npm run site
 - **`drawRoundRect` vs `drawPath`**：MaterialShapeDrawable 的圆角矩形走 `k.a(RectF)` 为真时的 `drawRoundRect`，路径分支只在非圆角/凸形状时用。
 - **不要为单个 APK 写特判**；设备数据走 `VIRTUAL_FS` / `navigator`。调试钩子只针对单 APK 类名的必须交付前清理。
 
+### 已知的行为简化（不是 bug，但和原生有差距）
+
+1. **ProgressBar 不插值**：`setProgress` 直接跳到目标值，没有 AOSP 的 VisualProgress 平滑动画；曾经留下 `$progressAnimation` / `$visualProgress` 两个死字段，已删除。要做的话得接 choreographer 帧循环。
+2. **`setSelection` 只滚到目标项**：不触发 `onNothingSelected`，也不处理 `setSelectionFromTop` 的偏移。
+
 ### 仍待修复的系统性 UI 差异
 
 1. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。

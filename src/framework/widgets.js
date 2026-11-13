@@ -125,6 +125,8 @@ export class TextView extends View {
     this.textPaint.textSize = defaultTextSize;
     this.textSize = defaultTextSize;
     this.textColor = 0xff000000;
+    // ColorStateList 由 setTextColor(ColorStateList) 写入；显式置空表示"没有状态列表"。
+    this.$textColorStateList = null;
     this.hintText = null;
     this.hintColor = 0x80808080;
     this.gravity = 0x800003;
@@ -197,6 +199,8 @@ export class TextView extends View {
   }
 
   setTextColor(color) {
+    // 显式设置单色时清掉 ColorStateList，否则旧的状态列表会盖住新颜色。
+    this.$textColorStateList = null;
     this.textColor = color >>> 0;
     this.textPaint.color = this.textColor;
     this.invalidate();
@@ -1010,8 +1014,6 @@ export class ProgressBar extends View {
     this.progressBackgroundTint = null;
     this.secondaryProgressTint = null;
     this.indeterminateTint = null;
-    this.$progressAnimation = null;
-    this.$visualProgress = 0;
     this.$indeterminateStart = 0;
   }
 
