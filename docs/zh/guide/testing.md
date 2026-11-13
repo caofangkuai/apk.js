@@ -15,6 +15,17 @@ npm run test:all
 
 `npm test` 会解析 `samples/hello-dex.apk`、构建 View 树，然后依次模拟：点击计数按钮、聚焦编辑框并回显键盘输入、动态添加视图、推进进度条、点击形状背景按钮、读取 `Build` 信息、执行一次反射调用、`startActivity` 跳到第二个 Activity 并校验传参，最后断言每个回调都触发了。
 
+## 静态检查
+
+```bash
+npm run check:refs        # 禁用类名引用
+npm run check:duplicates  # native 类重复注册
+npm run check:shadowing   # 实例属性遮蔽同名方法
+npm run check:coverage    # Framework 覆盖表是否最新
+```
+
+`check:shadowing` 针对的是 JS 不会报错的一类问题：构造函数给实例赋了与原型方法同名的字段，字段会悄悄地覆盖方法，调用方拿到的是值而不是函数。所以宿主字段统一用 `$` 前缀，例如 `$layoutRequested`。
+
 ## 视觉检查
 
 `npm run render -- <apk>` 会把 PNG 写进 `image-debug/`。这个目录里放着真实应用的参考出图，改动 Framework 后可以并排对照。

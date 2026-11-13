@@ -15,6 +15,17 @@ npm run test:all
 
 `npm test` parses `samples/hello-dex.apk`, builds the view tree, then simulates a counter tap, focusing the editor and echoing keyboard input, dynamic view insertion, progress advancement, a shape-backed button tap, reading `Build` info, a reflection call, and a `startActivity` jump to a second activity with argument checks. It asserts that each callback fired.
 
+## Static checks
+
+```bash
+npm run check:refs        # forbidden class references
+npm run check:duplicates  # duplicated native class registrations
+npm run check:shadowing   # instance fields that shadow prototype methods
+npm run check:coverage    # framework coverage table is up to date
+```
+
+`check:shadowing` exists because JavaScript never complains when a constructor assigns an instance field with the same name as a prototype method: the field silently wins and the method becomes uncallable. Host fields therefore use a `$` prefix, for example `$layoutRequested`.
+
 ## Visual checks
 
 `npm run render -- <apk>` writes a PNG into `image-debug/`. That directory holds reference renders of real apps, useful when comparing framework changes side by side.

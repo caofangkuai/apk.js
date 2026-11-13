@@ -37,10 +37,13 @@ npm run test:drawables
 # 检查 native 类重复注册
 npm run check:duplicates
 
+# 检查实例属性遮蔽同名原型方法
+npm run check:shadowing
+
 # 本地 UI/触摸回归（需要字体）
 npm run test:ui
 
-# 全部回归一起跑（coverage + duplicates + playground + refs + api + hooks + hooks-apk + bundles + layout-flag + zip + listview + format + diagnose + touch + interaction + widgets + drawables）
+# 全部回归一起跑（coverage + duplicates + shadowing + playground + refs + api + hooks + hooks-apk + bundles + layout-flag + zip + listview + format + diagnose + touch + interaction + widgets + drawables）
 npm run test:all
 
 
@@ -165,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -290,6 +293,8 @@ npm run site
 ### 关键实现陷阱（务必先读）
 
 - **`_invoke` 热路径不要新增无条件记账**。调用计数已由 `DBG_INVSTATS` 开关控制（默认关，开启后单次调用约慢 30%，真实 APK 启动中位数 78.9ms → 113.5ms）。需要剖析用 `npm run profile:apk`。
+
+- **宿主类不要用与原型方法同名的实例字段**。`this.isLayoutRequested = false` 曾遮蔽同名方法，让 `isLayoutRequested()` 直接不可调用；`npm run check:shadowing` 会扫出这类冲突，字段请统一用 `$` 前缀（如 `$layoutRequested`）。
 
 - **不要凭直觉给方法解析加缓存**。实测 DeviceInfoHW 启动期只有 138 次
   `findVirtual` / `findStatic` / `resolveMethod` 调用、合计约 1.8ms；真正开销在
