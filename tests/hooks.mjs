@@ -225,6 +225,42 @@ assert.equal(vm2.invoke(getRef, box2, []), 2, '延迟注册的 hook 应在 attac
 deferredHook.unhook();
 assert.equal(vm2.invoke(getRef, box2, []), 1);
 
+/* ---------------- 原生静态字段：`名字:类型` 键 ---------------- */
+const vm3 = makeVm();
+vm3.registry.registerNative(
+  new NativeClassDef('Ltest/Flag;', {
+    staticFields: { 'VISIBLE:I': 0, 'TAG:Ljava/lang/String;': 'default' },
+  })
+);
+const helpers3 = vm3.xposed.helpers;
+assert.equal(helpers3.getStaticObjectField('test.Flag', 'VISIBLE'), 0, '带类型的键应能读到初始值');
+helpers3.setStaticObjectField('test.Flag', 'VISIBLE', 4);
+assert.equal(helpers3.getStaticObjectField('test.Flag', 'VISIBLE'), 4, '写入后应能读回');
+assert.equal(helpers3.getStaticObjectField('test.Flag', 'TAG'), 'default');
+
+/* ---------------- 重载选择 ---------------- */
+const vm4 = makeVm();
+const box4 = vm4.allocateRawObject('Ltest/Box;');
+const helpers4 = vm4.xposed.helpers;
+assert.equal(helpers4.callMethod(box4, 'label', 'a'), '[a]', '字符串重载');
+assert.equal(helpers4.callMethod(box4, 'label', 7), '#7', '整数重载');
+assert.throws(() => helpers4.callMethod(box4, 'label', null, null), /找不到匹配的重载/);
+
+/* ---------------- clear() 与延迟注册 ---------------- */
+const vm5 = makeVm();
+const runtime5 = vm5.xposed;
+runtime5.bridge.hookAllMethods('test.Box', 'get', { afterHookedMethod(p) { p.setResult(0); } });
+assert.equal(runtime5.active, true);
+runtime5.clear();
+assert.equal(runtime5.active, false);
+assert.equal(vm5.invoke(getRef, vm5.allocateRawObject('Ltest/Box;'), []), 1, 'clear 之后不再拦截');
+
+const queuedRuntime = new XposedRuntime(null);
+queuedRuntime.bridge.hookAllMethods('test.Box', 'get', { afterHookedMethod(p) { p.setResult(0); } });
+assert.equal(queuedRuntime.pending.length, 1);
+queuedRuntime.clear();
+assert.equal(queuedRuntime.pending.length, 0, 'clear 应丢弃排队中的注册');
+
 /* ---------------- 模拟器门面 ---------------- */
 const simulator = new ApkSimulator({});
 let hookCalls = 0;

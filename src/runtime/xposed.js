@@ -347,9 +347,12 @@ export class XposedRuntime {
     return true;
   }
 
+  /** 清空全部拦截，包括还排在队列里、尚未绑定 VM 的注册。 */
   clear() {
     this.entries.clear();
     this.count = 0;
+    for (const task of this.pending) task.cancelled = true;
+    this.pending = [];
   }
 
   /** 按已解析的方法查找拦截项（native 方法额外尝试通配注册 `(*)`）。 */
@@ -665,54 +668,52 @@ function typeNameOf(value) {
   return typeof value;
 }
 
+/**
+ * 按运行时值给重载打分。字符串可以直接喂给 `Ljava/lang/String;` / `Ljava/lang/CharSequence;`
+ * 这类参数，避免调用方每次手工包一层 Java 字符串对象。
+ */
 function pickOverload(candidates, args) {
-  let fallback = null;
+  let best = null;
   for (const candidate of candidates) {
     const params = candidate.proto.parameters;
     if (params.length !== args.length) continue;
     let score = 0;
     let ok = true;
     for (let i = 0; i < params.length; i++) {
-      const param = params[i];
-      const value = args[i];
-      if (isObjectType(param)) {
-        if (value === null || value === undefined) {
-          score += 0;
-          continue;
-        }
-        if (typeof value !== 'object') {
-          ok = false;
-          break;
-        }
-        score += 2;
-        continue;
-      }
-      if (param === 'J') {
-        if (typeof value !== 'bigint' && !Number.isFinite(Number(value))) {
-          ok = false;
-          break;
-        }
-        score += 2;
-        continue;
-      }
-      if (param === 'F' || param === 'D') {
-        if (typeof value !== 'number') {
-          ok = false;
-          break;
-        }
-        score += 2;
-        continue;
-      }
-      if (typeof value !== 'number') {
+      const match = matchArgument(params[i], args[i]);
+      if (!match) {
         ok = false;
         break;
       }
-      score += 1;
+      score += match;
     }
     if (!ok) continue;
-    if (!fallback || score > fallback.score) fallback = { candidate, score };
+    if (!best || score > best.score) best = { candidate, score };
   }
-  return fallback?.candidate || null;
+  return best?.candidate || null;
+}
+
+/** 返回匹配得分（越大越精确），不匹配返回 0。 */
+function matchArgument(param, value) {
+  if (param === 'Ljava/lang/String;' || param === 'Ljava/lang/CharSequence;') {
+    if (typeof value === 'string') return 3;
+  }
+  if (isObjectType(param)) {
+    if (value === null || value === undefined) return 1;
+    return typeof value === 'object' ? 2 : 0;
+  }
+  if (param === 'J') {
+    if (typeof value === 'bigint') return 3;
+    return typeof value === 'number' && Number.isFinite(value) ? 1 : 0;
+  }
+  if (param === 'F' || param === 'D') {
+    return typeof value === 'number' ? 2 : 0;
+  }
+  if (param === 'Z') {
+    if (typeof value === 'boolean') return 3;
+    return value === 0 || value === 1 ? 1 : 0;
+  }
+  return typeof value === 'number' && Number.isInteger(value) ? 2 : 0;
 }
 
 /** 类名（点分 / 描述符）→ 描述符，并校验类存在。 */
