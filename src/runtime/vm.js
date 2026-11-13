@@ -53,7 +53,7 @@ export class JavaVM {
     this.nativeCallLog = [];
     this.hooks = options.hooks || null;
     this.xposed = options.xposed instanceof XposedRuntime ? options.xposed : new XposedRuntime(this);
-    this.xposed.attach(this);
+    this.xposed.bind(this);
   }
 
   addDexFile(dexFile) {

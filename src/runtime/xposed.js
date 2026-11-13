@@ -281,8 +281,7 @@ export class XposedRuntime {
    * 同时让 VM 采用本注册表（`vm.xposed`），否则 VM 查询的是它自建的那份。
    */
   attach(vm) {
-    this.vm = vm;
-    if (vm && vm.xposed !== this) vm.xposed = this;
+    this.bind(vm);
     if (!this.pending.length) return this;
     const tasks = this.pending;
     this.pending = [];
@@ -291,9 +290,22 @@ export class XposedRuntime {
       try {
         task.handles = task.run(this.bridge);
       } catch (error) {
+        // 目标类可能要到宿主类注册、甚至加载更多 dex 之后才存在；保留任务等下一次 attach 重试。
+        task.attempts = (task.attempts || 0) + 1;
+        if (task.attempts < 4) {
+          this.pending.push(task);
+          continue;
+        }
         vm?.log?.('error', 'xposed', '延迟注册 hook 失败: ' + (error?.message || error));
       }
     }
+    return this;
+  }
+
+  /** 只绑定 VM，不展开排队中的注册。VM 构造时用，避免宿主类尚未注册就回放。 */
+  bind(vm) {
+    this.vm = vm;
+    if (vm && vm.xposed !== this) vm.xposed = this;
     return this;
   }
 

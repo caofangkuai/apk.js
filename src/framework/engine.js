@@ -187,6 +187,8 @@ export class EmulatorEngine {
     vm.resources = resources;
     for (const cls of Object.values(JAVA_CORE_CLASSES)) vm.registry.registerNative(cls);
     registerFrameworkNativeClasses(vm);
+    // 宿主类注册完成后再展开延迟注册的 hook，否则按类名注册会找不到类。
+    this.xposed.attach(vm);
     const mainLooper = new Looper(vm);
     const queue = mainLooper.queue;
     vm.messageQueue = queue;
