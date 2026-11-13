@@ -5221,7 +5221,10 @@ function vmShowChild(self, index) {
         'setOnScrollListener(Landroid/widget/AbsListView$OnScrollListener;)V': (self, [listener]) => {
           if (self.view) self.view.$onScrollListener = listener;
         },
-        'setSelection(I)V': () => undefined,
+        'setSelection(I)V': (self, [index]) => {
+          self.view?.setSelection?.(index | 0);
+        },
+        'getSelectedItemPosition()I': (self) => self.view?.$selectedPosition ?? -1,
         'setSelectionFromTop(II)V': () => undefined,
         'smoothScrollToPosition(I)V': () => undefined,
         'smoothScrollToPositionFromTop(III)V': () => undefined,
@@ -5299,7 +5302,10 @@ function vmShowChild(self, index) {
         'getFirstVisiblePosition()I': () => 0,
         'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
         'getSelectedItemPosition()I': () => -1,
-        'setSelection(I)V': () => undefined,
+        'setSelection(I)V': (self, [index]) => {
+          self.view?.setSelection?.(index | 0);
+        },
+        'getSelectedItemPosition()I': (self) => self.view?.$selectedPosition ?? -1,
         'smoothScrollToPosition(I)V': () => undefined,
         'setDivider(Landroid/graphics/drawable/Drawable;)V': (self, [divider]) => {
           if (self.view) self.view.divider = divider;

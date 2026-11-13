@@ -1062,6 +1062,8 @@ export class ListView extends ViewGroup {
     this.$onItemClickListener = null;
     this.$onItemSelectedListener = null;
     this.$onScrollListener = null;
+    this.$selectedPosition = -1;
+    this.$scrollState = 0;
     this.divider = null;
     this.dividerHeight = Math.round(1 * this.getDensity());
     this.dividerColor = null;
@@ -1295,8 +1297,14 @@ export class ListView extends ViewGroup {
     }
   }
 
+  /** 懒模式下按行高估算，否则扫描已布局的子项。 */
   firstVisiblePosition() {
     const scrollY = this.scrollY | 0;
+    if (this.$lazy) {
+      const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
+      const index = Math.floor(scrollY / rowHeight);
+      return Math.max(0, Math.min(Math.max(0, (this.$itemCount | 0) - 1), index));
+    }
     for (let i = 0; i < this.$items.length; i += 1) {
       const item = this.$items[i];
       if (item.bottom > scrollY) return i;
@@ -1306,6 +1314,12 @@ export class ListView extends ViewGroup {
 
   lastVisiblePosition() {
     const bottom = (this.scrollY | 0) + this.getHeight();
+    if (this.$lazy) {
+      const rowHeight = Math.max(1, (this.$rowHeight | 0) + (this.dividerHeight | 0));
+      const count = Math.max(0, this.$itemCount | 0);
+      if (!count) return 0;
+      return Math.max(0, Math.min(count - 1, Math.floor((bottom - 1) / rowHeight)));
+    }
     for (let i = this.$items.length - 1; i >= 0; i -= 1) {
       const item = this.$items[i];
       if (item.top < bottom) return i;
@@ -1506,8 +1520,97 @@ export class ListView extends ViewGroup {
 
   scrollTo(x, y) {
     this.scrollX = 0;
-    this.scrollY = Math.max(0, Math.min(this.scrollRange || 0, y | 0));
+    this.applyScroll(y);
+  }
+
+  /** 统一的滚动入口：钳制范围后通知 OnScrollListener。 */
+  applyScroll(value) {
+    const next = Math.max(0, Math.min(this.scrollRange || 0, value | 0));
+    const previous = this.scrollY | 0;
+    this.scrollY = next;
     this.invalidate();
+    if (next !== previous) this.dispatchScroll();
+    return next;
+  }
+
+  dispatchScroll() {
+    const vm = this.$vm || this.vm;
+    const listener = this.$onScrollListener;
+    if (!vm || !listener) return;
+    const first = this.firstVisiblePosition();
+    const visible = Math.max(0, this.lastVisiblePosition() - first + 1);
+    const total = this.$lazy ? Math.max(0, this.$itemCount | 0) : this.$items.length;
+    try {
+      vm.invokeByName('onScroll', '(Landroid/widget/AbsListView;III)V', listener, [
+        this.$javaObject || null,
+        first,
+        visible,
+        total,
+      ]);
+    } catch (_) {
+      /* 应用侧回调异常不影响滚动 */
+    }
+  }
+
+  /** 0 = IDLE，1 = TOUCH_SCROLL（与 AbsListView.OnScrollListener 常量一致）。 */
+  setScrollState(state) {
+    const next = state | 0;
+    if (next === (this.$scrollState | 0)) return;
+    this.$scrollState = next;
+    const vm = this.$vm || this.vm;
+    const listener = this.$onScrollListener;
+    if (!vm || !listener) return;
+    try {
+      vm.invokeByName('onScrollStateChanged', '(Landroid/widget/AbsListView;I)V', listener, [
+        this.$javaObject || null,
+        next,
+      ]);
+    } catch (_) {
+      /* 同上 */
+    }
+  }
+
+  /** AOSP 语义：把某一项滚到可见区顶部，并触发 onItemSelected。 */
+  setSelection(position) {
+    const index = position | 0;
+    const total = this.$lazy ? (this.$itemCount | 0) : this.$items.length;
+    if (index < 0 || index >= total) return;
+    let offset = 0;
+    if (this.$lazy) {
+      offset = index * ((this.$rowHeight | 0) + (this.dividerHeight | 0));
+    } else {
+      const item = this.$items[index];
+      if (item) offset = (item.top | 0) - this.paddingTop;
+    }
+    this.applyScroll(offset);
+    this.$selectedPosition = index;
+    this.dispatchItemSelected(index);
+  }
+
+  dispatchItemSelected(position) {
+    const vm = this.$vm || this.vm;
+    const listener = this.$onItemSelectedListener;
+    if (!vm || !listener) return;
+    const item = this.$lazy
+      ? this.lazyItem(position, Math.max(1, this.getWidth() - this.paddingLeft - this.paddingRight))
+      : this.$items[position];
+    let id = position;
+    try {
+      const value = vm.invokeByName('getItemId', '(I)J', this.adapter, [position]);
+      if (value !== null && value !== undefined) id = value;
+    } catch (_) {
+      id = position;
+    }
+    try {
+      vm.invokeByName('onItemSelected', '(Landroid/widget/AdapterView;Landroid/view/View;IJ)V', listener, [
+        this.$javaObject || null,
+        item?.$javaObject || null,
+        position,
+        id,
+      ]);
+    } catch (_) {
+      /* 应用侧回调异常不影响选中状态 */
+    }
   }
 
   itemIndexAt(x, y) {
@@ -1574,6 +1677,7 @@ export class ListView extends ViewGroup {
         this.$dragging = true;
         this.$pressedItem = -1;
         this.pressed = false;
+        this.setScrollState(1);
         this.scrollTo(0, this.$touchStartScroll + delta);
       }
       return true;
@@ -1581,6 +1685,7 @@ export class ListView extends ViewGroup {
     if (host.action === 'up') {
       const dragged = this.$dragging;
       this.$dragging = false;
+      if (dragged) this.setScrollState(0);
       if (dragged) {
         this.$pressedItem = -1;
         this.pressed = false;
@@ -1596,6 +1701,7 @@ export class ListView extends ViewGroup {
     if (host.action === 'cancel') {
       this.$pressedItem = -1;
       this.pressed = false;
+      this.setScrollState(0);
       return true;
     }
     return false;
