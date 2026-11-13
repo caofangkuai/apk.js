@@ -40,7 +40,7 @@ npm run check:duplicates
 # 本地 UI/触摸回归（需要字体）
 npm run test:ui
 
-# 全部回归一起跑（coverage + duplicates + playground + parse + api + format + diagnose + zip + listview + touch + interaction + widgets + drawables）
+# 全部回归一起跑（coverage + duplicates + playground + refs + api + hooks + bundles + zip + listview + format + diagnose + touch + interaction + widgets + drawables）
 npm run test:all
 
 
@@ -156,11 +156,12 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`；2026-11-12 多轮改动已推送，最新 HEAD 以 `git log -1` 为准。
-- 新增：`src/framework/drawables.js`、`src/framework/opengl.js`、`tests/drawables.mjs`、`tools/setup-fonts.sh`、`tools/check-refs.mjs`、`tools/image-diff.mjs`、`tools/render-batch.mjs`、`tools/framework-coverage.mjs`、`tools/bench-render.mjs`。
-- 修改：`view.js`、`widgets.js`、`layouts.js`、`graphics.js`、`window.js`、`registry.js`、`java-core.js`、`layout-inflater.js`、`package.json`、`AGENTS.md`、`TODO.md`。
-- 本轮验证通过：`npm run test:all`（含 format/diagnose/interaction/widgets/drawables）、`npm run build`、`npm run site`。
-- 自检：`grep -rin "androidx\|com.google" src/` 必须为空。
+- 分支 `main`，最新 HEAD 以 `git log -1` 为准。
+- 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
+- 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
+- 测试套件：coverage、duplicates、playground、refs、run、check、parse、api、hooks、bundles、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
+- 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
 ### 本轮已完成（2026-11-09 第九轮：性能定位）
 
@@ -323,7 +324,7 @@ npm run site
 4. 应用程序页：PackageItemInfo.loadLabel、ColorStateList 包装、应用名称解析。
 5. SearchView：ColorStateList 不再 ClassCast，诊断 interesting=0。
 6. APK 大小默认不限制。
-7. 拦截层：`src/runtime/xposed.js` 的 Xposed API（`XC_MethodHook`、`MethodHookParam`、`XposedBridge`、`XposedHelpers`），拦截点移到 `JavaVM._invoke` 解析之后；`HookBus` 只保留生命周期事件；`npm run test:hooks`。打包重划为 `apk.js`（核心引擎）+ `android-framework.js`（宿主类与模拟器）。
+7. 拦截层：`src/runtime/xposed.js` 的 Xposed API（`XC_MethodHook`、`MethodHookParam`、`XposedBridge`、`XposedHelpers`），拦截点移到 `JavaVM._invoke` 解析之后；`HookBus` 只保留生命周期事件；`npm run test:hooks`。打包重划为 `apk.js`（核心引擎）+ `android-framework.js`（宿主类与模拟器），新增 `npm run test:bundles` 校验两个产物的分层与导出面。
 8. MaterialShapeDrawable ambient/key/spot 三段阴影。
 9. AnimatedVectorDrawable trimPath 路径裁剪与时间动画。
 10. ListView 超长列表跳转窗口化与视图回收。
