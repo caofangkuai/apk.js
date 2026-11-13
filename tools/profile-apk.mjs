@@ -51,10 +51,17 @@ canvas.removeEventListener = () => {};
 canvas.setPointerCapture = () => {};
 canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width, height });
 
+/** DEX + 宿主方法合计 */
 /** @type {Map<string, { count: number, ms: number }>} */
 const stats = new Map();
 let totalCalls = 0;
 let totalMs = 0;
+
+/** 仅宿主 native 实现 */
+/** @type {Map<string, { count: number, ms: number }>} */
+const nativeStats = new Map();
+let nativeTotalCalls = 0;
+let nativeTotalMs = 0;
 
 /** 把 vm.invoke 换成带计时的版本；重复调用无副作用。 */
 const wrap = (vm) => {
@@ -76,6 +83,27 @@ const wrap = (vm) => {
         entry.ms += elapsed;
       } else {
         stats.set(key, { count: 1, ms: elapsed });
+      }
+    }
+  };
+
+  // 只统计宿主实现（android.* / java.* 的 native 方法）
+  const originalInvokeNative = vm.invokeNative.bind(vm);
+  vm.invokeNative = function profiledInvokeNative(resolution, receiver, args, ref, mode) {
+    const key = `${resolution?.def?.descriptor || '?'}.${ref?.name || '?'}${ref?.proto?.descriptor || ''}`;
+    const startedAt = performance.now();
+    try {
+      return originalInvokeNative(resolution, receiver, args, ref, mode);
+    } finally {
+      const elapsed = performance.now() - startedAt;
+      nativeTotalCalls += 1;
+      nativeTotalMs += elapsed;
+      const entry = nativeStats.get(key);
+      if (entry) {
+        entry.count += 1;
+        entry.ms += elapsed;
+      } else {
+        nativeStats.set(key, { count: 1, ms: elapsed });
       }
     }
   };
@@ -139,4 +167,18 @@ sorted.slice(0, topN).forEach((item, index) => {
   );
 });
 console.log('');
-console.log(`统计的方法数: ${stats.size}`);
+const nativeSorted = [...nativeStats.entries()]
+  .map(([key, value]) => ({ key, count: value.count, ms: value.ms }))
+  .sort((a, b) => b.ms - a.ms);
+
+console.log(`宿主 native 调用: ${nativeTotalCalls} 次  累计 ${fmt(nativeTotalMs)}ms`);
+console.log('#  占比    次数      平均(ms)  宿主方法');
+nativeSorted.slice(0, topN).forEach((item, index) => {
+  const share = ((item.ms / Math.max(nativeTotalMs, 0.0001)) * 100).toFixed(1);
+  const avg = (item.ms / item.count).toFixed(3);
+  console.log(
+    `${String(index + 1).padStart(2)} ${share.padStart(5)}%  ${String(item.count).padStart(8)}  ${avg.padStart(9)}  ${item.key}`
+  );
+});
+
+console.log(`统计的方法数: ${stats.size}（其中宿主方法 ${nativeStats.size}）`);

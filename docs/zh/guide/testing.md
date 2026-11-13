@@ -27,7 +27,7 @@ npm run test:all
 PROFILE_FRAMES=60 npm run profile:apk -- /path/to/app.apk 20
 ```
 
-输出按耗时排序。要和调用次数一起看：次数高、占比也高才是真热点；单项占比特别大的通常是 layout/draw 入口，它本来就包含了所有子调用。
+输出分两张表——全部方法（DEX + 宿主）与仅宿主 `android.*` / `java.*` 实现——都按耗时排序。要和调用次数一起看：次数高、占比也高才是真热点；单项占比特别大的通常是 layout/draw 入口，它本来就包含了所有子调用。
 
 ## 调试脚本
 

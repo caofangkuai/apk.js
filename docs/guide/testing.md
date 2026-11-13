@@ -27,7 +27,7 @@ npm run test:all
 PROFILE_FRAMES=60 npm run profile:apk -- /path/to/app.apk 20
 ```
 
-The output is sorted by inclusive time. Cross-read it with the call count: a high count with a high share is a real hot spot, while one huge entry is usually a layout or draw entry point that simply contains everything else.
+The output has two tables — every method (DEX + host) and host `android.*` / `java.*` implementations only — both sorted by inclusive time. Cross-read it with the call count: a high count with a high share is a real hot spot, while one huge entry is usually a layout or draw entry point that simply contains everything else.
 
 ## Debug scripts
 
