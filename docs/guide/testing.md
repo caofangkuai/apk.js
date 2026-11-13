@@ -19,6 +19,16 @@ npm run test:all
 
 `npm run render -- <apk>` writes a PNG into `image-debug/`. That directory holds reference renders of real apps, useful when comparing framework changes side by side.
 
+## Profiling
+
+`npm run profile:apk -- <apk>` wraps `vm.invoke` from the moment the VM is created and reports per-method call counts plus inclusive time (own time plus everything it called, so nested calls add up):
+
+```bash
+PROFILE_FRAMES=60 npm run profile:apk -- /path/to/app.apk 20
+```
+
+The output is sorted by inclusive time. Cross-read it with the call count: a high count with a high share is a real hot spot, while one huge entry is usually a layout or draw entry point that simply contains everything else.
+
 ## Debug scripts
 
 `tests/debug/` holds roughly 400 exploratory scripts from development. They open specific internals, print intermediate state, and generally assume a particular APK. They are not part of the suite and will be pruned over time.

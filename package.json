@@ -13,6 +13,7 @@
     "test:parse": "node tests/parse-smoke.mjs",
     "render": "node tools/render-apk.mjs",
     "hook:apk": "node tools/hook-apk.mjs",
+    "profile:apk": "node tools/profile-apk.mjs",
     "serve": "python3 -m http.server 8080 --directory site",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
