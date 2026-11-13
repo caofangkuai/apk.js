@@ -47,6 +47,7 @@ export default defineConfig({
           items: [
             { text: 'Simulator options', link: '/api/simulator' },
             { text: 'Methods', link: '/api/methods' },
+            { text: 'Hooking methods', link: '/api/hooks' },
           ],
         },
       ],
@@ -111,6 +112,7 @@ export default defineConfig({
               items: [
                 { text: '模拟器选项', link: '/zh/api/simulator' },
                 { text: '方法', link: '/zh/api/methods' },
+                { text: '拦截方法', link: '/zh/api/hooks' },
               ],
             },
           ],

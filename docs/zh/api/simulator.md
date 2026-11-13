@@ -52,15 +52,15 @@ const DEFAULT_DEVICE = {
 | `log` | `{ level, tag, message, time }` |
 | `activity:finish` | `{ engine, vm, activity }` |
 
-## 拦截方法（Xposed API）
+## 拦截方法
 
-`sim.xposed` 是 `XposedRuntime`，提供 `bridge` 与 `helpers`。VM 还没创建时就能注册拦截，引擎启动时自动生效。拦截挂在「方法解析完成之后、执行之前」，所以 DEX 方法、宿主（`android.*` / `java.*`）方法和构造方法都能拦。
+`sim.xposed` 提供 `XposedRuntime`，含 `bridge` 与 `helpers`。VM 还没创建时就能注册拦截，引擎启动时自动生效。
 
 ```js
 import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
 const sim = createSimulator({ element: '#screen' });
-const { bridge, helpers } = sim.xposed;
+const { bridge } = sim.xposed;
 
 bridge.hookAllMethods('android.widget.TextView', 'setText', {
   beforeHookedMethod(param) {
@@ -68,25 +68,7 @@ bridge.hookAllMethods('android.widget.TextView', 'setText', {
   },
 });
 
-helpers.findAndHookMethod('java.lang.String', null, 'trim', {
-  afterHookedMethod(param) {
-    param.setResult(param.getResult() + '!');
-  },
-});
+await sim.loadFromFile(file);
 ```
 
-| API | 说明 |
-| --- | --- |
-| `XposedBridge.hookAllMethods(className, methodName, callback)` | 拦截该类声明的同名全部重载，返回一组 `Unhook`。 |
-| `XposedBridge.hookAllConstructors(className, callback)` | 拦截 `<init>` 重载。 |
-| `XposedBridge.hookMethod(methodInfo, callback)` | 拦截 `findMethodExact` 返回的方法对象。 |
-| `XposedHelpers.findAndHookMethod(className, classLoader, methodName, ...参数类型, callback)` | 精确拦截单个重载；`classLoader` 仅为对齐 Xposed 签名，可传 `null`。 |
-| `XposedHelpers.findMethodExact(className, methodName, ...参数类型)` | 只解析方法，不拦截。 |
-| `XposedHelpers.findClass(className)` | 类信息（`getName`、`getDescriptor`）。 |
-| `XposedHelpers.getObjectField` / `setObjectField` 及 `Int` / `Long` / `Boolean` / `Float` / `Double` 变体 | 直接读写字段。 |
-| `XposedHelpers.callMethod` / `callStaticMethod` / `newInstance` | 从 JS 调用方法和构造。 |
-| `unhook()` | 每个返回的句柄都可调用，用于摘除拦截。 |
-
-`MethodHookParam` 提供 `method`、`thisObject`、`args`、`isStatic`、`getResult()` / `setResult(value)`、`getThrowable()` / `setThrowable(error)` / `hasThrowable()`。在 `beforeHookedMethod` 里调用 `setResult` 会完全跳过原方法；`setThrowable` 让这次调用抛出异常。
-
-回调可以是 `XC_MethodHook` 实例、它的子类，或 `{ beforeHookedMethod, afterHookedMethod }` 对象。
+完整 API（注册入口、`MethodHookParam`、字段读写、从 hook 里抛异常以及已知限制）见[拦截方法](./hooks.md)。

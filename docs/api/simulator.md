@@ -52,15 +52,15 @@ const DEFAULT_DEVICE = {
 | `log` | `{ level, tag, message, time }` |
 | `activity:finish` | `{ engine, vm, activity }` |
 
-## Hooking methods (Xposed API)
+## Hooking methods
 
-`sim.xposed` is an `XposedRuntime` exposing `bridge` and `helpers`. Hooks may be registered before the VM exists; they are applied once the engine starts. Interception happens right after method resolution, so DEX methods, host (`android.*` / `java.*`) methods and constructors can all be hooked.
+`sim.xposed` exposes an `XposedRuntime` with `bridge` and `helpers`. Hooks may be registered before the VM exists; they are applied once the engine starts.
 
 ```js
 import { createSimulator } from 'https://caofangkuai.github.io/apk.js/dist/android-framework.min.js';
 
 const sim = createSimulator({ element: '#screen' });
-const { bridge, helpers } = sim.xposed;
+const { bridge } = sim.xposed;
 
 bridge.hookAllMethods('android.widget.TextView', 'setText', {
   beforeHookedMethod(param) {
@@ -68,25 +68,7 @@ bridge.hookAllMethods('android.widget.TextView', 'setText', {
   },
 });
 
-helpers.findAndHookMethod('java.lang.String', null, 'trim', {
-  afterHookedMethod(param) {
-    param.setResult(param.getResult() + '!');
-  },
-});
+await sim.loadFromFile(file);
 ```
 
-| API | Description |
-| --- | --- |
-| `XposedBridge.hookAllMethods(className, methodName, callback)` | Hook every overload declared on that class; returns a set of `Unhook`. |
-| `XposedBridge.hookAllConstructors(className, callback)` | Hook the `<init>` overloads. |
-| `XposedBridge.hookMethod(methodInfo, callback)` | Hook a method object from `findMethodExact`. |
-| `XposedHelpers.findAndHookMethod(className, classLoader, methodName, ...paramTypes, callback)` | Hook one exact overload. `classLoader` mirrors the Xposed signature and may be `null`. |
-| `XposedHelpers.findMethodExact(className, methodName, ...paramTypes)` | Resolve a method without hooking it. |
-| `XposedHelpers.findClass(className)` | Class info (`getName`, `getDescriptor`). |
-| `XposedHelpers.getObjectField` / `setObjectField` plus the `Int` / `Long` / `Boolean` / `Float` / `Double` variants | Read and write fields directly. |
-| `XposedHelpers.callMethod` / `callStaticMethod` / `newInstance` | Call methods and constructors from JS. |
-| `unhook()` | Available on every returned handle to remove the hook. |
-
-`MethodHookParam` exposes `method`, `thisObject`, `args`, `isStatic`, `getResult()` / `setResult(value)`, `getThrowable()` / `setThrowable(error)` / `hasThrowable()`. Calling `setResult` inside `beforeHookedMethod` skips the original method entirely; `setThrowable` makes the call throw.
-
-The callback may be an `XC_MethodHook` instance, a subclass of it, or a plain `{ beforeHookedMethod, afterHookedMethod }` object.
+The full API — registration helpers, `MethodHookParam`, field access, throwing from a hook and the limits — is documented in [Hooking methods](./hooks.md).
