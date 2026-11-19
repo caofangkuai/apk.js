@@ -1573,18 +1573,49 @@ export class ListView extends ViewGroup {
   /** AOSP 语义：把某一项滚到可见区顶部，并触发 onItemSelected。 */
   setSelection(position) {
     const index = position | 0;
-    const total = this.$lazy ? (this.$itemCount | 0) : this.$items.length;
-    if (index < 0 || index >= total) return;
-    let offset = 0;
-    if (this.$lazy) {
-      offset = index * ((this.$rowHeight | 0) + (this.dividerHeight | 0));
-    } else {
-      const item = this.$items[index];
-      if (item) offset = (item.top | 0) - this.paddingTop;
+    if (index < 0) {
+      // AOSP 语义：清空选中时通知 onNothingSelected。
+      if ((this.$selectedPosition | 0) >= 0) {
+        this.$selectedPosition = -1;
+        this.dispatchNothingSelected();
+      }
+      return;
     }
-    this.applyScroll(offset);
+    const total = this.$lazy ? (this.$itemCount | 0) : this.$items.length;
+    if (index >= total) return;
+    this.applyScroll(this.itemOffset(index));
     this.$selectedPosition = index;
     this.dispatchItemSelected(index);
+  }
+
+  /** AOSP 语义：让 position 项的顶部落在距列表顶 paddingTop + y 的位置。 */
+  setSelectionFromTop(position, y) {
+    const index = position | 0;
+    const total = this.$lazy ? (this.$itemCount | 0) : this.$items.length;
+    if (index < 0 || index >= total) return;
+    this.applyScroll(this.itemOffset(index) - (y | 0));
+    this.$selectedPosition = index;
+    this.dispatchItemSelected(index);
+  }
+
+  /** 某一项相对内容顶部的偏移，懒模式按行高估算。 */
+  itemOffset(index) {
+    if (this.$lazy) return index * ((this.$rowHeight | 0) + (this.dividerHeight | 0));
+    const item = this.$items[index];
+    return item ? (item.top | 0) - this.paddingTop : 0;
+  }
+
+  dispatchNothingSelected() {
+    const vm = this.$vm || this.vm;
+    const listener = this.$onItemSelectedListener;
+    if (!vm || !listener) return;
+    try {
+      vm.invokeByName('onNothingSelected', '(Landroid/widget/AdapterView;)V', listener, [
+        this.$javaObject || null,
+      ]);
+    } catch (_) {
+      /* 应用侧回调异常不影响选中状态 */
+    }
   }
 
   dispatchItemSelected(position) {

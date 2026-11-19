@@ -1339,7 +1339,6 @@ function buildFrameworkDefinitions(vm) {
           if (!vm.applicationObject && vm.contextObject) return vm.contextObject;
           return vm.applicationObject ?? vm.contextObject;
         },
-        'getApplication()Landroid/app/Application;': (self, _args, vm) => vm.applicationObject,
         'getIntent()Landroid/content/Intent;': (self) => self.intent,
         'setIntent(Landroid/content/Intent;)V': (self, [intent]) => {
           self.intent = intent;
@@ -2456,7 +2455,6 @@ function buildFrameworkDefinitions(vm) {
       methods: {
         'getScaledHorizontalScrollFactor()F': () => 1.0,
         'getScaledVerticalScrollFactor()F': () => 1.0,
-        'getScaledTouchSlop()I': () => 8,
         'getScaledMinimumScalingSpan()I': () => 12,
         'getScaledTouchSlop()I': (self) => self.touchSlop ?? 8,
         'getScaledDoubleTapSlop()I': (self) => self.doubleTapSlop ?? 100,
@@ -2743,7 +2741,6 @@ function buildFrameworkDefinitions(vm) {
           self.height = height | 0;
           self.focusable = !!focusable;
         },
-        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
         '<init>(II)V': (self, [width, height]) => {
           self.width = width | 0;
           self.height = height | 0;
@@ -3081,8 +3078,7 @@ function buildFrameworkDefinitions(vm) {
           const at = (index | 0) < 0 ? self.view.children.length : (index | 0);
           self.view.children.splice(at, 0, child);
         },
-        'onViewRemoved(Landroid/view/View;)V': () => undefined,
-'getChildCount()I': (self) => self.view?.getChildCount?.() ?? 0,
+        'getChildCount()I': (self) => self.view?.getChildCount?.() ?? 0,
         'getChildAt(I)Landroid/view/View;': (self, [index], vm) => {
           if (globalThis.FV_DBG) console.error('GETCHILD self=', typeof self, 'hasView=', !!self?.view, 'idx=', index, 'kids=', self?.view?.children?.length);
           const child = self.view?.getChildAt?.(index | 0);
@@ -3622,9 +3618,6 @@ function buildFrameworkDefinitions(vm) {
         'getTransformationMethod()Landroid/text/method/TransformationMethod;': () => null,
         'getLineCount()I': (self) => self.view?.getLineCount?.() ?? 0,
         'getMaxLines()I': (self) => self.view?.maxLines ?? 0,
-        'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines?.(lines | 0),
-        'setSingleLine(Z)V': (self, [single]) => self.view?.setSingleLine?.(!!single),
-        'setSingleLine()V': (self) => self.view?.setSingleLine?.(true),
         'setEllipsize(Landroid/text/TextUtils$TruncateAt;)V': (self, [where]) => self.view?.setEllipsize?.(where ?? null),
         'getEllipsize()Landroid/text/TextUtils$TruncateAt;': (self) => self.view?.getEllipsize?.() ?? null,
         'setIncludeFontPadding(Z)V': (self, [include]) => self.view?.setIncludeFontPadding?.(!!include),
@@ -3669,15 +3662,14 @@ function buildFrameworkDefinitions(vm) {
           return self.object;
         },
         'append(Ljava/lang/CharSequence;)V': (self, [text]) => self.view?.append(jsString(text)),
-        'setSingleLine()V': (self) => self.view?.setSingleLine(true),
-        'setSingleLine(Z)V': (self, [value]) => self.view?.setSingleLine(!!value),
+        'setSingleLine()V': (self) => self.view?.setSingleLine?.(true),
+        'setSingleLine(Z)V': (self, [value]) => self.view?.setSingleLine?.(!!value),
         'setMaxLines(I)V': (self, [lines]) => self.view?.setMaxLines?.(Number(lines)),
         'setAllCaps(Z)V': (self, [value]) => self.view?.setTextAllCaps(!!value),
         'getTextSize()F': (self) => self.view?.getTextSize() ?? 0,
         'getCurrentTextColor()I': (self) => self.view?.textColor ?? 0,
         'getTypeface()Landroid/graphics/Typeface;': (self) => ({ $descriptor: 'Landroid/graphics/Typeface;', family: self.view?.typeface || null, style: self.view?.textStyle | 0 }),
         'getTextColors()Landroid/content/res/ColorStateList;': (self) => self.view?.$textColorStateList ?? null,
-        'getCurrentTextColor()I': (self) => self.view?.getCurrentTextColor() ?? 0,
         'getPaint()Landroid/text/TextPaint;': (self, _args, vm) => {
           if (!self.textPaint) {
             self.textPaint = vm.allocateRawObject('Landroid/text/TextPaint;');
@@ -5225,9 +5217,13 @@ function vmShowChild(self, index) {
           self.view?.setSelection?.(index | 0);
         },
         'getSelectedItemPosition()I': (self) => self.view?.$selectedPosition ?? -1,
-        'setSelectionFromTop(II)V': () => undefined,
+        'setSelectionFromTop(II)V': (self, [position, y]) => {
+          self.view?.setSelectionFromTop?.(position | 0, y | 0);
+        },
+        'smoothScrollToPositionFromTop(III)V': (self, [position, y]) => {
+          self.view?.setSelectionFromTop?.(position | 0, y | 0);
+        },
         'smoothScrollToPosition(I)V': () => undefined,
-        'smoothScrollToPositionFromTop(III)V': () => undefined,
         'setDivider(Landroid/graphics/drawable/Drawable;)V': (self, [divider]) => {
           if (self.view) self.view.divider = divider;
         },
@@ -5299,9 +5295,8 @@ function vmShowChild(self, index) {
         'performItemClick(Landroid/view/View;IJ)Z': (self, [_view, position]) => {
           return self.view?.performItemClick?.(position | 0) ?? false;
         },
-        'getFirstVisiblePosition()I': () => 0,
-        'getLastVisiblePosition()I': (self) => Math.max(0, (self.view?.$items?.length ?? 1) - 1),
-        'getSelectedItemPosition()I': () => -1,
+        'getFirstVisiblePosition()I': (self) => self.view?.firstVisiblePosition?.() ?? 0,
+        'getLastVisiblePosition()I': (self) => self.view?.lastVisiblePosition?.() ?? 0,
         'setSelection(I)V': (self, [index]) => {
           self.view?.setSelection?.(index | 0);
         },

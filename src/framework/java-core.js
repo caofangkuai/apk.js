@@ -874,7 +874,6 @@ export const JAVA_CORE_CLASSES = {
       'toUpperCase(Ljava/util/Locale;)Ljava/lang/String;': (self) => jsString(self).toUpperCase(),
       'toLowerCase(Ljava/util/Locale;)Ljava/lang/String;': (self) => jsString(self).toLowerCase(),
       'trim()Ljava/lang/String;': (self) => jsString(self).trim(),
-      'isEmpty()Z': (self) => jsString(self).length === 0,
       'split(Ljava/lang/String;)[Ljava/lang/String;': (self, [pattern], vm) => {
         const parts = javaSplit(jsString(self), jsString(pattern), 0);
         return vm.newArray('[Ljava/lang/String;', parts.length, parts);
@@ -887,11 +886,10 @@ export const JAVA_CORE_CLASSES = {
         jsString(self).replace(new RegExp(jsString(regex), 'g'), javaRegexReplacement(jsString(replacement))),
       'replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [regex, replacement]) =>
         jsString(self).replace(new RegExp(jsString(regex)), javaRegexReplacement(jsString(replacement))),
-      'matches(Ljava/lang/String;)Z': (self, [regex]) => {
+      'matches(Ljava/lang/String;)Z': (self, [pattern]) => {
         try {
-          return new RegExp(`^(?:${jsString(regex)})$`).test(jsString(self));
-        } catch (error) {
-          void error;
+          return new RegExp(`^(?:${jsString(pattern)})$`).test(jsString(self));
+        } catch {
           return false;
         }
       },
@@ -915,13 +913,6 @@ export const JAVA_CORE_CLASSES = {
         const a = jsString(self);
         const b = jsString(other);
         return a < b ? -1 : a > b ? 1 : 0;
-      },
-      'matches(Ljava/lang/String;)Z': (self, [pattern]) => {
-        try {
-          return new RegExp(`^(?:${jsString(pattern)})$`).test(jsString(self));
-        } catch {
-          return false;
-        }
       },
     },
     staticMethods: {
