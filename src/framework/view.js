@@ -1078,9 +1078,22 @@ export class View {
 
   offsetTopAndBottom(offset) {
     const delta = offset | 0;
+    if (!delta) return;
+    // 滚动容器靠平移子项来实现滚动，
+    // 所以这里必须同时让父级重绘，并把滚动量反映到容器的滚动状态上，
+    // 否则触摸能到达 DEX、可界面永远不动。
+    const parent = this.parent || null;
+    if (parent) {
+      parent.$offsetAccumY = (parent.$offsetAccumY || 0) + delta;
+      if (parent.$offsetAccumY < 0) {
+        parent.scrollY = Math.max(0, (parent.scrollY | 0) - parent.$offsetAccumY);
+        parent.$offsetAccumY = 0;
+      }
+    }
     this.top += delta;
     this.bottom += delta;
     if (typeof this.onOffsetChanged === 'function') this.onOffsetChanged(0, delta);
+    (this.parent || this).invalidate();
   }
 
   offsetLeftAndRight(offset) {
@@ -1989,11 +2002,16 @@ export class ViewGroup extends View {
 
   offsetChildrenTopAndBottom(offset) {
     const delta = offset | 0;
+    if (!delta) return;
+    // 容器平移子项来滚动时，扫描到的子项可能只是可见窗口的一部分，
+    // 因此滚动量要单独记在容器上，用于 getScrollY 与后续命中测试。
+    this.scrollY = Math.max(0, (this.scrollY | 0) + delta);
     for (const child of this.children || []) {
       child.top += delta;
       child.bottom += delta;
       if (typeof child.onOffsetChanged === 'function') child.onOffsetChanged(0, delta);
     }
+    this.invalidate();
   }
 
   offsetChildrenLeftAndRight(offset) {

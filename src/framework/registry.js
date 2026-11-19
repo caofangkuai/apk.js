@@ -3132,6 +3132,18 @@ function buildFrameworkDefinitions(vm) {
         'checkLayoutParams(Landroid/view/ViewGroup$LayoutParams;)Z': () => true,
         'getNestedScrollAxes()I': () => 0,
         'setNestedScrollAxes(I)V': () => undefined,
+        // NestedScrollingParent 契约：默认不拦截，交给父视图继续往上冒泡。
+        // 子视图（如列表）在滑动前会先问父级要不要接手，缺了这几个方法，
+        // 依赖嵌套滚动的控件在滑动手势下会完全不动。
+        'onStartNestedScroll(Landroid/view/View;Landroid/view/View;I)Z': () => false,
+        'onNestedScrollAccepted(Landroid/view/View;Landroid/view/View;I)V': () => undefined,
+        'onStopNestedScroll(Landroid/view/View;)V': () => undefined,
+        'onNestedScroll(Landroid/view/View;IIIII)V': () => undefined,
+        'onNestedScroll(Landroid/view/View;IIIIII[I)V': () => undefined,
+        'onNestedPreScroll(Landroid/view/View;II[I)V': () => undefined,
+        'onNestedPreScroll(Landroid/view/View;II[II)V': () => undefined,
+        'onNestedFling(Landroid/view/View;FFZ)Z': () => false,
+        'onNestedPreFling(Landroid/view/View;FF)Z': () => false,
       },
       staticMethods: {
         'getChildMeasureSpec(III)I': (_self, [spec, padding, childDimension]) => {
