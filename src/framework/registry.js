@@ -1463,6 +1463,11 @@ function buildFrameworkDefinitions(vm) {
           return intent;
         },
         'getResources()Landroid/content/res/Resources;': (self, _args, vm) => self.resources || vm.resources,
+        'getColorStateList(ILandroid/content/res/Resources$Theme;)Landroid/content/res/ColorStateList;': (self, [id], vm) => {
+          const resources = vm?.resources || self.resources;
+          const info = resources?.getColorStateList?.(id >>> 0);
+          return info ? makeColorStateList(vm, info) : null;
+        },
         'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [id], vm) => {
           const resources = vm?.resources || self.resources;
           const info = resources?.getColorStateList?.(id >>> 0);
@@ -1548,7 +1553,11 @@ function buildFrameworkDefinitions(vm) {
     super: 'Landroid/content/ContextWrapper;',
     ctor: class ContextThemeWrapperPeer { constructor(vm, context) { this.vm = vm; this.base = context ?? null; this.theme = null; } },
     methods: {
-      '<init>(Landroid/content/Context;I)V': (self, [context]) => { self.base = context ?? null; },
+      '<init>(Landroid/content/Context;)V': (self, [context]) => { self.base = context ?? null; },
+      '<init>(Landroid/content/Context;I)V': (self, [context, styleId], vm) => {
+        self.base = context ?? null;
+        if (typeof styleId === 'number' && styleId) loadThemeFromStyleId(vm, styleId >>> 0);
+      },
       '<init>(Landroid/content/Context;Landroid/content/res/Resources$Theme;)V': (self, [context, theme]) => { self.base = context ?? null; self.theme = theme ?? null; },
       'getTheme()Landroid/content/res/Resources$Theme;': (self) => self.theme,
       'setTheme(I)V': () => undefined,
@@ -3162,6 +3171,18 @@ function buildFrameworkDefinitions(vm) {
         'startViewTransition(Landroid/view/View;)V': () => undefined,
         'endViewTransition(Landroid/view/View;)V': () => undefined,
         'checkLayoutParams(Landroid/view/ViewGroup$LayoutParams;)Z': () => true,
+        // 子类不覆写时回落到 ViewGroup 默认值：WRAP_CONTENT 的宽度/高度。
+        // 缺了它，控件的 layoutParams 会是空，测量时宽度直接塌成 0。
+        'generateDefaultLayoutParams()Landroid/view/ViewGroup$LayoutParams;': (self, _args, vm) => {
+          const params = vm.allocateRawObject('Landroid/view/ViewGroup$LayoutParams;');
+          params.$peer = { width: -2, height: -2 };
+          return params;
+        },
+        'generateLayoutParams(Landroid/util/AttributeSet;)Landroid/view/ViewGroup$LayoutParams;': (self, [attrs], vm) => {
+          const params = vm.allocateRawObject('Landroid/view/ViewGroup$LayoutParams;');
+          params.$peer = { width: -2, height: -2, attributeSet: attrs ?? null };
+          return params;
+        },
         'getNestedScrollAxes()I': () => 0,
         'setNestedScrollAxes(I)V': () => undefined,
         // NestedScrollingParent 契约：默认不拦截，交给父视图继续往上冒泡。

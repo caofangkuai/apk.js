@@ -451,9 +451,14 @@ export class TextView extends View {
     const textMetrics = this.textLineMetrics();
     const widthMode = MeasureSpec.getMode(widthSpec);
     const heightMode = MeasureSpec.getMode(heightSpec);
+    // MATCH_PARENT 的子项在 AT_MOST 下要撑满可用宽度：
+    // 否则空输入的 EditText 会量出 0 宽，整个输入框直接不可见。
+    const matchParentWidth = (this.layoutParams?.width ?? -2) === -1;
     let width = desiredWidth;
     if (widthMode === MeasureSpec.EXACTLY) width = MeasureSpec.getSize(widthSpec);
-    else if (widthMode === MeasureSpec.AT_MOST) width = Math.min(desiredWidth, MeasureSpec.getSize(widthSpec));
+    else if (widthMode === MeasureSpec.AT_MOST) {
+      width = matchParentWidth ? MeasureSpec.getSize(widthSpec) : Math.min(desiredWidth, MeasureSpec.getSize(widthSpec));
+    }
     width = Math.max(width, this.minWidth + this.paddingLeft + this.paddingRight);
     this.ensureTextLayout(width);
     const lines = Math.max(1, this.lines.length);
