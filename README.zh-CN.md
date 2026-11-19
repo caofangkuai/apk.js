@@ -256,11 +256,22 @@ npm test
 # 校验 APK 解析结果
 npm run check
 
-# 一次跑完上面两项
-npm run diagnose -- /path/to/app.apk
-npm run test:ui
+# 全部回归（含下面这些 Framework 专项）
 npm run test:all
 ```
+
+Framework 的每项行为都有一个可单独运行的专项回归：
+
+| 命令 | 覆盖内容 |
+| --- | --- |
+| `npm run test:recyclerview` | 嵌套滚动契约与走真实触摸分发的滚动 |
+| `npm run test:appbar` | 子项平移计入容器滚动量 |
+| `npm run test:elevation-overlay` | 暗色主题下的 Material elevation overlay |
+| `npm run test:dialog-theme` | Dialog 配色从主题解析 |
+| `npm run test:progress-animation` | ProgressBar 的 VisualProgress 插值 |
+| `npm run test:list-choices` | `CHOICE_MODE` 选中集合 |
+| `npm run test:layout-flag` | `requestLayout` / `isLayoutRequested` 语义 |
+| `npm run test:list-callbacks` | 滚动与选中监听器派发 |
 
 `npm test` 会解析 `samples/hello-dex.apk`、构建 View 树，然后依次模拟：点击计数按钮、聚焦编辑框并用键盘输入回显、动态添加视图、推进进度条、点击形状背景按钮、读取 `Build` 信息、跑一次反射调用、`startActivity` 跳到第二个 Activity 并校验传参，最后检查各项事件回调是否生效。
 
@@ -275,6 +286,8 @@ npm run test:all
 
 - 部分大型第三方应用在生命周期 `onStart` 阶段仍会失败，原因是 Framework 覆盖不全。
 - 调试开关（`DBG_INV`、`DBG_CAST`、`CAS_DBG`、`FV_DBG`）在打包时会被编译期替换成 `false`。
+- elevation overlay 目前只覆盖内置暗色主题；应用自定义的 overlay 颜色尚未支持。
+- `AppBarLayout` collapse 与 `TextInputLayout` 浮动标签完全由 APK 的 DEX 驱动。参考 APK 里没有可滚动区域、也没有 `TextInputLayout`，这两条路径**仍缺像素级回归**。
 - `tests/debug/` 下约有 400 个开发期临时脚本，留作参考，后续会逐步清理。
 
 ## 文档站

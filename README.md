@@ -256,11 +256,22 @@ npm test
 # Verify the APK parse result
 npm run check
 
-# All of the above
-npm run diagnose -- /path/to/app.apk
-npm run test:ui
+# Everything, including the framework regressions below
 npm run test:all
 ```
+
+Framework behaviours each have a focused regression you can run on its own:
+
+| Command | Covers |
+| --- | --- |
+| `npm run test:recyclerview` | Nested-scroll contract and scrolling through real touch dispatch |
+| `npm run test:appbar` | Sub-view offsets feed container scroll position |
+| `npm run test:elevation-overlay` | Material elevation overlay in dark themes |
+| `npm run test:dialog-theme` | Dialog colours resolved from the theme |
+| `npm run test:progress-animation` | ProgressBar visual progress interpolation |
+| `npm run test:list-choices` | `CHOICE_MODE` selection sets |
+| `npm run test:layout-flag` | `requestLayout` / `isLayoutRequested` semantics |
+| `npm run test:list-callbacks` | Scroll and selection listener dispatch |
 
 `npm test` parses `samples/hello-dex.apk`, builds the view tree, then simulates a counter tap, focusing the editor and echoing keyboard input, dynamic view insertion, progress advancement, a shape-backed button tap, reading `Build` info, a reflection call, and a `startActivity` jump to a second `Activity` with argument checks.
 
@@ -275,6 +286,8 @@ The scripts in `tests/debug/` are older exploratory probes from development. The
 
 - Some large third-party apps still fail during `onStart` because the framework coverage is incomplete.
 - Debug switches (`DBG_INV`, `DBG_CAST`, `CAS_DBG`, `FV_DBG`) are replaced with `false` at build time.
+- The elevation overlay only covers the built-in dark theme; an app-provided overlay colour is not honoured yet.
+- `AppBarLayout` collapse and `TextInputLayout` floating labels run entirely from the APK DEX. The reference APK has no scrollable region and no `TextInputLayout`, so those two paths have no pixel-level regression yet.
 - `tests/debug/` contains roughly 400 ad-hoc scripts from development. They are kept for reference and will be pruned.
 
 ## Documentation
