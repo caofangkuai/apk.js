@@ -342,22 +342,41 @@ export class LayoutInflater {
   mountChild(parent, child, node) {
     this.applyParentLayoutParams(child, node, parent);
     // 子类可能覆写了 addView（例如用 addView 拦截 EditText 建立内部关联）。
-    // 直接调宿主 parent.addView 会绕开这些覆写，导致整条初始化链路失效。
+    // 直接调宿主 parent.addView 会绕开这些覆写，导致整条初始化链路失效；
+    // 但只有 DEX 里真的声明了该方法时才派发，否则会白白多绕一层。
     const vm = this.context?.vm || this.context?.$vm || this.vm || null;
     const parentObject = parent?.$javaObject;
     const childObject = child?.$javaObject;
     if (vm && parentObject && childObject) {
-      const dispatch = (proto, args) => {
+      let descriptor = null;
+      try {
+        descriptor = vm.registry.classNameOf(parentObject);
+      } catch {
+        descriptor = null;
+      }
+      const declared = (proto) => {
+        if (!descriptor) return false;
         try {
-          vm.invokeByName('addView', proto, parentObject, args);
-          return true;
+          const rc = vm.registry.resolve(descriptor);
+          return !!rc?.dexClass?.findDeclaredMethod?.('addView', proto)?.code;
         } catch {
           return false;
         }
       };
       const params = child.$layoutParamsObject || null;
-      if (dispatch('(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V', [childObject, params])) return;
-      if (dispatch('(Landroid/view/View;)V', [childObject])) return;
+      const candidates = [
+        ['(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V', [childObject, params]],
+        ['(Landroid/view/View;ILandroid/view/ViewGroup$LayoutParams;)V', [childObject, -1, params]],
+      ];
+      for (const [proto, args] of candidates) {
+        if (!declared(proto)) continue;
+        try {
+          vm.invokeByName('addView', proto, parentObject, args);
+          return;
+        } catch {
+          // 派发失败就继续尝试其它重载，最后回落到宿主实现。
+        }
+      }
     }
     parent.addView(child);
   }
