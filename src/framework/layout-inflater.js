@@ -334,8 +334,14 @@ export class LayoutInflater {
     if (!resolved || resolved.kind !== 'dex') return;
     try {
       vm.invoke({ classDesc: descriptor, name: 'onFinishInflate', proto: resolved.method.proto }, object, [], 'virtual');
-    } catch {
-      // 与 Android 一致：初始化失败不应中断整棵布局的构建
+    } catch (error) {
+      // 与 Android 一致：初始化失败不应中断整棵布局的构建，
+      // 但原因要留痕，否则控件静默失效后无从查起。
+      try {
+        vm.log?.('debug', 'inflate', `onFinishInflate 失败 ${descriptor}: ${error?.message ?? error}`);
+      } catch {
+        // 忽略日志本身的失败。
+      }
     }
   }
 
@@ -373,8 +379,15 @@ export class LayoutInflater {
         try {
           vm.invokeByName('addView', proto, parentObject, args);
           return;
-        } catch {
-          // 派发失败就继续尝试其它重载，最后回落到宿主实现。
+        } catch (error) {
+          // 派发失败要继续尝试其它重载，但失败原因必须留痕：
+          // 控件常常在覆写的 addView 里做初始化，静默吞掉会让整条链路
+          // 无声失效，事后极难定位。
+          try {
+            vm.log?.('debug', 'inflate', `addView 派发失败 ${descriptor}.${proto}: ${error?.message ?? error}`);
+          } catch {
+            // 日志本身失败不影响挂载流程。
+          }
         }
       }
     }

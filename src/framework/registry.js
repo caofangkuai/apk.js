@@ -10195,6 +10195,12 @@ function contextSystemService(vm, name) {
     object = inflater;
   } else if (key === 'window') {
     object = vm.contextObject?.windowObject ?? null;
+  } else if (key === 'accessibility') {
+    // 控件会在构造期取这个服务并 checkcast 成 AccessibilityManager，
+    // 返回裸对象会让 checkcast 直接抛异常、整个构造中断。
+    object = vm.wrapPeer({
+      constructor: { $descriptor: 'Landroid/view/accessibility/AccessibilityManager;' },
+    });
   } else if (key === 'input_method') {
       object = {
         showSoftInput() {
