@@ -168,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -312,7 +312,7 @@ npm run site
 
 ### 已知的行为简化（不是 bug，但和原生有差距）
 
-1. **ProgressBar 不插值**：`setProgress` 直接跳到目标值，没有 AOSP 的 VisualProgress 平滑动画；曾经留下 `$progressAnimation` / `$visualProgress` 两个死字段，已删除。要做的话得接 choreographer 帧循环。
+1. **ProgressBar 插值**：已实现 VisualProgress——`setProgress` 记录起止值与起始时间，`visualProgress()` 按 250ms 减速曲线插值，绘制与帧循环都读它；不确定态仍走自己的旋转动画。仍缺：进入不确定态时的 morph 过渡。
 2. **`setSelection` 只滚到目标项**：不触发 `onNothingSelected`，也不处理 `setSelectionFromTop` 的偏移。
 
 ### 仍待修复的系统性 UI 差异

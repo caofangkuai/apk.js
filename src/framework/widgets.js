@@ -1015,6 +1015,9 @@ export class ProgressBar extends View {
     this.secondaryProgressTint = null;
     this.indeterminateTint = null;
     this.$indeterminateStart = 0;
+    // VisualProgress：setProgress 之后用这些字段做帧间插值，避免进度条直接跳变。
+    this.$visualProgress = null;
+    this.$progressAnim = null;
   }
 
   getDensity() {
@@ -1038,9 +1041,39 @@ export class ProgressBar extends View {
   setProgress(value) {
     const next = Number(value) || 0;
     if (next === this.progress) return this;
+    // 从当前显示值出发做插值；不确定进度条没有跳变问题。
+    const start = this.visualProgress();
     this.progress = next;
+    if (!this.indeterminate && start !== next) {
+      this.$progressAnim = { from: start, to: next, start: Date.now() };
+    } else {
+      this.$progressAnim = null;
+      this.$visualProgress = next;
+    }
     this.invalidate();
     return this;
+  }
+
+  /** 当前实际绘制的进度值：有动画时按时间在起止值之间插值。 */
+  visualProgress() {
+    const anim = this.$progressAnim;
+    if (!anim) {
+      const value = this.$visualProgress;
+      return typeof value === 'number' && Number.isFinite(value) ? value : this.progress;
+    }
+    const duration = 250;
+    const elapsed = Date.now() - anim.start;
+    if (elapsed >= duration) {
+      this.$progressAnim = null;
+      this.$visualProgress = anim.to;
+      return anim.to;
+    }
+    const t = Math.max(0, elapsed) / duration;
+    // Material 的减速曲线（decelerate cubic），进度变化先快后慢。
+    const eased = 1 - (1 - t) ** 3;
+    const value = anim.from + (anim.to - anim.from) * eased;
+    this.$visualProgress = value;
+    return value;
   }
 
   getProgress() {
@@ -1138,9 +1171,10 @@ export class ProgressBar extends View {
       this.drawCircular(ctx, width, height, density, accent, trackColor);
     }
     ctx.restore();
-    if (this.indeterminate) {
-      if (typeof requestAnimationFrame === 'function') this.invalidate();
-      else this.invalidate();
+    if (this.indeterminate || this.$progressAnim) {
+      // 不确定态与进度插值都需要下一帧。
+      this.invalidate();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => this.invalidate());
     }
   }
 
@@ -1160,7 +1194,7 @@ export class ProgressBar extends View {
       ctx.fillStyle = cssColor(secondary);
       ctx.fillRect(left, top, secondaryWidth, trackHeight);
     }
-    const primaryWidth = span * this.progressFraction();
+    const primaryWidth = span * this.progressFraction(this.visualProgress());
     if (primaryWidth > 0) {
       ctx.fillStyle = cssColor(primary);
       ctx.fillRect(left, top, primaryWidth, trackHeight);
@@ -1181,7 +1215,7 @@ export class ProgressBar extends View {
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.strokeStyle = cssColor(background);
       ctx.stroke();
-      const fraction = this.progressFraction();
+      const fraction = this.progressFraction(this.visualProgress());
       if (fraction > 0) {
         ctx.beginPath();
         ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fraction);
