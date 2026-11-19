@@ -486,6 +486,19 @@ function dialogRoundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
+/**
+ * Dialog 的配色一律取自当前主题，而不是写死深浅两套色值。
+ * 之前的 peer.night 从未被赋值，暗色主题下对话框永远是白底。
+ */
+function dialogTheme(peer) {
+  const theme = peer.vm?.themeAttributes || {};
+  const night = theme.isLightTheme === false;
+  const surface = typeof theme.colorSurface === 'number' ? theme.colorSurface >>> 0 : (night ? 0xff1e1e1e : 0xffffffff);
+  const onSurface = typeof theme.colorOnSurface === 'number' ? theme.colorOnSurface >>> 0 : (night ? 0xffffffff : 0xff212121);
+  const accent = typeof theme.colorPrimary === 'number' ? theme.colorPrimary >>> 0 : 0xff3f51b5;
+  return { night, surface, onSurface, accent, css: colorToCss(surface), onSurfaceCss: colorToCss(onSurface), accentCss: colorToCss(accent) };
+}
+
 function dialogLayout(peer, screen) {
   const sw = screen?.width || 360;
   const sh = screen?.height || 640;
@@ -528,11 +541,12 @@ function dialogShow(peer) {
       ctx.shadowColor = 'rgba(0,0,0,0.28)';
       ctx.shadowBlur = 24 * (layout.density || 1);
       ctx.shadowOffsetY = 8 * (layout.density || 1);
-      ctx.fillStyle = peer.night ? '#1e1e1e' : '#ffffff';
+      const theme = dialogTheme(peer);
+      ctx.fillStyle = theme.css;
       dialogRoundRect(ctx, layout.left, layout.top, layout.width, layout.height, radius);
       ctx.fill();
       ctx.restore();
-      ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+      ctx.fillStyle = theme.onSurfaceCss;
       ctx.font = 'bold ' + Math.round(20 * (layout.density || 1)) + 'px sans-serif';
       if (peer.title) ctx.fillText(String(peer.title), layout.left + 24 * (layout.density || 1), layout.top + 38 * (layout.density || 1));
       ctx.font = Math.round(14 * (layout.density || 1)) + 'px sans-serif';
@@ -562,7 +576,7 @@ function dialogShow(peer) {
       peer.itemRects = [];
       if (peer.adapter) {
         ctx.textAlign = 'left';
-        ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+        ctx.fillStyle = theme.onSurfaceCss;
         const count = Number(peer.adapterCount) || 0;
         for (let index = 0; index < count; index += 1) {
           const top = layout.top + 20 + index * 44;
@@ -572,7 +586,7 @@ function dialogShow(peer) {
         }
       } else if (Array.isArray(peer.items)) {
         ctx.textAlign = 'left';
-        ctx.fillStyle = peer.night ? '#ffffff' : '#212121';
+        ctx.fillStyle = theme.onSurfaceCss;
         peer.items.forEach((item, index) => {
           const top = layout.top + 20 + index * 44;
           let prefix = '';
