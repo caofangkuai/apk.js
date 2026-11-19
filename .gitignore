@@ -198,3 +198,6 @@ dist/
 # Site build output (built by CI)
 site/
 .build-cache/
+
+# 生成的 Material 样例 APK（由 tools/build-textinput-apk.sh 产出）
+samples/textinput-dex.apk
