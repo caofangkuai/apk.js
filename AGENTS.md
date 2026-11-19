@@ -168,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -319,7 +319,9 @@ npm run site
 
 1. **elevation overlay**：暗色主题下已按 8 档 alpha 曲线叠加白色（`View.elevationOverlayColor` / `drawElevationOverlay`），用应用实际配置的 surface 色为基底；浅色主题不叠加。仍有差距：Material 允许应用自定义 overlay 颜色（`elevationOverlayColor` 属性），目前只支持主题自带的暗色分支。
 2. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
-3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**；TextInputLayout 在该 APK 中不存在实例。
+3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**。
+   - 已尝试自建 Material 样例 APK（`samples/textinput-src/` + `tools/build-textinput-apk.sh`）：工具链与依赖齐备、APK 能成功产出，但**构建管线尚不完整**。`androidx.appcompat.R$styleable` 并不在 AAR 里，它由 Gradle 逐库执行 `aapt2 link --static-lib` 按依赖拓扑生成；缺了它，AppCompat 的 `createSubDecor` 取不到 `AppCompatTheme` 数组，Activity 无法启动。
+   - 因此浮动标签的像素基线**仍无法建立**。两条可行路径：用 Gradle 构建一个带 TextInputLayout 的 APK，或补齐资源静态库管线（工作量在构建层，不在框架层）。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
 
 ### 建议接手顺序
