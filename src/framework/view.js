@@ -764,6 +764,35 @@ export class View {
     return this.elevation + this.translationZ;
   }
 
+  /**
+   * Material 的 elevation overlay：暗色主题下，视图像素颜色会随 elevation 提高而
+   * 叠加一层白色 alpha，用 8 档曲线（Material 3 的 overlay 值）表现层级。
+   * 浅色主题不叠加，保持背景原色。
+   */
+  elevationOverlayColor(baseColor, elevation = this.elevation) {
+    const color = baseColor >>> 0;
+    const z = Number(elevation) || 0;
+    if (z <= 0) return color;
+    const theme = this.$vm?.themeAttributes || this.vm?.themeAttributes || null;
+    if (!theme || theme.isLightTheme !== false) return color;
+    const levels = [0, 0.05, 0.07, 0.08, 0.09, 0.11, 0.12, 0.14, 0.15];
+    const step = Math.min(levels.length - 1, Math.max(1, Math.round(z / 1.5)));
+    const alpha = levels[step];
+    const blend = (channel) => Math.round(channel + (255 - channel) * alpha) & 0xff;
+    return (
+      ((blend((color >>> 24) & 0xff) << 24) |
+        (blend((color >>> 16) & 0xff) << 16) |
+        (blend((color >>> 8) & 0xff) << 8) |
+        blend(color & 0xff)) >>>
+      0
+    );
+  }
+
+  /** 当前视图绘制表面色时应使用的背景色（已按 elevation 叠加）。 */
+  surfaceColorWithElevation(baseColor) {
+    return this.elevationOverlayColor(baseColor, this.elevation);
+  }
+
   setSelected(selected) {
     const next = !!selected;
     if (this.selected === next) return this;
@@ -1579,12 +1608,44 @@ export class View {
       { left: 0, top: 0, right: width, bottom: height },
       options,
     );
-    if (drew) return;
+    if (drew) {
+      this.drawElevationOverlay(canvas, width, height);
+      return;
+    }
     if (bg.type === 'bitmap' && bg.bitmap?.image) {
       canvas.context.save();
       canvas.context.drawImage(bg.bitmap.image, 0, 0, width, height);
       canvas.context.restore();
+      this.drawElevationOverlay(canvas, width, height);
     }
+  }
+
+  /**
+   * 暗色主题下把 elevation 的白色叠层画到背景之上，让高层视图更亮。
+   * 只在有背景、且主题确实是暗色时生效；浅色主题与无背景视图直接跳过。
+   */
+  drawElevationOverlay(canvas, width, height) {
+    const elevation = Number(this.elevation) || 0;
+    if (elevation <= 0) return;
+    const theme = this.$vm?.themeAttributes || this.vm?.themeAttributes || null;
+    if (!theme || theme.isLightTheme !== false) return;
+    const overlay = this.elevationOverlayColor(0x00000000, elevation);
+    const alpha = (overlay >>> 24) / 255;
+    if (alpha <= 0) return;
+    const ctx = canvas.context;
+    const radius = this.outlineRadius?.() || 0;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffffff';
+    if (radius > 0) {
+      ctx.beginPath();
+      ctx.roundRect?.(0, 0, width, height, radius);
+      if (typeof ctx.roundRect !== 'function') ctx.rect(0, 0, width, height);
+      ctx.fill();
+    } else {
+      ctx.fillRect(0, 0, width, height);
+    }
+    ctx.restore();
   }
 
   drawForeground(canvas) {

@@ -317,7 +317,7 @@ npm run site
 
 ### 仍待修复的系统性 UI 差异
 
-1. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。
+1. **elevation overlay**：暗色主题下已按 8 档 alpha 曲线叠加白色（`View.elevationOverlayColor` / `drawElevationOverlay`），用应用实际配置的 surface 色为基底；浅色主题不叠加。仍有差距：Material 允许应用自定义 overlay 颜色（`elevationOverlayColor` 属性），目前只支持主题自带的暗色分支。
 2. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
 3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**；TextInputLayout 在该 APK 中不存在实例。
 4. **Dialog/AlertDialog**：已补 Material 圆角表面、阴影、neutral/negative/positive 三段按钮；复杂 AppCompat 主题仍建议真机对照。
