@@ -5270,9 +5270,19 @@ function vmShowChild(self, index) {
         'setStackFromBottom(Z)V': () => undefined,
         'setItemsCanFocus(Z)V': () => undefined,
         'setChoiceMode(I)V': (self, [mode]) => {
-          if (self.view) self.view.choiceMode = mode | 0;
+          if (!self.view) return;
+          self.view.choiceMode = mode | 0;
+          // CHOICE_MODE_NONE 会顺带清空已有选中项，和 AOSP 一致。
+          if ((mode | 0) === 0) self.view.clearChoices?.();
         },
         'getChoiceMode()I': (self) => self.view?.choiceMode ?? 0,
+        'clearChoices()V': (self) => { self.view?.clearChoices?.(); },
+        'setItemChecked(IZ)V': (self, [position, checked]) => {
+          self.view?.setItemChecked?.(position | 0, !!checked);
+        },
+        'isItemChecked(I)Z': (self, [position]) => (self.view?.isItemChecked?.(position | 0) ? 1 : 0),
+        'getCheckedItemPosition()I': (self) => self.view?.getCheckedItemPosition?.() ?? -1,
+        'getCheckedItemCount()I': (self) => self.view?.getCheckedItemCount?.() ?? 0,
         'setEmptyView(Landroid/view/View;)V': () => undefined,
         'getEmptyView()Landroid/view/View;': () => null,
         'getCount()I': (self) => self.view?.adapterCount?.() ?? 0,
@@ -5349,9 +5359,19 @@ function vmShowChild(self, index) {
         'setStackFromBottom(Z)V': () => undefined,
         'setItemsCanFocus(Z)V': () => undefined,
         'setChoiceMode(I)V': (self, [mode]) => {
-          if (self.view) self.view.choiceMode = mode | 0;
+          if (!self.view) return;
+          self.view.choiceMode = mode | 0;
+          // CHOICE_MODE_NONE 会顺带清空已有选中项，和 AOSP 一致。
+          if ((mode | 0) === 0) self.view.clearChoices?.();
         },
         'getChoiceMode()I': (self) => self.view?.choiceMode ?? 0,
+        'clearChoices()V': (self) => { self.view?.clearChoices?.(); },
+        'setItemChecked(IZ)V': (self, [position, checked]) => {
+          self.view?.setItemChecked?.(position | 0, !!checked);
+        },
+        'isItemChecked(I)Z': (self, [position]) => (self.view?.isItemChecked?.(position | 0) ? 1 : 0),
+        'getCheckedItemPosition()I': (self) => self.view?.getCheckedItemPosition?.() ?? -1,
+        'getCheckedItemCount()I': (self) => self.view?.getCheckedItemCount?.() ?? 0,
         'setEmptyView(Landroid/view/View;)V': () => undefined,
         'getEmptyView()Landroid/view/View;': () => null,
       },

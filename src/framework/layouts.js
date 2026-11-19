@@ -1069,6 +1069,8 @@ export class ListView extends ViewGroup {
     this.dividerColor = null;
     this.selector = null;
     this.choiceMode = 0;
+    // CHOICE_MODE_NONE/SINGLE/MULTIPLE 下的选中项集合（0 基索引）。
+    this.$checkedItems = new Set();
     this.$items = [];
     this.$itemCount = -1;
     this.$pressedItem = -1;
@@ -1667,6 +1669,9 @@ export class ListView extends ViewGroup {
     const vm = this.$vm || this.vm;
     const item = this.$lazy ? this.lazyItem(position | 0, Math.max(1, this.getWidth() - this.paddingLeft - this.paddingRight)) : this.$items[position | 0];
     if (!vm || !item) return false;
+    // 选择模式下点击要切换选中态；SINGLE 互斥，MULTIPLE 追加。
+    if (this.choiceMode === 1) this.setItemChecked(position | 0, !this.isItemChecked(position | 0));
+    else if (this.choiceMode === 2) this.setItemChecked(position | 0, !this.isItemChecked(position | 0));
     const listener = this.$onItemClickListener;
     if (listener) {
       let id = position | 0;
@@ -1690,6 +1695,43 @@ export class ListView extends ViewGroup {
       }
     }
     return false;
+  }
+
+  /** AOSP 语义：清空所有选中项。 */
+  clearChoices() {
+    if (!this.$checkedItems?.size) return;
+    this.$checkedItems.clear();
+    this.invalidate();
+  }
+
+  /** CHOICE_MODE_NONE 下忽略；SINGLE 只保留这一项；MULTIPLE 逐项维护。 */
+  setItemChecked(position, checked) {
+    const index = position | 0;
+    const mode = this.choiceMode | 0;
+    if (mode === 0 || index < 0) return;
+    if (mode === 1) {
+      this.$checkedItems.clear();
+      if (checked) this.$checkedItems.add(index);
+    } else if (checked) {
+      this.$checkedItems.add(index);
+    } else {
+      this.$checkedItems.delete(index);
+    }
+    this.invalidate();
+  }
+
+  isItemChecked(position) {
+    return this.$checkedItems?.has(position | 0) ?? false;
+  }
+
+  /** SINGLE 模式返回唯一选中项，没有则 -1；MULTIPLE/INVALID_POSITION 统一 -1。 */
+  getCheckedItemPosition() {
+    if ((this.choiceMode | 0) !== 1 || !this.$checkedItems?.size) return -1;
+    return [...this.$checkedItems][0];
+  }
+
+  getCheckedItemCount() {
+    return this.$checkedItems?.size ?? 0;
   }
 
   onTouchEvent(event) {
