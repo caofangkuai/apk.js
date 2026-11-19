@@ -9874,9 +9874,12 @@ function wrapColorDrawable(vm, color) {
   return object;
 }
 
-function makeTypedArrayPeer(vm, values, present = null) {
+function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
   const presentSet = present || values.__present || null;
-  const indexAttrId = (index) => [...values.keys()][index | 0];
+  // 有原始 attr 数组时按数组下标取 id；没有才回退到 Map 键序。
+  const indexAttrId = (index) => (attrIds
+    ? (attrIds[index | 0] === undefined ? undefined : (attrIds[index | 0] >>> 0))
+    : [...values.keys()][index | 0]);
   const isPresent = (index) => {
     if (!presentSet) return true;
     const attrId = indexAttrId(index);
@@ -10301,8 +10304,11 @@ function parseMenuResource(resources, resId, vm) {
 
 function createTypedArray(vm, attrs, styleId, attributeSet = null, defStyleAttr = 0) {
   const values = themeAttributeValues(vm, attrs, styleId, attributeSet, defStyleAttr);
+  const ids = Array.isArray(attrs) ? attrs : (attrs?.$data || []);
   const object = vm.allocateRawObject('Landroid/content/res/TypedArray;');
-  object.$peer = makeTypedArrayPeer(vm, values);
+  // TypedArray 的访问器收的是 attr 数组下标，不是 attr id。
+  // 必须把原始数组传下去，否则缺失的 attr 会让下标错位。
+  object.$peer = makeTypedArrayPeer(vm, values, null, ids);
   return object;
 }
 
