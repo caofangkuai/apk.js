@@ -259,6 +259,10 @@ export class ClassRegistry {
         'Ljava/lang/Object;'
       );
     }
+    // $nativeClass 表示“这个对象属于哪个宿主类”。java.lang.Class 的实例
+    // 用 $descriptor 描述它“指向哪个类”，两者不能混为一谈：
+    // 否则 getName() 之类会被派发到被描述的那个类上，返回 null。
+    if (typeof value === 'object' && value.$nativeClass) return value.$nativeClass;
     if (typeof value === 'object' && value.$descriptor) return value.$descriptor;
     if (typeof value === 'object' && value.constructor?.$descriptor) return value.constructor.$descriptor;
     return 'Ljava/lang/Object;';

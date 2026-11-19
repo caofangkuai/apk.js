@@ -406,7 +406,8 @@ export class JavaVM {
   getClassObject(descriptor) {
     if (!this.classObjects) this.classObjects = new Map();
     if (!this.classObjects.has(descriptor)) {
-      const peer = { $descriptor: descriptor, $name: descriptorToName(descriptor) };
+      // Class 对象描述的是“另一个类”，自身类型固定是 java.lang.Class。
+      const peer = { $descriptor: descriptor, $nativeClass: 'Ljava/lang/Class;', $name: descriptorToName(descriptor) };
       this.classObjects.set(descriptor, peer);
     }
     return this.classObjects.get(descriptor);
