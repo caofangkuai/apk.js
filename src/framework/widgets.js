@@ -1048,12 +1048,14 @@ export class ProgressBar extends View {
     if (next === this.progress) return this;
     // 从当前显示值出发做插值；不确定进度条没有跳变问题。
     const start = this.visualProgress();
+    const first = this.$visualProgress === null || this.$visualProgress === undefined;
     this.progress = next;
-    if (!this.indeterminate && start !== next) {
-      this.$progressAnim = { from: start, to: next, start: Date.now() };
-    } else {
+    // 首次设置（还没画过）直接生效：否则控件一出现就是 0 宽。
+    if (first || this.indeterminate || start === next) {
       this.$progressAnim = null;
       this.$visualProgress = next;
+    } else {
+      this.$progressAnim = { from: start, to: next, start: Date.now() };
     }
     this.invalidate();
     return this;

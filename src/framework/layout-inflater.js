@@ -341,6 +341,24 @@ export class LayoutInflater {
 
   mountChild(parent, child, node) {
     this.applyParentLayoutParams(child, node, parent);
+    // 子类可能覆写了 addView（例如用 addView 拦截 EditText 建立内部关联）。
+    // 直接调宿主 parent.addView 会绕开这些覆写，导致整条初始化链路失效。
+    const vm = this.context?.vm || this.context?.$vm || this.vm || null;
+    const parentObject = parent?.$javaObject;
+    const childObject = child?.$javaObject;
+    if (vm && parentObject && childObject) {
+      const dispatch = (proto, args) => {
+        try {
+          vm.invokeByName('addView', proto, parentObject, args);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const params = child.$layoutParamsObject || null;
+      if (dispatch('(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V', [childObject, params])) return;
+      if (dispatch('(Landroid/view/View;)V', [childObject])) return;
+    }
     parent.addView(child);
   }
 
