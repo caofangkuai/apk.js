@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TextInput 样例</string>
+    <string name="hint_name">姓名</string>
+    <string name="hint_email">邮箱</string>
+    <string name="label_filled">已填写</string>
+    <string name="label_empty">未填写</string>
+</resources>

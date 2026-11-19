@@ -490,6 +490,22 @@ function dialogRoundRect(ctx, x, y, width, height, radius) {
  * Dialog 的配色一律取自当前主题，而不是写死深浅两套色值。
  * 之前的 peer.night 从未被赋值，暗色主题下对话框永远是白底。
  */
+/** 读取清单属性并归一成字符串：字符串直接用，对象取 reference/stringValue。 */
+function manifestAttrText(node, ...names) {
+  for (const name of names) {
+    const raw = node?.getAttribute?.(name);
+    if (raw === null || raw === undefined || raw === '') continue;
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'number') return String(raw);
+    if (typeof raw === 'object') {
+      if (typeof raw.stringValue === 'string') return raw.stringValue;
+      if (raw.value !== undefined && raw.value !== null) return String(raw.value);
+      if (raw.reference !== undefined) return String(raw.reference);
+    }
+  }
+  return '';
+}
+
 function dialogTheme(peer) {
   const theme = peer.vm?.themeAttributes || {};
   const night = theme.isLightTheme === false;
@@ -1924,6 +1940,8 @@ function buildFrameworkDefinitions(vm) {
         'getQueue()Landroid/os/MessageQueue;': (self) => self.queue,
         'getThread()Ljava/lang/Thread;': (self, _args, vm) => mainThreadObject(vm),
         'isCurrentThread()Z': () => true,
+        // AppCompat / Material 启动期会调用 isMainThread() 判断是否已在主线程。
+        'isMainThread()Z': () => true,
         'quit()V': (self) => self.quit?.(),
         'quitSafely()V': (self) => self.quit?.(),
       },
@@ -7242,6 +7260,7 @@ function vmShowChild(self, index) {
         }
       },
       methods: {
+        // 清单属性可能是字符串，也可能是 {reference}/TypedValue 对象，统一归一成字符串再比较。
         'getActivityInfo(Landroid/content/ComponentName;I)Landroid/content/pm/ActivityInfo;': (self, [component], vm) => {
           const peer = component?.$peer;
           const className = peer?.cls || '';
@@ -7249,7 +7268,7 @@ function vmShowChild(self, index) {
           const application = manifest?.findChild?.('application');
           const activities = application?.findAll?.('activity') || [];
           const target = activities.find((activity) => {
-            const rawName = activity.getAttribute('android:name') || activity.getAttribute('name') || '';
+            const rawName = manifestAttrText(activity, 'android:name', 'name');
             let fullName = rawName;
             if (rawName.startsWith('.')) fullName = `${peer?.pkg || ''}${rawName}`;
             else if (rawName && !rawName.includes('.')) fullName = `${peer?.pkg || ''}.${rawName}`;
@@ -7259,10 +7278,10 @@ function vmShowChild(self, index) {
           const info = vm.allocateRawObject('Landroid/content/pm/ActivityInfo;');
           const infoPeer = { vm, constructor: { $descriptor: 'Landroid/content/pm/ActivityInfo;' } };
           info.$peer = infoPeer;
-          infoPeer.name = target.getAttribute('android:name') || target.getAttribute('name') || '';
+          infoPeer.name = manifestAttrText(target, 'android:name', 'name');
           infoPeer.packageName = peer?.pkg || vm.packageName || '';
           infoPeer.parentActivityName = target.getAttribute('android:parentActivityName');
-          infoPeer.exported = (target.getAttribute('android:exported') || '').toLowerCase() === 'true';
+          infoPeer.exported = manifestAttrText(target, 'android:exported').toLowerCase() === 'true';
           const themeRaw = target.getAttribute('android:theme');
           if (themeRaw) {
             const resolved = vm.resources.resolveAttribute?.(themeRaw);
@@ -9574,6 +9593,14 @@ const FRAMEWORK_ATTR_KEYS = new Map([
   [0x0101009b, 'textColorLink'],
   [0x01010095, 'textSize'],
   [0x01010098, 'textColor'],
+  // 窗口类属性：系统包的 attr 条目不在 APK 的 resources.arsc 里，
+  // 主题样式引用 0x0101xxxx 时只能靠这张内置表还原语义名。
+  [0x01010054, 'windowBackground'],
+  [0x01010055, 'windowActionBar'],
+  [0x01010056, 'windowNoTitle'],
+  [0x0101005a, 'windowIsFloating'],
+  [0x0101020d, 'windowMinWidthMajor'],
+  [0x0101020e, 'windowMinWidthMinor'],
 ]);
 
 function resolveStyleColor(vm, raw) {

@@ -197,3 +197,4 @@ dist/
 
 # Site build output (built by CI)
 site/
+.build-cache/
