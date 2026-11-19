@@ -2005,7 +2005,8 @@ export class ViewGroup extends View {
     if (!delta) return;
     // 容器平移子项来滚动时，扫描到的子项可能只是可见窗口的一部分，
     // 因此滚动量要单独记在容器上，用于 getScrollY 与后续命中测试。
-    this.scrollY = Math.max(0, (this.scrollY | 0) + delta);
+    // 子项上移（delta 为负）等价于容器向下滚动，所以取反累加。
+    this.scrollY = Math.max(0, (this.scrollY | 0) - delta);
     for (const child of this.children || []) {
       child.top += delta;
       child.bottom += delta;

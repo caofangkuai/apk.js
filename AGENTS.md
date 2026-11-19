@@ -168,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -319,7 +319,7 @@ npm run site
 
 1. **elevation overlay**：深色默认主题色已接入；应用显式配色不会自动转换。
 2. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
-3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行，host 提供 offset/translation/nested scroll；浮动标签和 collapse 尚未做像素级验证。
+3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**；TextInputLayout 在该 APK 中不存在实例。
 4. **Dialog/AlertDialog**：已补 Material 圆角表面、阴影、neutral/negative/positive 三段按钮；复杂 AppCompat 主题仍建议真机对照。
 
 ### 建议接手顺序
