@@ -7445,6 +7445,12 @@ function vmShowChild(self, index) {
           if (value === null || value === undefined) return true;
           return jsString(value).length === 0;
         },
+        // Material 的文本比较大量走 TextUtils.equals，缺了它标签永远判为不等。
+        'equals(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z': (_self, [a, b]) => {
+          const empty = (v) => v === null || v === undefined;
+          if (empty(a) || empty(b)) return empty(a) && empty(b);
+          return jsString(a) === jsString(b);
+        },
         'join(Ljava/lang/CharSequence;Ljava/lang/Iterable;)Ljava/lang/String;': (_self, [separator, values], vm) => {
           let items = values?.items || (Array.isArray(values) ? values : null);
           if (!items && vm && values) {
@@ -9752,11 +9758,16 @@ function resolveThemeStyleId(vm, defStyleAttr) {
   const attrId = (defStyleAttr >>> 0) & 0xffffffff;
   const key = table.getEntry(attrId)?.key;
   if (!key) return 0;
-  const value = themeStore(vm)[key];
+  const store = themeStore(vm);
+  // 优先用加载主题时记下的原始引用 id：样式属性的值常被解析成 bag
+  // （{parent, items}），直接读 value.parent 会拿到父样式而不是它自己。
+  const reference = store.$attrReferences?.[key];
+  if (typeof reference === 'number') return reference >>> 0;
+  const value = store[key];
   if (typeof value === 'number') return value >>> 0;
   if (value && typeof value === 'object') {
-    if (typeof value.parent === 'number') return value.parent >>> 0;
     if (typeof value.reference === 'number') return value.reference >>> 0;
+    if (typeof value.parent === 'number') return value.parent >>> 0;
   }
   return 0;
 }
@@ -9838,14 +9849,17 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
       present.add(id);
       continue;
     }
-    if (styleAttributes && styleAttributes.has(id)) {
-      const raw = themedStyledValue(vm, styleAttributes.get(id));
+    // 优先级与 AOSP 一致：defStyleAttr（控件自己的 style 属性）高于
+    // defStyleRes。之前两者颠倒，控件会读到 defStyleRes 里 boxBackgroundMode=0
+    // （none），背景因此永远不创建。
+    if (defStyleAttributes && defStyleAttributes.has(id)) {
+      const raw = themedStyledValue(vm, defStyleAttributes.get(id));
       result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
       present.add(id);
       continue;
     }
-    if (defStyleAttributes && defStyleAttributes.has(id)) {
-      const raw = themedStyledValue(vm, defStyleAttributes.get(id));
+    if (styleAttributes && styleAttributes.has(id)) {
+      const raw = themedStyledValue(vm, styleAttributes.get(id));
       result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
       present.add(id);
       continue;
@@ -9857,6 +9871,12 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
     if (styleAttrId || defStyleAttrId) {
       const source = styleAttrId ? styleAttributes : defStyleAttributes;
       const raw = source.get(styleAttrId || defStyleAttrId);
+      result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
+      present.add(id);
+    } else if (key && !Object.prototype.hasOwnProperty.call(store, key)
+      && referencedStyleValue(table, store, key) !== undefined) {
+      // 主题没有直接声明，但被引用的样式里有：取值同 themedStyledValue。
+      const raw = themedStyledValue(vm, referencedStyleValue(table, store, key));
       result.set(id, typeof raw === 'string' ? table.resolve?.(raw) ?? raw : raw);
       present.add(id);
     } else if (key && Object.prototype.hasOwnProperty.call(store, key)) {
@@ -9880,6 +9900,25 @@ function lookupStyleAttributeId(table, styleAttributes, key) {
     if (entry?.key === key) return attrId >>> 0;
   }
   return 0;
+}
+
+/**
+ * 控件的属性往往来自被主题引用的样式（例如 textInputStyle 指向的 style），
+ * 而不是主题自身声明的属性。loadThemeFromStyleId 会把这类引用记到
+ * store.$attrReferences，这里顺着它把引用样式里的属性再查一遍。
+ */
+function referencedStyleValue(table, store, key) {
+  if (!key || !store?.$attrReferences) return undefined;
+  const seen = new Set();
+  for (const refId of Object.values(store.$attrReferences)) {
+    if (typeof refId !== 'number' || seen.has(refId)) continue;
+    seen.add(refId);
+    const attributes = table?.getStyleAttributes?.(refId >>> 0);
+    if (!attributes || !attributes.size) continue;
+    const attrId = lookupStyleAttributeId(table, attributes, key);
+    if (attrId) return attributes.get(attrId);
+  }
+  return undefined;
 }
 
 function wrapColorDrawable(vm, color) {
