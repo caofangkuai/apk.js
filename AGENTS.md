@@ -170,10 +170,19 @@ npm run site
 - 推送认证注意：GitHub 不接受 `用户名:token` 形式（会返回 401），要用 `x-access-token:token` 作为凭据，或写进 `~/.git-credentials` 的 `https://x-access-token:<token>@github.com` 行配合 `git config credential.helper store`。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables、compat。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables、scrollbars、compat。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 - Via 浏览器（`/tmp/via.apk`）：能渲染隐私弹窗、完成 Firebase 组件图构建，止于 `MissingDependencyException`；下一步要在 `PackageManager` / manifest meta-data 层补 `ComponentRegistrar` 发现，才能继续推进。
+
+### 本轮已完成（2026-11-21 第十三轮：AOSP 滚动条绘制）
+
+1. **滚动条**：`View.drawForeground` 现在按 AOSP `onDrawForeground` 的顺序在绘制前景后调用 `drawScrollBars`。滚动条宽度取 4dp（`scrollBarSize` 可覆盖），垂直条贴右内边缘（`verticalScrollBarPosition=1` 时贴左），track 为 `height - paddingTop - paddingBottom`；thumb 长度 = `max(24dp, track * extent / range)`，位置按 `offset / (range - extent)` 比例滑动。
+2. **可见性时序**：与 AOSP 一致——初始不显示，滚动时 `awakenScrollBars()` 把 `$scrollBarFadeStart` 置为 `now + 300ms`，之后 250ms 线性淡出；淡出期间通过 `invalidate()` 继续出帧。`setScrollbarFadingEnabled(false)` 可常显。
+3. **度量来源**：`scrollBarMetric()` 优先调用 DEX 覆写的 `compute*ScrollRange/Offset/Extent`，否则回退宿主实现。宿主 `ListView` 取 `$contentHeight` / `scrollY` / 视口高度，`ScrollView` 取子项高度，`HorizontalScrollView` 取 `scrollRangeX + 宽度`（并默认关闭垂直条）；基类 `View` 保持 AOSP 默认（range = extent = 自身尺寸、offset = 0）。
+4. **API 补全**：`compat.js` 的 `VIEW_METHODS` 补 `set/isVerticalScrollBarEnabled`、`set/isHorizontalScrollBarEnabled`、`set/getScrollBarStyle`、`set/getScrollBarSize`、`set/isScrollbarFadingEnabled`、`set/getScrollBarFadeDuration`、`set/getScrollBarDefaultDelayBeforeFade`、`awakenScrollBars` 三种重载、`compute*Scroll*` 六件套、`getVerticalScrollbarWidth/Height`。`AbsListView` 里原先吞掉 `setVerticalScrollBarEnabled` 的空实现改为真正写回 view。
+5. **滚动唤醒**：`View.scrollTo`、`ListView.applyScroll`、`ScrollView.scrollTo`、`HorizontalScrollView.scrollTo` 在位置变化时唤醒滚动条。
+6. **回归**：新增 `tests/scrollbars.mjs`（不可滚动不出条、offset 移动 thumb、水平条、淡出、关闭开关、drawForeground 联动、各容器度量），已并入 `test:all`。DeviceInfoHW 静态渲染与上一轮基线像素完全一致（0 changed），滚动 hello-dex 的 ScrollView 后右边缘出现 26% 黑 thumb（像素 184,185,185），验证通过。
 
 ### 本轮已完成（2026-11-21 第十二轮：集合/反射语义修正与 AOSP 绘制管线对照）
 
@@ -196,13 +205,13 @@ npm run site
 | `drawBackground()` | `drawBackground()` + `drawElevationOverlay()` | 一致（overlay 仅在暗色/主题启用时叠加） |
 | `onDraw()` | 宿主 `onDraw`，DEX 覆写优先 | 一致 |
 | `dispatchDraw()` | `dispatchDraw()`：`clipChildren` → `clipToPadding` → 滚动平移 → 按 Z 排序 → 跳过 GONE/INVISIBLE | 与 `ViewGroup.dispatchDraw` 一致 |
-| `onDrawForeground()` | `drawForeground()`（前景 drawable + tint） | 前景一致；滚动条/默认焦点高亮仍未绘制 |
+| `onDrawForeground()` | `drawForeground()`（前景 drawable + tint + `drawScrollBars`） | 前景与滚动条一致（4dp 宽、最小 24dp、滚动后 300ms 延迟 + 250ms 淡出）；`defaultFocusHighlight` 未绘制（模拟器不建模触摸模式） |
 | `alpha` / `translation` | `canvas.translate` + `globalAlpha` | 一致 |
 | DEX 覆写 `draw()` 的 super 调用 | `$dexDrawActive` 防止二次平移 | 与 AOSP「先定位画布再调用 super」一致 |
 
 测量/布局侧：`MeasureSpec` 三态、`MATCH_PARENT` 二趟测量、`LinearLayout` 权重递减分配与 baseline 对齐、`FrameLayout` 二趟测量都已按 AOSP 实现（见第五轮记录）。已知剩余差距：
 
-1. 滚动条（`scrollbars` / `scrollbarThumb`）与 `defaultFocusHighlight` 未绘制，AOSP 在 `onDrawForeground` 末段绘制。
+1. `defaultFocusHighlight` 未绘制；AOSP 只在非触摸模式下绘制，本模拟器的交互都由触摸驱动，暂不实现以免凭空多出高亮框。
 2. 阴影由子视图自绘而非父级统一合成，重叠区域可能比原生更暗。
 3. `View.draw` 未处理 `matrix` 与 `clipToOutline` 之外的硬件层（`setLayerType`）。
 4. `elevation overlay` 目前对所有背景生效，Material 只在背景色等于 `colorSurface` 时叠加。

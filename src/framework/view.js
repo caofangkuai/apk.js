@@ -244,6 +244,19 @@ export class View {
     this.translationZ = 0;
     this.scrollX = 0;
     this.scrollY = 0;
+    // 滚动条：与 AOSP 一致，默认两个方向都允许绘制，但只有 range > extent 时才出现。
+    this.verticalScrollBarEnabled = true;
+    this.horizontalScrollBarEnabled = true;
+    this.scrollBarStyle = 0;
+    this.scrollBarSize = 0;
+    this.scrollBarFadingEnabled = true;
+    this.scrollBarFadeDuration = 250;
+    this.scrollBarDefaultDelayBeforeFade = 300;
+    this.verticalScrollBarPosition = 0;
+    this.scrollBarThumbVertical = null;
+    this.scrollBarThumbHorizontal = null;
+    this.$scrollBarFadeStart = 0;
+    this.$scrollBarAlpha = 0;
     this.selected = false;
     this.activated = false;
     this.pressed = false;
@@ -683,6 +696,7 @@ export class View {
     if (this.scrollX !== x || this.scrollY !== y) {
       this.scrollX = x | 0;
       this.scrollY = y | 0;
+      this.awakenScrollBars();
       this.invalidate();
     }
     return this;
@@ -690,6 +704,249 @@ export class View {
 
   scrollBy(x, y) {
     return this.scrollTo(this.scrollX + x, this.scrollY + y);
+  }
+
+  isVerticalScrollBarEnabled() {
+    return this.verticalScrollBarEnabled !== false;
+  }
+
+  setVerticalScrollBarEnabled(enabled) {
+    this.verticalScrollBarEnabled = !!enabled;
+    this.invalidate();
+    return this;
+  }
+
+  isHorizontalScrollBarEnabled() {
+    return this.horizontalScrollBarEnabled !== false;
+  }
+
+  setHorizontalScrollBarEnabled(enabled) {
+    this.horizontalScrollBarEnabled = !!enabled;
+    this.invalidate();
+    return this;
+  }
+
+  setScrollBarStyle(style) {
+    this.scrollBarStyle = style | 0;
+    this.invalidate();
+    return this;
+  }
+
+  getScrollBarStyle() {
+    return this.scrollBarStyle | 0;
+  }
+
+  setScrollBarSize(size) {
+    this.scrollBarSize = size | 0;
+    this.invalidate();
+    return this;
+  }
+
+  getScrollBarSize() {
+    return this.scrollBarSize | 0;
+  }
+
+  setScrollbarFadingEnabled(enabled) {
+    this.scrollBarFadingEnabled = !!enabled;
+    if (!this.scrollBarFadingEnabled) this.$scrollBarAlpha = 1;
+    this.invalidate();
+    return this;
+  }
+
+  isScrollbarFadingEnabled() {
+    return this.scrollBarFadingEnabled !== false;
+  }
+
+  setScrollBarFadeDuration(duration) {
+    this.scrollBarFadeDuration = duration | 0;
+    return this;
+  }
+
+  getScrollBarFadeDuration() {
+    return this.scrollBarFadeDuration | 0;
+  }
+
+  setScrollBarDefaultDelayBeforeFade(delay) {
+    this.scrollBarDefaultDelayBeforeFade = delay | 0;
+    return this;
+  }
+
+  getScrollBarDefaultDelayBeforeFade() {
+    return this.scrollBarDefaultDelayBeforeFade | 0;
+  }
+
+  setVerticalScrollbarPosition(position) {
+    this.verticalScrollBarPosition = position | 0;
+    return this;
+  }
+
+  getVerticalScrollbarPosition() {
+    return this.verticalScrollBarPosition | 0;
+  }
+
+  getVerticalScrollbarWidth() {
+    return this.isVerticalScrollBarEnabled() ? this.scrollBarThickness() : 0;
+  }
+
+  getHorizontalScrollbarHeight() {
+    return this.isHorizontalScrollBarEnabled() ? this.scrollBarThickness() : 0;
+  }
+
+  /** 进入「滚动中」状态：AOSP 在滚动后延迟一段时间再淡出滚动条。 */
+  awakenScrollBars(startDelay = this.scrollBarDefaultDelayBeforeFade) {
+    this.$scrollBarAlpha = 1;
+    this.$scrollBarFadeStart = Date.now() + (Number(startDelay) || 0);
+    this.invalidate();
+    return true;
+  }
+
+  computeVerticalScrollRange() {
+    return this.getHeight();
+  }
+
+  computeVerticalScrollOffset() {
+    return 0;
+  }
+
+  computeVerticalScrollExtent() {
+    return this.getHeight();
+  }
+
+  computeHorizontalScrollRange() {
+    return this.getWidth();
+  }
+
+  computeHorizontalScrollOffset() {
+    return 0;
+  }
+
+  computeHorizontalScrollExtent() {
+    return this.getWidth();
+  }
+
+  scrollBarThickness() {
+    const configured = Number(this.scrollBarSize) || 0;
+    return Math.max(2, Math.round(configured > 0 ? configured : 4 * this.getDensity()));
+  }
+
+  /**
+   * 子类（包括 DEX 里覆写的实现）可能改写 compute*Scroll*，优先取 DEX 结果，
+   * 否则回退到宿主实现。
+   */
+  scrollBarMetric(name, fallback) {
+    const vm = this.vm || this.$vm;
+    const descriptor = this.$descriptor;
+    const object = this.$javaObject;
+    if (vm && descriptor && object && typeof vm.findVirtual === 'function') {
+      try {
+        const resolved = vm.findVirtual(descriptor, name, '()I');
+        if (resolved && resolved.kind === 'dex') {
+          const value = Number(vm.invoke(
+            { classDesc: descriptor, name, proto: resolved.method.proto },
+            object,
+            [],
+            'virtual',
+          ));
+          if (Number.isFinite(value)) return value | 0;
+        }
+      } catch (_error) {
+        // DEX 抛错时退回宿主实现
+      }
+    }
+    return fallback;
+  }
+
+  /** 滚动条淡出进度：0 表示不可见，1 表示完全不透明。 */
+  scrollBarAlpha() {
+    if (!this.scrollBarFadingEnabled) return this.$scrollBarAlpha > 0 ? 1 : 0;
+    const fadeStart = Number(this.$scrollBarFadeStart) || 0;
+    if (!fadeStart) return 0;
+    const remaining = fadeStart - Date.now();
+    if (remaining > 0) return 1;
+    const duration = Math.max(1, this.scrollBarFadeDuration | 0);
+    const elapsed = -remaining;
+    if (elapsed >= duration) {
+      this.$scrollBarAlpha = 0;
+      this.$scrollBarFadeStart = 0;
+      return 0;
+    }
+    this.$scrollBarAlpha = 1 - elapsed / duration;
+    return this.$scrollBarAlpha;
+  }
+
+  scrollBarColor() {
+    const vm = this.vm || this.$vm;
+    const theme = vm?.themeAttributes || null;
+    const background = theme && typeof theme.colorBackground === 'number' ? theme.colorBackground >>> 0 : null;
+    if (background === null) return 'rgba(0, 0, 0, 0.26)';
+    const red = (background >>> 16) & 0xff;
+    const green = (background >>> 8) & 0xff;
+    const blue = background & 0xff;
+    const luminance = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+    return luminance < 0.5 ? 'rgba(255, 255, 255, 0.32)' : 'rgba(0, 0, 0, 0.26)';
+  }
+
+  /** 对照 AOSP View.onDrawScrollBars：滚动条宽度 4dp，thumb 最小长度 24dp。 */
+  drawScrollBars(canvas) {
+    const alpha = this.scrollBarAlpha();
+    if (alpha <= 0) return;
+    const width = this.getWidth();
+    const height = this.getHeight();
+    if (width <= 0 || height <= 0) return;
+    const ctx = canvas?.context;
+    if (!ctx) return;
+    const thickness = this.scrollBarThickness();
+    const density = this.getDensity();
+    const fillThumb = (left, top, thumbWidth, thumbHeight) => {
+      const radius = Math.min(thumbWidth, thumbHeight) / 2;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(left, top, thumbWidth, thumbHeight, radius);
+      } else {
+        ctx.rect(left, top, thumbWidth, thumbHeight);
+      }
+      ctx.fill();
+    };
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = this.scrollBarColor();
+    if (this.isVerticalScrollBarEnabled()) {
+      const range = this.scrollBarMetric('computeVerticalScrollRange', this.computeVerticalScrollRange());
+      const offset = this.scrollBarMetric('computeVerticalScrollOffset', this.computeVerticalScrollOffset());
+      const extent = this.scrollBarMetric('computeVerticalScrollExtent', this.computeVerticalScrollExtent());
+      const trackTop = this.paddingTop;
+      const trackLength = height - this.paddingBottom - trackTop;
+      if (range > extent && extent > 0 && trackLength > 0) {
+        const minLength = Math.min(trackLength, Math.max(thickness, Math.round(24 * density)));
+        const thumbLength = Math.min(trackLength, Math.max(minLength, Math.round(trackLength * extent / range)));
+        const maxOffset = range - extent;
+        const ratio = maxOffset > 0 ? Math.min(1, Math.max(0, offset / maxOffset)) : 0;
+        const thumbTop = trackTop + Math.round((trackLength - thumbLength) * ratio);
+        const left = this.verticalScrollBarPosition === 1
+          ? this.paddingLeft
+          : width - this.paddingRight - thickness;
+        fillThumb(left, thumbTop, thickness, thumbLength);
+      }
+    }
+    if (this.isHorizontalScrollBarEnabled()) {
+      const range = this.scrollBarMetric('computeHorizontalScrollRange', this.computeHorizontalScrollRange());
+      const offset = this.scrollBarMetric('computeHorizontalScrollOffset', this.computeHorizontalScrollOffset());
+      const extent = this.scrollBarMetric('computeHorizontalScrollExtent', this.computeHorizontalScrollExtent());
+      const trackLeft = this.paddingLeft;
+      const trackLength = width - this.paddingRight - trackLeft;
+      if (range > extent && extent > 0 && trackLength > 0) {
+        const minLength = Math.min(trackLength, Math.max(thickness, Math.round(24 * density)));
+        const thumbLength = Math.min(trackLength, Math.max(minLength, Math.round(trackLength * extent / range)));
+        const maxOffset = range - extent;
+        const ratio = maxOffset > 0 ? Math.min(1, Math.max(0, offset / maxOffset)) : 0;
+        const thumbLeft = trackLeft + Math.round((trackLength - thumbLength) * ratio);
+        const top = height - this.paddingBottom - thickness;
+        fillThumb(thumbLeft, top, thumbLength, thickness);
+      }
+    }
+    ctx.restore();
+    // 淡出过程中持续出帧，否则只画一帧就停住。
+    if (alpha > 0 && alpha < 1) this.invalidate();
   }
 
   setScaleX(value) {
@@ -1710,14 +1967,17 @@ export class View {
 
   drawForeground(canvas) {
     const fg = this.foreground;
-    if (!fg) return;
-    const width = this.getWidth();
-    const height = this.getHeight();
-    if (width <= 0 || height <= 0) return;
-    const options = this.drawableOptions({
-      tint: this.foregroundTintList ?? null,
-    });
-    drawDrawable(canvas.context, fg, { left: 0, top: 0, right: width, bottom: height }, options);
+    if (fg) {
+      const width = this.getWidth();
+      const height = this.getHeight();
+      if (width > 0 && height > 0) {
+        const options = this.drawableOptions({
+          tint: this.foregroundTintList ?? null,
+        });
+        drawDrawable(canvas.context, fg, { left: 0, top: 0, right: width, bottom: height }, options);
+      }
+    }
+    this.drawScrollBars(canvas);
   }
 
   drawableOptions(extra = {}) {

@@ -1254,6 +1254,7 @@ export class ScrollView extends View {
     this.scrollX = 0;
     this.scrollY = 0;
     this.scrollRange = 0;
+    this.horizontalScrollBarEnabled = false;
   }
 
   addView(child) {
@@ -1296,9 +1297,27 @@ export class ScrollView extends View {
   }
 
   scrollTo(x, y) {
+    const nextY = Math.max(0, Math.min(this.scrollRange, y));
+    const changed = nextY !== this.scrollY;
     this.scrollX = x;
-    this.scrollY = Math.max(0, Math.min(this.scrollRange, y));
+    this.scrollY = nextY;
+    if (changed) this.awakenScrollBars();
     this.invalidate();
+  }
+
+  computeVerticalScrollRange() {
+    const content = this.child
+      ? this.paddingTop + this.child.getMeasuredHeight() + this.paddingBottom
+      : 0;
+    return Math.max(content, this.getHeight());
+  }
+
+  computeVerticalScrollOffset() {
+    return this.scrollY | 0;
+  }
+
+  computeVerticalScrollExtent() {
+    return Math.max(0, this.getHeight() - this.paddingTop - this.paddingBottom);
   }
 
   findViewById(id) {

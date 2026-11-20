@@ -115,6 +115,7 @@ export class HorizontalScrollView extends FrameLayout {
     this.scrollY = 0;
     this.scrollRangeX = 0;
     this.fillViewport = false;
+    this.verticalScrollBarEnabled = false;
   }
 
   setFillViewport(value) {
@@ -145,9 +146,24 @@ export class HorizontalScrollView extends FrameLayout {
   }
 
   scrollTo(x, y) {
-    this.scrollX = Math.max(0, Math.min(this.scrollRangeX, x));
+    const nextX = Math.max(0, Math.min(this.scrollRangeX, x));
+    const changed = nextX !== this.scrollX;
+    this.scrollX = nextX;
     this.scrollY = y;
+    if (changed) this.awakenScrollBars();
     this.invalidate();
+  }
+
+  computeHorizontalScrollRange() {
+    return Math.max(this.scrollRangeX + this.getWidth(), this.getWidth());
+  }
+
+  computeHorizontalScrollOffset() {
+    return this.scrollX | 0;
+  }
+
+  computeHorizontalScrollExtent() {
+    return Math.max(0, this.getWidth() - this.paddingLeft - this.paddingRight);
   }
 
   dispatchDraw(canvas) {
@@ -1084,6 +1100,19 @@ export class ListView extends ViewGroup {
     this.$rowHeight = 0;
     this.$lazyHeights = new Map();
     this.$lazyHeightDelta = 0;
+    this.horizontalScrollBarEnabled = false;
+  }
+
+  computeVerticalScrollRange() {
+    return Math.max(this.$contentHeight | 0, this.getHeight());
+  }
+
+  computeVerticalScrollOffset() {
+    return this.scrollY | 0;
+  }
+
+  computeVerticalScrollExtent() {
+    return Math.max(0, this.getHeight() - this.paddingTop - this.paddingBottom);
   }
 
   setDivider(drawable) {
@@ -1531,7 +1560,10 @@ export class ListView extends ViewGroup {
     const previous = this.scrollY | 0;
     this.scrollY = next;
     this.invalidate();
-    if (next !== previous) this.dispatchScroll();
+    if (next !== previous) {
+      this.awakenScrollBars();
+      this.dispatchScroll();
+    }
     return next;
   }
 
