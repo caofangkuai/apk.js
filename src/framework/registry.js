@@ -195,6 +195,17 @@ function systemProperty(key) {
   return '';
 }
 
+/** 深度优先查找当前持有焦点的子视图（对应 AOSP 的 mFocused 链路）。 */
+function findFocusedDescendant(view) {
+  if (!view) return null;
+  if (view.focused === true) return view;
+  for (const child of view.children || []) {
+    const found = findFocusedDescendant(child);
+    if (found) return found;
+  }
+  return view.child ? findFocusedDescendant(view.child) : null;
+}
+
 const SHELL_LS_LINE = (name) => `lrwxrwxrwx 1 root root 16 2026-01-01 00:00 ${name} -> /dev/block/mmcblk0p1`;
 
 function runShellCommand(command) {
@@ -1344,6 +1355,85 @@ export function buildFrameworkDefinitions(vm) {
         'onBackPressed()V': (self) => {
           self.finish?.();
         },
+        'getCurrentFocus()Landroid/view/View;': (self) => {
+          const focused = findFocusedDescendant(self.decorView);
+          return focused ? viewObject(self.vm, focused) : null;
+        },
+        'attachBaseContext(Landroid/content/Context;)V': (self, [context]) => {
+          self.base = context ?? null;
+        },
+        'getParent()Landroid/app/Activity;': () => null,
+        'isChild()Z': () => false,
+        'getLoaderManager()Landroid/app/LoaderManager;': () => null,
+        'getAutofillClient()Landroid/view/autofill/AutofillManager$AutofillClient;': () => null,
+        'getContentCaptureClient()Landroid/view/contentcapture/ContentCaptureManager$ContentCaptureClient;': () => null,
+        'getSplashScreen()Landroid/window/SplashScreen;': () => null,
+        'setSplashScreenView(Landroid/window/SplashScreenView;)V': () => undefined,
+        'setLocusContext(Landroid/content/LocusId;Landroid/os/Bundle;)V': () => undefined,
+        'onCreate(Landroid/os/Bundle;Landroid/os/PersistableBundle;)V': (self, [state], vm) => {
+          try { vm.invokeByName('onCreate', '(Landroid/os/Bundle;)V', self.object || self, [state ?? null]); } catch (_error) { /* 应用未覆写 */ }
+        },
+        'onPostCreate(Landroid/os/Bundle;)V': () => undefined,
+        'onPostCreate(Landroid/os/Bundle;Landroid/os/PersistableBundle;)V': (self, [state], vm) => {
+          try { vm.invokeByName('onPostCreate', '(Landroid/os/Bundle;)V', self.object || self, [state ?? null]); } catch (_error) { /* 应用未覆写 */ }
+        },
+        'onSaveInstanceState(Landroid/os/Bundle;Landroid/os/PersistableBundle;)V': (self, [state], vm) => {
+          try { vm.invokeByName('onSaveInstanceState', '(Landroid/os/Bundle;)V', self.object || self, [state ?? null]); } catch (_error) { /* 应用未覆写 */ }
+        },
+        'onRestoreInstanceState(Landroid/os/Bundle;Landroid/os/PersistableBundle;)V': (self, [state], vm) => {
+          try { vm.invokeByName('onRestoreInstanceState', '(Landroid/os/Bundle;)V', self.object || self, [state ?? null]); } catch (_error) { /* 应用未覆写 */ }
+        },
+        'onNewIntent(Landroid/content/Intent;)V': (self, [intent]) => {
+          self.intent = intent ?? null;
+        },
+        'onStateNotSaved()V': () => undefined,
+        'onTopResumedActivityChanged(Z)V': () => undefined,
+        'onUserLeaveHint()V': () => undefined,
+        'onMultiWindowModeChanged(Z)V': () => undefined,
+        'onMultiWindowModeChanged(ZLandroid/content/res/Configuration;)V': () => undefined,
+        'isInMultiWindowMode()Z': () => false,
+        'onPictureInPictureModeChanged(Z)V': () => undefined,
+        'onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V': () => undefined,
+        'onPictureInPictureUiStateChanged(Landroid/app/PictureInPictureUiState;)V': () => undefined,
+        'isInPictureInPictureMode()Z': () => false,
+        'enterPictureInPictureMode()V': () => undefined,
+        'enterPictureInPictureMode(Landroid/app/PictureInPictureParams;)Z': () => false,
+        'setPictureInPictureParams(Landroid/app/PictureInPictureParams;)V': () => undefined,
+        'getMaxNumPictureInPictureActions()I': () => 0,
+        'onPictureInPictureRequested()Z': () => false,
+        'isVoiceInteraction()Z': () => false,
+        'isVoiceInteractionRoot()Z': () => false,
+        'getVoiceInteractor()Landroid/app/VoiceInteractor;': () => null,
+        'isLocalVoiceInteractionSupported()Z': () => false,
+        'startLocalVoiceInteraction(Landroid/os/Bundle;)V': () => undefined,
+        'stopLocalVoiceInteraction()V': () => undefined,
+        'onLocalVoiceInteractionStarted()V': () => undefined,
+        'onLocalVoiceInteractionStopped()V': () => undefined,
+        'onMovedToDisplay(ILandroid/content/res/Configuration;)V': () => undefined,
+        'onConfigurationChanged(Landroid/content/res/Configuration;)V': () => undefined,
+        'getChangingConfigurations()I': () => 0,
+        'getLastNonConfigurationInstance()Ljava/lang/Object;': () => null,
+        'onRetainNonConfigurationInstance()Ljava/lang/Object;': () => null,
+        'onLowMemory()V': () => undefined,
+        'onTrimMemory(I)V': () => undefined,
+        'onCreateThumbnail(Landroid/graphics/Bitmap;Landroid/graphics/Canvas;)Z': () => false,
+        'onCreateDescription()Ljava/lang/CharSequence;': () => null,
+        'onProvideAssistData(Landroid/os/Bundle;)V': () => undefined,
+        'onProvideAssistContent(Landroid/app/assist/AssistContent;)V': () => undefined,
+        'onGetDirectActions(Landroid/os/CancellationSignal;Ljava/util/function/Consumer;)V': () => undefined,
+        'onPerformDirectAction(Ljava/lang/String;Landroid/os/Bundle;Landroid/os/CancellationSignal;Ljava/util/function/Consumer;)V': () => undefined,
+        'onProvideKeyboardShortcuts(Ljava/util/List;Landroid/view/Menu;I)V': () => undefined,
+        'requestShowKeyboardShortcuts()V': () => undefined,
+        'dismissKeyboardShortcutsHelper()V': () => undefined,
+        'showAssist(Landroid/os/Bundle;)Z': () => false,
+        'reportFullyDrawn()V': () => undefined,
+        'unregisterActivityLifecycleCallbacks(Landroid/app/Application$ActivityLifecycleCallbacks;)V': () => undefined,
+        'getNextAutofillId()I': (self) => {
+          const next = Number(self.$nextAutofillId) || 1;
+          self.$nextAutofillId = next + 1;
+          return next;
+        },
+        'autofillClientGetNextAutofillId()Landroid/view/autofill/AutofillId;': () => null,
         'onSaveInstanceState(Landroid/os/Bundle;)V': () => undefined,
         'onRestoreInstanceState(Landroid/os/Bundle;)V': () => undefined,
         'setContentView(I)V': (self, [resId], vm) => {

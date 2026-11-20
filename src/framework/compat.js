@@ -16,6 +16,17 @@ function readIntArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+/** CharSequence / String / char[] 统一成 JS 字符串（null 视为空串）。 */
+function textOf(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value.$string === 'string') return value.$string;
+  if (value.$peer && typeof value.$peer.text === 'string') return value.$peer.text;
+  if (Array.isArray(value.$data)) return value.$data.map((code) => String.fromCharCode(code & 0xffff)).join('');
+  if (Array.isArray(value.$peer?.parts)) return value.$peer.parts.join('');
+  return String(value);
+}
+
 
 
 function viewOf(self) {
@@ -39,8 +50,8 @@ function bitmapPeer(bitmap) {
 }
 
 const VIEW_METHODS = {
-  'getVerticalFadingEdgeLength()I': () => 0,
-  'getHorizontalFadingEdgeLength()I': () => 0,
+  'getVerticalFadingEdgeLength()I': (self) => viewOf(self)?.getVerticalFadingEdgeLength?.() ?? 0,
+  'getHorizontalFadingEdgeLength()I': (self) => viewOf(self)?.getHorizontalFadingEdgeLength?.() ?? 0,
   'getVerticalScrollbarWidth()I': (self) => viewOf(self)?.getVerticalScrollbarWidth?.() ?? 0,
   'getHorizontalScrollbarHeight()I': (self) => viewOf(self)?.getHorizontalScrollbarHeight?.() ?? 0,
   'getVerticalScrollbarPosition()I': (self) => viewOf(self)?.getVerticalScrollbarPosition?.() ?? 0,
@@ -246,6 +257,174 @@ const VIEW_METHODS = {
     const view = viewOf(self);
     if (view) view.scrollY = value | 0;
   },
+  'setKeepScreenOn(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.keepScreenOn = !!value;
+  },
+  'getKeepScreenOn()Z': (self) => viewOf(self)?.keepScreenOn === true,
+  'setScrollContainer(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.$scrollContainer = !!value;
+  },
+  'isScrollContainer()Z': (self) => viewOf(self)?.$scrollContainer === true,
+  'setRevealOnFocusHint(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.revealOnFocusHint = !!value;
+  },
+  'getRevealOnFocusHint()Z': (self) => viewOf(self)?.revealOnFocusHint !== false,
+  'setShowingLayoutBounds(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.$showingLayoutBounds = !!value;
+  },
+  'isShowingLayoutBounds()Z': (self) => viewOf(self)?.$showingLayoutBounds === true,
+  'setNextFocusLeftId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextFocusLeftId = id | 0; },
+  'getNextFocusLeftId()I': (self) => viewOf(self)?.nextFocusLeftId ?? -1,
+  'setNextFocusRightId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextFocusRightId = id | 0; },
+  'getNextFocusRightId()I': (self) => viewOf(self)?.nextFocusRightId ?? -1,
+  'setNextFocusUpId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextFocusUpId = id | 0; },
+  'getNextFocusUpId()I': (self) => viewOf(self)?.nextFocusUpId ?? -1,
+  'setNextFocusDownId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextFocusDownId = id | 0; },
+  'getNextFocusDownId()I': (self) => viewOf(self)?.nextFocusDownId ?? -1,
+  'setNextFocusForwardId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextFocusForwardId = id | 0; },
+  'getNextFocusForwardId()I': (self) => viewOf(self)?.nextFocusForwardId ?? -1,
+  'setNextClusterForwardId(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.nextClusterForwardId = id | 0; },
+  'getNextClusterForwardId()I': (self) => viewOf(self)?.nextClusterForwardId ?? -1,
+  'setDrawingCacheQuality(I)V': (self, [quality]) => {
+    const view = viewOf(self);
+    if (view) view.drawingCacheQuality = quality | 0;
+  },
+  'getDrawingCacheQuality()I': (self) => viewOf(self)?.drawingCacheQuality ?? 0,
+  'setFadingEdgeLength(I)V': (self, [length]) => {
+    const view = viewOf(self);
+    if (view) view.fadingEdgeLength = length | 0;
+  },
+  'setVerticalScrollbarThumbDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+    const view = viewOf(self);
+    if (view) view.scrollBarThumbVertical = drawable ?? null;
+  },
+  'getVerticalScrollbarThumbDrawable()Landroid/graphics/drawable/Drawable;': (self) => viewOf(self)?.scrollBarThumbVertical ?? null,
+  'setVerticalScrollbarTrackDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+    const view = viewOf(self);
+    if (view) view.scrollBarTrackVertical = drawable ?? null;
+  },
+  'getVerticalScrollbarTrackDrawable()Landroid/graphics/drawable/Drawable;': (self) => viewOf(self)?.scrollBarTrackVertical ?? null,
+  'setHorizontalScrollbarThumbDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+    const view = viewOf(self);
+    if (view) view.scrollBarThumbHorizontal = drawable ?? null;
+  },
+  'getHorizontalScrollbarThumbDrawable()Landroid/graphics/drawable/Drawable;': (self) => viewOf(self)?.scrollBarThumbHorizontal ?? null,
+  'setHorizontalScrollbarTrackDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+    const view = viewOf(self);
+    if (view) view.scrollBarTrackHorizontal = drawable ?? null;
+  },
+  'getHorizontalScrollbarTrackDrawable()Landroid/graphics/drawable/Drawable;': (self) => viewOf(self)?.scrollBarTrackHorizontal ?? null,
+  'setAccessibilityPaneTitle(Ljava/lang/CharSequence;)V': (self, [title]) => {
+    const view = viewOf(self);
+    if (view) view.accessibilityPaneTitle = title ?? null;
+  },
+  'getAccessibilityPaneTitle()Ljava/lang/CharSequence;': (self) => viewOf(self)?.accessibilityPaneTitle ?? null,
+  'setStateDescription(Ljava/lang/CharSequence;)V': (self, [description]) => {
+    const view = viewOf(self);
+    if (view) view.stateDescription = description ?? null;
+  },
+  'getStateDescription()Ljava/lang/CharSequence;': (self) => viewOf(self)?.stateDescription ?? null,
+  'setAccessibilityTraversalBefore(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.accessibilityTraversalBefore = id | 0; },
+  'getAccessibilityTraversalBefore()I': (self) => viewOf(self)?.accessibilityTraversalBefore ?? -1,
+  'setAccessibilityTraversalAfter(I)V': (self, [id]) => { const view = viewOf(self); if (view) view.accessibilityTraversalAfter = id | 0; },
+  'getAccessibilityTraversalAfter()I': (self) => viewOf(self)?.accessibilityTraversalAfter ?? -1,
+  'hasExplicitFocusable()Z': (self) => viewOf(self)?.focusable === true,
+  'onFocusChanged(ZILandroid/graphics/Rect;)V': (self, [gainFocus]) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.focused = !!gainFocus;
+    view.refreshDrawableState?.();
+  },
+  'onFocusLost()V': (self) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.focused = false;
+    view.refreshDrawableState?.();
+  },
+  'startActionMode(Landroid/view/ActionMode$Callback;I)Landroid/view/ActionMode;': () => null,
+  'getBoundsOnScreen(Landroid/graphics/Rect;)V': (self, [rect]) => viewOf(self)?.getBoundsOnScreen?.(rect, false),
+  'getBoundsOnScreen(Landroid/graphics/Rect;Z)V': (self, [rect, clip]) => viewOf(self)?.getBoundsOnScreen?.(rect, !!clip),
+  'mapRectFromViewToScreenCoords(Landroid/graphics/RectF;Z)V': (self, [rect, clip]) => viewOf(self)?.mapRectFromViewToScreenCoords?.(rect, !!clip),
+  'getHotspotBounds(Landroid/graphics/Rect;)V': (self, [rect]) => viewOf(self)?.getHotspotBounds?.(rect),
+  'isVisibleToUser()Z': (self) => viewOf(self)?.isVisibleToUser?.() ?? false,
+  'isVisibleToUser(Landroid/graphics/Rect;)Z': (self, [rect]) => viewOf(self)?.isVisibleToUser?.(rect) ?? false,
+  'isVisibleToUserForAutofill(I)Z': (self) => viewOf(self)?.isVisibleToUser?.() ?? false,
+  'isImportantForAutofill()Z': () => false,
+  'getAutofillType()I': () => 0,
+  'getAutofillHints()[Ljava/lang/String;': () => null,
+  'isAutofilled()Z': () => false,
+  'hideAutofillHighlight()Z': () => false,
+  'getAutofillValue()Landroid/view/autofill/AutofillValue;': () => null,
+  'getAutofillId()Landroid/view/autofill/AutofillId;': () => null,
+  'setAutofillId(Landroid/view/autofill/AutofillId;)V': () => {},
+  'autofill(Landroid/view/autofill/AutofillValue;)V': () => {},
+  'autofill(Landroid/util/SparseArray;)V': () => {},
+  'resetSubtreeAutofillIds()V': () => {},
+  'canNotifyAutofillEnterExitEvent()Z': () => false,
+  'setNotifyAutofillManagerOnClick(Z)V': () => {},
+  'notifyEnterOrExitForAutoFillIfNeeded(Z)V': () => {},
+  'getImportantForContentCapture()I': () => 0,
+  'setImportantForContentCapture(I)V': () => {},
+  'isImportantForContentCapture()Z': () => false,
+  'getNotifiedContentCaptureAppeared()Z': () => false,
+  'setContentCaptureSession(Landroid/view/contentcapture/ContentCaptureSession;)V': () => {},
+  'getContentCaptureSession()Landroid/view/contentcapture/ContentCaptureSession;': () => null,
+  'dispatchInitialProvideContentCaptureStructure()V': () => {},
+  'initializeFadingEdge(Landroid/content/res/TypedArray;)V': () => {},
+  'initializeFadingEdgeInternal(Landroid/content/res/TypedArray;)V': () => {},
+  'initializeScrollbars(Landroid/content/res/TypedArray;)V': () => {},
+  'initializeScrollbarsInternal(Landroid/content/res/TypedArray;)V': () => {},
+  'addFrameMetricsListener(Landroid/view/Window;Landroid/view/Window$OnFrameMetricsAvailableListener;Landroid/os/Handler;)V': () => {},
+  'removeFrameMetricsListener(Landroid/view/Window$OnFrameMetricsAvailableListener;)V': () => {},
+  'performButtonActionOnTouchDown(Landroid/view/MotionEvent;)Z': () => false,
+  'dispatchActivityResult(Ljava/lang/String;IILandroid/content/Intent;)Z': () => false,
+  'onActivityResult(IILandroid/content/Intent;)V': () => {},
+  'sendAccessibilityEvent(I)V': () => {},
+  'sendAccessibilityEventInternal(I)V': () => {},
+  'sendAccessibilityEventUnchecked(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'sendAccessibilityEventUncheckedInternal(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'dispatchPopulateAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)Z': () => false,
+  'dispatchPopulateAccessibilityEventInternal(Landroid/view/accessibility/AccessibilityEvent;)Z': () => false,
+  'onPopulateAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'onPopulateAccessibilityEventInternal(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'onInitializeAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'onInitializeAccessibilityEventInternal(Landroid/view/accessibility/AccessibilityEvent;)V': () => {},
+  'onInitializeAccessibilityNodeInfo(Landroid/view/accessibility/AccessibilityNodeInfo;)V': () => {},
+  'onInitializeAccessibilityNodeInfoInternal(Landroid/view/accessibility/AccessibilityNodeInfo;)V': () => {},
+  'createAccessibilityNodeInfo()Landroid/view/accessibility/AccessibilityNodeInfo;': () => null,
+  'createAccessibilityNodeInfoInternal()Landroid/view/accessibility/AccessibilityNodeInfo;': () => null,
+  'getAccessibilityNodeProvider()Landroid/view/accessibility/AccessibilityNodeProvider;': () => null,
+  'getAccessibilityViewId()I': () => 0,
+  'getAutofillViewId()I': () => -1,
+  'getAccessibilityWindowId()I': () => -1,
+  'addExtraDataToAccessibilityNodeInfo(Landroid/view/accessibility/AccessibilityNodeInfo;Ljava/lang/String;Landroid/os/Bundle;)V': () => {},
+  'onProvideStructure(Landroid/view/ViewStructure;)V': () => {},
+  'onProvideAutofillStructure(Landroid/view/ViewStructure;I)V': () => {},
+  'onProvideContentCaptureStructure(Landroid/view/ViewStructure;I)V': () => {},
+  'onProvideStructure(Landroid/view/ViewStructure;II)V': () => {},
+  'onProvideVirtualStructure(Landroid/view/ViewStructure;)V': () => {},
+  'onProvideAutofillVirtualStructure(Landroid/view/ViewStructure;I)V': () => {},
+  'dispatchProvideStructure(Landroid/view/ViewStructure;)V': () => {},
+  'dispatchProvideAutofillStructure(Landroid/view/ViewStructure;I)V': () => {},
+  'getAttributeResolutionStack(I)[I': () => null,
+  'getAttributeSourceResourceMap()Ljava/util/Map;': () => null,
+  'getExplicitStyle()I': () => 0,
+  'fitSystemWindows(Landroid/graphics/Rect;)Z': (self, [insets]) => {
+    const view = viewOf(self);
+    if (!view) return false;
+    view.fitsSystemWindows = true;
+    return true;
+  },
+  'setWindowInsetsAnimationCallback(Landroid/view/WindowInsetsAnimation$Callback;)V': () => {},
+  'hasWindowInsetsAnimationCallback()Z': () => false,
+  'setOnReceiveContentListener([Ljava/lang/String;Landroid/view/OnReceiveContentListener;)V': () => {},
+  'performReceiveContent(Landroid/view/ContentInfo;)Landroid/view/ContentInfo;': () => null,
+  'onReceiveContent(Landroid/view/ContentInfo;)Landroid/view/ContentInfo;': () => null,
+  'getReceiveContentMimeTypes()[Ljava/lang/String;': () => null,
 };
 
 const VIEW_GROUP_METHODS = {
@@ -430,6 +609,316 @@ const TEXT_VIEW_METHODS = {
     }
   },
   'getAccessibilityClassName()Ljava/lang/CharSequence;': () => 'android.widget.TextView',
+  'getTextScaleX()F': (self) => Number(viewOf(self)?.textScaleX ?? 1),
+  'setTextScaleX(F)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.textScaleX = Number(value) || 0;
+  },
+  'getElegantTextHeight()Z': (self) => viewOf(self)?.elegantTextHeight === true,
+  'setElegantTextHeight(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.elegantTextHeight = !!value;
+  },
+  'isElegantTextHeight()Z': (self) => viewOf(self)?.elegantTextHeight === true,
+  'isFallbackLineSpacing()Z': (self) => viewOf(self)?.fallbackLineSpacing !== false,
+  'setFallbackLineSpacing(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.fallbackLineSpacing = !!value;
+  },
+  'getFontFeatureSettings()Ljava/lang/String;': (self) => viewOf(self)?.fontFeatureSettings ?? null,
+  'setFontFeatureSettings(Ljava/lang/String;)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.fontFeatureSettings = value ?? null;
+  },
+  'getFontVariationSettings()Ljava/lang/String;': () => null,
+  'getBreakStrategy()I': (self) => viewOf(self)?.breakStrategy ?? 0,
+  'setBreakStrategy(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.breakStrategy = value | 0;
+  },
+  'getHyphenationFrequency()I': (self) => viewOf(self)?.hyphenationFrequency ?? 0,
+  'setHyphenationFrequency(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.hyphenationFrequency = value | 0;
+  },
+  'getJustificationMode()I': (self) => viewOf(self)?.justificationMode ?? 0,
+  'setJustificationMode(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.justificationMode = value | 0;
+  },
+  'getTextMetricsParams()Landroid/text/PrecomputedText$Params;': () => null,
+  'setTextMetricsParams(Landroid/text/PrecomputedText$Params;)V': () => {},
+  'getTextLocale()Ljava/util/Locale;': (self) => viewOf(self)?.textLocale ?? null,
+  'getTextLocales()Landroid/os/LocaleList;': () => null,
+  'setTextLocale(Ljava/util/Locale;)V': (self, [locale]) => {
+    const view = viewOf(self);
+    if (view) view.textLocale = locale ?? null;
+  },
+  'onConfigurationChanged(Landroid/content/res/Configuration;)V': () => {},
+  'getScaledTextSize()F': (self) => Number(viewOf(self)?.textSize ?? 0),
+  'getTypefaceStyle()I': (self) => viewOf(self)?.textStyle ?? 0,
+  'getTextSizeUnit()I': () => 2,
+  'setFirstBaselineToTopHeight(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.firstBaselineToTopHeight = value | 0;
+  },
+  'getFirstBaselineToTopHeight()I': (self) => viewOf(self)?.firstBaselineToTopHeight ?? -1,
+  'setLastBaselineToBottomHeight(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.lastBaselineToBottomHeight = value | 0;
+  },
+  'getLastBaselineToBottomHeight()I': (self) => viewOf(self)?.lastBaselineToBottomHeight ?? -1,
+  'getAutoSizeTextType()I': () => 0,
+  'setAutoSizeTextTypeWithDefaults(I)V': () => {},
+  'setAutoSizeTextTypeUniformWithConfiguration(IIII)V': () => {},
+  'setAutoSizeTextTypeUniformWithPresetSizes([II)V': () => {},
+  'getAutoSizeStepGranularity()I': () => -1,
+  'getAutoSizeMinTextSize()I': () => -1,
+  'getAutoSizeMaxTextSize()I': () => -1,
+  'getAutoSizeTextAvailableSizes()[I': () => null,
+  'getAutoLinkMask()I': (self) => viewOf(self)?.autoLinkMask ?? 0,
+  'setAutoLinkMask(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.autoLinkMask = value | 0;
+  },
+  'getLinksClickable()Z': (self) => viewOf(self)?.linksClickable !== false,
+  'setLinksClickable(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.linksClickable = !!value;
+  },
+  'getUrls()[Landroid/text/style/URLSpan;': () => null,
+  'getHint()Ljava/lang/CharSequence;': (self) => viewOf(self)?.hintText ?? null,
+  'setHint(Ljava/lang/CharSequence;)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.hintText = value ?? null;
+    view.invalidate?.();
+  },
+  'setHint(I)V': (self, [id], vm) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.hintText = vm?.resources?.getString?.(id) ?? null;
+    view.invalidate?.();
+  },
+  'setHintTextColor(I)V': (self, [color]) => {
+    const view = viewOf(self);
+    if (view) view.hintColor = color | 0;
+  },
+  'getHintTextColors()Landroid/content/res/ColorStateList;': () => null,
+  'getCurrentHintTextColor()I': (self) => viewOf(self)?.hintColor ?? 0,
+  'setLinkTextColor(I)V': () => {},
+  'getLinkTextColors()Landroid/content/res/ColorStateList;': () => null,
+  'getGravity()I': (self) => viewOf(self)?.gravity ?? 0,
+  'getPaintFlags()I': (self) => viewOf(self)?.paintFlags ?? 0,
+  'setPaintFlags(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.paintFlags = value | 0;
+  },
+  'setHorizontallyScrolling(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.horizontallyScrolling = !!value;
+  },
+  'getHorizontallyScrolling()Z': (self) => viewOf(self)?.horizontallyScrolling === true,
+  'isHorizontallyScrollable()Z': (self) => viewOf(self)?.horizontallyScrolling === true,
+  'setMinLines(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.minLines = value | 0;
+  },
+  'getMinLines()I': (self) => viewOf(self)?.minLines ?? 0,
+  'setMinEms(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.minEms = value | 0;
+  },
+  'getMinEms()I': (self) => viewOf(self)?.minEms ?? -1,
+  'setMaxEms(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.maxEms = value | 0;
+  },
+  'getMaxEms()I': (self) => viewOf(self)?.maxEms ?? -1,
+  'setEms(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.ems = value | 0;
+  },
+  'setLines(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.linesCount = value | 0;
+  },
+  'setLineHeight(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.lineHeight = value | 0;
+  },
+  'setMinHeight(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.minHeight = value | 0;
+  },
+  'getMinHeight()I': (self) => viewOf(self)?.minHeight ?? 0,
+  'setMaxHeight(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.maxHeight = value | 0;
+  },
+  'getMaxHeight()I': (self) => viewOf(self)?.maxHeight ?? 0,
+  'setMinWidth(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.minWidth = value | 0;
+  },
+  'getMinWidth()I': (self) => viewOf(self)?.minWidth ?? 0,
+  'setMaxWidth(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.maxWidth = value | 0;
+  },
+  'getMaxWidth()I': (self) => viewOf(self)?.maxWidth ?? 0,
+  'isSingleLine()Z': (self) => viewOf(self)?.singleLine === true,
+  'getInputType()I': (self) => viewOf(self)?.inputType ?? 0,
+  'setInputType(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.inputType = value | 0;
+  },
+  'setRawInputType(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.inputType = value | 0;
+  },
+  'isAnyPasswordInputType()Z': (self) => {
+    const type = viewOf(self)?.inputType ?? 0;
+    const masked = type & 0xff0;
+    return masked === 0x80 || masked === 0x90 || masked === 0xa0;
+  },
+  'getImeOptions()I': (self) => viewOf(self)?.imeOptions ?? 0,
+  'setImeOptions(I)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.imeOptions = value | 0;
+  },
+  'setImeActionLabel(Ljava/lang/CharSequence;I)V': (self, [label, id]) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.imeActionLabel = label ?? null;
+    view.imeActionId = id | 0;
+  },
+  'getImeActionLabel()Ljava/lang/CharSequence;': (self) => viewOf(self)?.imeActionLabel ?? null,
+  'getImeActionId()I': (self) => viewOf(self)?.imeActionId ?? 0,
+  'setOnEditorActionListener(Landroid/widget/TextView$OnEditorActionListener;)V': (self, [listener]) => {
+    const view = viewOf(self);
+    if (view) view.onEditorActionListener = listener ?? null;
+  },
+  'onEditorAction(I)V': () => {},
+  'setPrivateImeOptions(Ljava/lang/String;)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.privateImeOptions = value ?? null;
+  },
+  'getPrivateImeOptions()Ljava/lang/String;': (self) => viewOf(self)?.privateImeOptions ?? null,
+  'getInputExtras(Z)Landroid/os/Bundle;': () => null,
+  'setInputExtras(I)V': () => {},
+  'setImeHintLocales(Landroid/os/LocaleList;)V': () => {},
+  'getImeHintLocales()Landroid/os/LocaleList;': () => null,
+  'getShowSoftInputOnFocus()Z': (self) => viewOf(self)?.showSoftInputOnFocus !== false,
+  'setShowSoftInputOnFocus(Z)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.showSoftInputOnFocus = !!value;
+  },
+  'getShadowRadius()F': (self) => {
+    const shadow = viewOf(self)?.textShadow;
+    return Number(shadow?.radius) || 0;
+  },
+  'getShadowDx()F': (self) => Number(viewOf(self)?.textShadow?.dx) || 0,
+  'getShadowDy()F': (self) => Number(viewOf(self)?.textShadow?.dy) || 0,
+  'getShadowColor()I': (self) => viewOf(self)?.textShadow?.color ?? 0,
+  'getError()Ljava/lang/CharSequence;': (self) => viewOf(self)?.errorText ?? null,
+  'setError(Ljava/lang/CharSequence;)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.errorText = value ?? null;
+  },
+  'setError(Ljava/lang/CharSequence;Landroid/graphics/drawable/Drawable;)V': (self, [value]) => {
+    const view = viewOf(self);
+    if (view) view.errorText = value ?? null;
+  },
+  'setText([CII)V': (self, [chars, start, length]) => {
+    const view = viewOf(self);
+    if (!view) return;
+    const data = Array.isArray(chars?.$data) ? chars.$data : [];
+    const text = data.slice(start | 0, (start | 0) + (length | 0)).map((code) => String.fromCharCode(code & 0xffff)).join('');
+    view.setText?.(text);
+  },
+  'setText(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V': (self, [text]) => {
+    viewOf(self)?.setText?.(textOf(text));
+  },
+  'setText(ILandroid/widget/TextView$BufferType;)V': (self, [id], vm) => {
+    const view = viewOf(self);
+    if (!view) return;
+    view.setText?.(vm?.resources?.getString?.(id) ?? '');
+  },
+  'setTextKeepState(Ljava/lang/CharSequence;)V': (self, [text]) => {
+    viewOf(self)?.setText?.(textOf(text));
+  },
+  'setTextKeepState(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V': (self, [text]) => {
+    viewOf(self)?.setText?.(textOf(text));
+  },
+  'append(Ljava/lang/CharSequence;II)V': (self, [text, start, end]) => {
+    const view = viewOf(self);
+    if (!view) return;
+    const source = textOf(text);
+    view.setText?.(`${view.text ?? ''}${source.slice(start | 0, end | 0)}`);
+  },
+  'setFilters([Landroid/text/InputFilter;)V': (self, [filters]) => {
+    const view = viewOf(self);
+    if (view) view.filters = filters ?? null;
+  },
+  'getFilters()[Landroid/text/InputFilter;': (self) => viewOf(self)?.filters ?? null,
+  'setFrame(IIII)Z': (self, [left, top, right, bottom]) => {
+    const view = viewOf(self);
+    if (!view) return false;
+    view.left = left | 0;
+    view.top = top | 0;
+    view.right = right | 0;
+    view.bottom = bottom | 0;
+    view.layoutDirty = true;
+    return true;
+  },
+  'preloadFontCache()V': () => {},
+  'getTransformed()Ljava/lang/CharSequence;': (self) => viewOf(self)?.text ?? null,
+  'getUndoManager()Landroid/content/UndoManager;': () => null,
+  'setUndoManager(Landroid/content/UndoManager;Ljava/lang/String;)V': () => {},
+  'getEditorForTesting()Landroid/widget/Editor;': () => null,
+  'getDefaultMovementMethod()Landroid/text/method/MovementMethod;': () => null,
+  'getKeyListener()Landroid/text/method/KeyListener;': () => null,
+  'setKeyListener(Landroid/text/method/KeyListener;)V': () => {},
+  'setTransformationMethod(Landroid/text/method/TransformationMethod;)V': () => {},
+  'getCompoundDrawables()[Landroid/graphics/drawable/Drawable;': (self) => {
+    const view = viewOf(self);
+    return view?.compoundDrawables ? view.compoundDrawables.slice() : null;
+  },
+  'getCompoundDrawablesRelative()[Landroid/graphics/drawable/Drawable;': (self) => {
+    const view = viewOf(self);
+    return view?.compoundDrawables ? view.compoundDrawables.slice() : null;
+  },
+  'setCompoundDrawablesRelativeWithIntrinsicBounds(Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;Landroid/graphics/drawable/Drawable;)V':
+    (self, [left, top, right, bottom]) => viewOf(self)?.setCompoundDrawables?.(left, top, right, bottom),
+  'setCompoundDrawablesRelativeWithIntrinsicBounds(IIII)V': (self, [left, top, right, bottom]) =>
+    viewOf(self)?.setCompoundDrawablesWithIntrinsicBounds?.(left, top, right, bottom),
+  'getCompoundDrawableTintList()Landroid/content/res/ColorStateList;': (self) => viewOf(self)?.compoundDrawableTint ?? null,
+  'getCompoundDrawableTintMode()Landroid/graphics/PorterDuff$Mode;': () => null,
+  'getCompoundDrawableTintBlendMode()Landroid/graphics/BlendMode;': () => null,
+  'setCompoundDrawableTintBlendMode(Landroid/graphics/BlendMode;)V': () => {},
+  'drawableHotspotChanged(FF)V': () => {},
+  'onSaveInstanceState()Landroid/os/Parcelable;': () => null,
+  'onRestoreInstanceState(Landroid/os/Parcelable;)V': () => {},
+  'setEditableFactory(Landroid/text/Editable$Factory;)V': () => {},
+  'setSpannableFactory(Landroid/text/Spannable$Factory;)V': () => {},
+  'setTextSelectHandle(Landroid/graphics/drawable/Drawable;)V': () => {},
+  'setTextSelectHandle(I)V': () => {},
+  'getTextSelectHandle()Landroid/graphics/drawable/Drawable;': () => null,
+  'setTextSelectHandleLeft(Landroid/graphics/drawable/Drawable;)V': () => {},
+  'setTextSelectHandleLeft(I)V': () => {},
+  'getTextSelectHandleLeft()Landroid/graphics/drawable/Drawable;': () => null,
+  'setTextSelectHandleRight(Landroid/graphics/drawable/Drawable;)V': () => {},
+  'setTextSelectHandleRight(I)V': () => {},
+  'getTextSelectHandleRight()Landroid/graphics/drawable/Drawable;': () => null,
+  'setTextCursorDrawable(Landroid/graphics/drawable/Drawable;)V': () => {},
+  'setTextCursorDrawable(I)V': () => {},
+  'getTextCursorDrawable()Landroid/graphics/drawable/Drawable;': () => null,
+  'onPreDraw()Z': () => true,
+  'onDetachedFromWindowInternal()V': () => {},
+  'onScreenStateChanged(I)V': () => {},
+  'isPaddingOffsetRequired()Z': () => false,
+  'getLeftPaddingOffset()I': () => 0,
 };
 
 const CANVAS_METHODS = {

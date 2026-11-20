@@ -38,6 +38,27 @@ export function isGone(view) {
   return GONE_VALUES.has(view?.visibility);
 }
 
+/** Rect 在不同调用点可能是 JavaArray、普通数组或 Rect peer，按各自形态写入。 */
+function writeRect(out, left, top, right, bottom) {
+  if (!out) return;
+  if (Array.isArray(out)) {
+    out[0] = left;
+    out[1] = top;
+    out[2] = right;
+    out[3] = bottom;
+  } else if (Array.isArray(out.$data)) {
+    out.$data[0] = left;
+    out.$data[1] = top;
+    out.$data[2] = right;
+    out.$data[3] = bottom;
+  } else {
+    out.left = left;
+    out.top = top;
+    out.right = right;
+    out.bottom = bottom;
+  }
+}
+
 // Material 的 elevation overlay 曲线：叠层透明度按 elevation 取 8 档。
 const ELEVATION_OVERLAY_ALPHAS = [0, 0.05, 0.07, 0.08, 0.09, 0.11, 0.12, 0.14, 0.15];
 
@@ -255,8 +276,27 @@ export class View {
     this.verticalScrollBarPosition = 0;
     this.scrollBarThumbVertical = null;
     this.scrollBarThumbHorizontal = null;
+    this.scrollBarTrackVertical = null;
+    this.scrollBarTrackHorizontal = null;
     this.$scrollBarFadeStart = 0;
     this.$scrollBarAlpha = 0;
+    // AOSP View 的杂项状态：焦点跳转、绘制缓存、无障碍描述等。
+    this.keepScreenOn = false;
+    this.$scrollContainer = false;
+    this.revealOnFocusHint = true;
+    this.nextFocusLeftId = -1;
+    this.nextFocusRightId = -1;
+    this.nextFocusUpId = -1;
+    this.nextFocusDownId = -1;
+    this.nextFocusForwardId = -1;
+    this.nextClusterForwardId = -1;
+    this.drawingCacheQuality = 0;
+    this.fadingEdgeLength = 0;
+    this.accessibilityPaneTitle = null;
+    this.stateDescription = null;
+    this.accessibilityTraversalBefore = -1;
+    this.accessibilityTraversalAfter = -1;
+    this.$showingLayoutBounds = false;
     this.selected = false;
     this.activated = false;
     this.pressed = false;
@@ -947,6 +987,135 @@ export class View {
     ctx.restore();
     // 淡出过程中持续出帧，否则只画一帧就停住。
     if (alpha > 0 && alpha < 1) this.invalidate();
+  }
+
+  setKeepScreenOn(keepScreenOn) {
+    this.keepScreenOn = !!keepScreenOn;
+  }
+
+  getKeepScreenOn() {
+    return this.keepScreenOn === true;
+  }
+
+  setScrollContainer(scrollContainer) {
+    this.$scrollContainer = !!scrollContainer;
+  }
+
+  isScrollContainer() {
+    return this.$scrollContainer === true;
+  }
+
+  setRevealOnFocusHint(revealOnFocusHint) {
+    this.revealOnFocusHint = !!revealOnFocusHint;
+  }
+
+  getRevealOnFocusHint() {
+    return this.revealOnFocusHint !== false;
+  }
+
+  setShowingLayoutBounds(showing) {
+    this.$showingLayoutBounds = !!showing;
+  }
+
+  isShowingLayoutBounds() {
+    return this.$showingLayoutBounds === true;
+  }
+
+  setNextFocusLeftId(id) { this.nextFocusLeftId = id | 0; }
+  getNextFocusLeftId() { return this.nextFocusLeftId | 0; }
+  setNextFocusRightId(id) { this.nextFocusRightId = id | 0; }
+  getNextFocusRightId() { return this.nextFocusRightId | 0; }
+  setNextFocusUpId(id) { this.nextFocusUpId = id | 0; }
+  getNextFocusUpId() { return this.nextFocusUpId | 0; }
+  setNextFocusDownId(id) { this.nextFocusDownId = id | 0; }
+  getNextFocusDownId() { return this.nextFocusDownId | 0; }
+  setNextFocusForwardId(id) { this.nextFocusForwardId = id | 0; }
+  getNextFocusForwardId() { return this.nextFocusForwardId | 0; }
+  setNextClusterForwardId(id) { this.nextClusterForwardId = id | 0; }
+  getNextClusterForwardId() { return this.nextClusterForwardId | 0; }
+
+  setDrawingCacheQuality(quality) { this.drawingCacheQuality = quality | 0; }
+  getDrawingCacheQuality() { return this.drawingCacheQuality | 0; }
+  setFadingEdgeLength(length) { this.fadingEdgeLength = length | 0; }
+  getVerticalFadingEdgeLength() { return this.fadingEdgeLength | 0; }
+  getHorizontalFadingEdgeLength() { return this.fadingEdgeLength | 0; }
+
+  setVerticalScrollbarThumbDrawable(drawable) {
+    this.scrollBarThumbVertical = drawable || null;
+    this.invalidate();
+  }
+
+  getVerticalScrollbarThumbDrawable() { return this.scrollBarThumbVertical || null; }
+  setVerticalScrollbarTrackDrawable(drawable) { this.scrollBarTrackVertical = drawable || null; this.invalidate(); }
+  getVerticalScrollbarTrackDrawable() { return this.scrollBarTrackVertical || null; }
+  setHorizontalScrollbarThumbDrawable(drawable) { this.scrollBarThumbHorizontal = drawable || null; this.invalidate(); }
+  getHorizontalScrollbarThumbDrawable() { return this.scrollBarThumbHorizontal || null; }
+  setHorizontalScrollbarTrackDrawable(drawable) { this.scrollBarTrackHorizontal = drawable || null; this.invalidate(); }
+  getHorizontalScrollbarTrackDrawable() { return this.scrollBarTrackHorizontal || null; }
+
+  setAccessibilityPaneTitle(title) { this.accessibilityPaneTitle = title; }
+  getAccessibilityPaneTitle() { return this.accessibilityPaneTitle; }
+  setStateDescription(description) { this.stateDescription = description; }
+  getStateDescription() { return this.stateDescription; }
+  setAccessibilityTraversalBefore(id) { this.accessibilityTraversalBefore = id | 0; }
+  getAccessibilityTraversalBefore() { return this.accessibilityTraversalBefore | 0; }
+  setAccessibilityTraversalAfter(id) { this.accessibilityTraversalAfter = id | 0; }
+  getAccessibilityTraversalAfter() { return this.accessibilityTraversalAfter | 0; }
+
+  hasExplicitFocusable() {
+    return this.focusable === true;
+  }
+
+  onFocusChanged(gainFocus, direction, previouslyFocusedRect) {
+    this.focused = !!gainFocus;
+    this.refreshDrawableState();
+  }
+
+  onFocusLost() {
+    this.onFocusChanged(false, 0, null);
+  }
+
+  startActionMode(callback, type) {
+    return null;
+  }
+
+  /** 屏幕坐标下的边界（AOSP View.getBoundsOnScreen）。 */
+  getBoundsOnScreen(out, clipToWindow) {
+    if (!out) return;
+    const offset = [0, 0];
+    this.getLocationOnScreen(offset);
+    writeRect(out, offset[0], offset[1], offset[0] + this.width, offset[1] + this.height);
+  }
+
+  mapRectFromViewToScreenCoords(rectF, clipToWindow) {
+    if (!rectF) return;
+    const offset = [0, 0];
+    this.getLocationOnScreen(offset);
+    const left = Number(rectF.left) || 0;
+    const top = Number(rectF.top) || 0;
+    rectF.left = left + offset[0];
+    rectF.top = top + offset[1];
+  }
+
+  getHotspotBounds(out) {
+    writeRect(out, this.left, this.top, this.right, this.bottom);
+  }
+
+  /** 与 AOSP 一致：自身与所有祖先生效（VISIBLE）且已挂到窗口才算对用户可见。 */
+  isVisibleToUser(out) {
+    let visible = this.visibility === VISIBILITY.VISIBLE;
+    let node = this.parent;
+    while (visible && node) {
+      if (node.visibility !== VISIBILITY.VISIBLE) visible = false;
+      node = node.parent;
+    }
+    if (visible && !this.isAttachedToWindowFlag()) visible = false;
+    if (visible && out) {
+      const offset = [0, 0];
+      this.getLocationOnScreen(offset);
+      writeRect(out, 0, 0, Math.max(0, this.width), Math.max(0, this.height));
+    }
+    return visible;
   }
 
   setScaleX(value) {

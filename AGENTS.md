@@ -175,6 +175,15 @@ npm run site
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 - Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染，冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
 
+### 本轮已完成（2026-11-21 第十五轮：View/TextView/Activity API 面补全）
+
+1. **View 状态与度量 API**（`view.js` + `compat.js`）：补 `keepScreenOn`、`scrollContainer`、`revealOnFocusHint`、`showingLayoutBounds`、`nextFocus*`/`nextClusterForward`、`drawingCacheQuality`、`fadingEdgeLength`、滚动条 thumb/track drawable、`accessibilityPaneTitle`/`stateDescription`/`accessibilityTraversal*`；实现 `getBoundsOnScreen`、`getHotspotBounds`、`mapRectFromViewToScreenCoords`、`isVisibleToUser`、`onFocusChanged`/`onFocusLost`、`startActionMode`、`hasExplicitFocusable`。
+2. **View 空缺 API**：autofill / content-capture / accessibility 事件与结构（`onProvide*Structure`、`createAccessibilityNodeInfo`、`sendAccessibilityEvent*`、frame metrics、`initializeScrollbars`、`fitSystemWindows` 等）按 AOSP 默认语义补齐。
+3. **TextView API**：补 `setText` 的 `BufferType`/`[CII`/资源 id 重载、`setHint` 与 hint 颜色、`getGravity`/`paintFlags`、min/max `Lines/Ems/Height/Width`、`lines`/`lineHeight`、`inputType`/`imeOptions`/`EditorAction`/私密 IME、`breakStrategy`/`hyphenation`/`justification`、`textLocale`、`shadow*`、`error`、`filters`、`setFrame`、select handle/cursor drawable，以及 `append(CharSequence,I,I)`。
+4. **Activity API**：补 `getCurrentFocus`（沿 decor 深度优先找 `focused`）、`attachBaseContext`、`onPostCreate`/`onSaveInstanceState`/`onRestoreInstanceState` 的 `PersistableBundle` 重载（委托给单参版本）、`onNewIntent`、多窗口/画中画/语音交互/助手/键盘快捷键等生命周期与状态查询默认实现。
+5. **覆盖度**：`tools/check-sdk.mjs` 对 android-31 语料从 3345/8804 提升到 **3672/8804**（+327 个方法）。
+6. **回归**：`tests/compat.mjs` 增加 View/TextView 状态读写断言；DeviceInfoHW 渲染与基线像素完全一致（`changed=0`），Via 冒烟仍通过。
+
 ### 本轮已完成（2026-11-21 第十四轮：Via 浏览器启动打通）
 
 1. **`Collections.addAll(Collection, Object[])`**：此前只认 List 的 `items`，目标是 Set 时静默丢弃全部元素。Firebase `Component.Builder` 用它保存附加接口，导致组件只登记主接口，依赖校验误报 `MissingDependencyException: android.content.Context`。现同时支持 List 与 Set（Set 走 `findSetIndex` 去重）。

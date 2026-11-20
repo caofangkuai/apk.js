@@ -226,6 +226,25 @@ function vmPeer() {
   assert.equal(view.lastEvaluatedScript, '1+1');
 }
 
+// View / TextView：本轮补齐的状态型 API
+{
+  const view = { text: 'a', invalidate() {}, setText(value) { this.text = value; } };
+  const self = { view };
+  method('Landroid/view/View;', 'setKeepScreenOn(Z)V')(self, [true]);
+  assert.equal(view.keepScreenOn, true);
+  assert.equal(method('Landroid/view/View;', 'getKeepScreenOn()Z')(self, []), true);
+  method('Landroid/view/View;', 'setNextFocusDownId(I)V')(self, [7]);
+  assert.equal(method('Landroid/view/View;', 'getNextFocusDownId()I')(self, []), 7);
+  method('Landroid/view/View;', 'setAccessibilityPaneTitle(Ljava/lang/CharSequence;)V')(self, ['面板']);
+  assert.equal(method('Landroid/view/View;', 'getAccessibilityPaneTitle()Ljava/lang/CharSequence;')(self, []), '面板');
+  method('Landroid/widget/TextView;', 'setText(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V')(self, ['hello']);
+  assert.equal(view.text, 'hello');
+  method('Landroid/widget/TextView;', 'setInputType(I)V')(self, [0x81]);
+  assert.equal(method('Landroid/widget/TextView;', 'isAnyPasswordInputType()Z')(self, []), true);
+  method('Landroid/widget/TextView;', 'setHint(Ljava/lang/CharSequence;)V')(self, ['提示']);
+  assert.equal(method('Landroid/widget/TextView;', 'getHint()Ljava/lang/CharSequence;')(self, []), '提示');
+}
+
 // 兼容层不能覆盖已有实现
 {
   const canvasDef = defOf('Landroid/graphics/Canvas;');
