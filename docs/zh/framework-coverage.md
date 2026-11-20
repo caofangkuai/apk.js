@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：17
-- 注册的 native 类：371
-- 方法/构造函数键（静态统计）：3598
+- 注册的 native 类：372
+- 方法/构造函数键（静态统计）：3608
 
 ## Native 类清单
 
@@ -355,6 +355,7 @@
 | `Ljava/util/HashSet;` | java-core.js |
 | `Ljava/util/Iterator;` | java-core.js |
 | `Ljava/util/LinkedHashMap;` | java-core.js |
+| `Ljava/util/LinkedHashSet;` | java-core.js |
 | `Ljava/util/LinkedList;` | java-core.js |
 | `Ljava/util/List;` | java-core.js |
 | `Ljava/util/ListIterator;` | java-core.js |

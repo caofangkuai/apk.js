@@ -3607,6 +3607,48 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     'iterator()Ljava/util/Iterator;': (self, _args, vm) => makeIterator(vm, self.setItems || []),
   },
 });
+// 保持插入顺序的 Set。Material 的监听器集合普遍用它，
+// 缺了它这些集合会退化成裸对象，iterator() 返回 null，
+// 表现为「调用 hasNext 时对象为空」，而报错点离真正的缺失很远。
+JAVA_CORE_CLASSES['Ljava/util/LinkedHashSet;'] = nativeDef('Ljava/util/LinkedHashSet;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/util/Set;', 'Ljava/util/Collection;'],
+  ctor: peerClass(function () {
+    this.setItems = [];
+  }, { setItems: [] }),
+  methods: {
+    '<init>()V': (self) => {
+      self.setItems = [];
+    },
+    '<init>(I)V': (self) => {
+      self.setItems = [];
+    },
+    '<init>(Ljava/util/Collection;)V': (self, [source]) => {
+      const items = source?.$peer?.setItems || source?.$peer?.items || source?.$data || source?.setItems || source?.items || [];
+      self.setItems = [];
+      for (const item of items) if (!self.setItems.includes(item)) self.setItems.push(item);
+    },
+    'add(Ljava/lang/Object;)Z': (self, [value]) => {
+      if (!self.setItems) self.setItems = [];
+      if (self.setItems.includes(value)) return false;
+      self.setItems.push(value);
+      return true;
+    },
+    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
+      const index = (self.setItems || []).indexOf(value);
+      if (index < 0) return false;
+      self.setItems.splice(index, 1);
+      return true;
+    },
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.setItems || []).includes(value),
+    'size()I': (self) => (self.setItems || []).length,
+    'isEmpty()Z': (self) => (self.setItems || []).length === 0,
+    'clear()V': (self) => {
+      self.setItems = [];
+    },
+    'iterator()Ljava/util/Iterator;': (self, _args, vm) => makeIterator(vm, self.setItems || []),
+  },
+});
 JAVA_CORE_CLASSES['Ljava/util/concurrent/CopyOnWriteArraySet;'] = nativeDef('Ljava/util/concurrent/CopyOnWriteArraySet;', {
   super: 'Ljava/lang/Object;',
   interfaces: ['Ljava/util/Set;', 'Ljava/util/Collection;'],
