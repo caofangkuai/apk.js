@@ -337,7 +337,13 @@ npm run site
    - 因此构建脚本的正确配置就是：`aapt2 link` 一次（不加 `--static-lib`），`--extra-packages` 里列出 `androidx.appcompat:androidx.appcompat.resources:com.google.android.material`，再把这些 R 类一起编译进 dex。已验证 `R$drawable` 能拿到 dexClass。
    - **已解决**（2026-11-20）：真正的卡点是 `java.util.LinkedHashSet` **没有 host 实现**。`EndCompoundLayout` 用它存监听器，构造期 `initEndIconView → setEndIconMode → dispatchOnEndIconChanged` 就要遍历，集合退化成裸对象后 `iterator()` 返回 null，于是报「调用 hasNext 时对象为空」，`endLayout` / `editText` 一直是 null。补齐该集合后两者立即正常，**样例 APK 首次画出输入框**。
    - 顺带修掉：`setText(null)` 之前经 `jsString(null)` 变成字面量 `"null"`（应为清空），两处 `setText(CharSequence)` 绑定已挡掉空引用；`themedStyledValue` 对系统资源 id（`0x01xxxxxx`）查不到时改走 `resources.resolve` 的内置映射。
-   - **剩余**：输入框底色是洋红（`0xffff00ff`）。根因是 `boxBackgroundColor` 引用的 `0x7f0d000d` 在资源表里**不存在**（`0x7f0d` 段只有 `mtrl_badge_content_description` 一个条目）。这属于构建产物缺资源，与框架无关，**不建议**在框架侧为它做兜底。
+   - **洋红底色的最终结论**（2026-11-20，已逐层取证）：
+     1. `boxBackgroundColor` / `defaultFilledBackgroundColor` 实测都是 `0xffff00ff`；
+     2. 追踪到 `TypedArray.getColor(idx=0, fallback=0xffff00ff)` 返回 fallback，调用栈是 `ResourcesCompat.getColorStateList → inflateColorStateList → ColorStateListInflaterCompat.createFromXml`，即 **color XML 解析失败后走了兜底**；
+     3. 用 `parseBinaryXml` 直接解析 `res/color/mtrl_filled_background_color.xml`，结构完全正常：`selector` 下 4 个 `item`，各带 `color`/`alpha`/`state_*`；
+     4. 但 `item` 的 `color` 属性值是 `2130903306`（`0x7f03000a`），在资源表里指向 **`attr/actionBarTabTextStyle`**，而 `R.java` 里 `colorSurface=0x7f030120`——**同一份 APK 内 id 不自洽**。
+     5. 结论：`res/color/*.xml` 是编译期固化 id 的二进制，最终 link 重新编号后与 AXML 内嵌 id 对不上。这是多包 `--extra-packages` 链路的固有后果，**不是框架缺陷**，框架侧不应为它兜底。
+   - 排查方法教训：`parseBinaryXml` 返回的是 `{ root, first, manifest, pool }` 而不是节点本身，直接当节点用会误判成「解析失败」。
    - 浮动标签文本控件的尺寸为 `0x0` 属正常：未输入时 hint 由 `CollapsingTextHelper` 自绘，不走 TextView。
    - 教训：统计型 grep 必须用完整模式（`0x[0-9a-f]*`），否则会把十六进制值误读成 0。本文件此前三条基于该误读的结论已作废。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
