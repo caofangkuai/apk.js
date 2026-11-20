@@ -335,7 +335,10 @@ npm run site
    - 也就是说：`--extra-packages` 生成的是主包 R 的**副本**（换包名），并不是各库自己的符号表；库资源的 id 在这一链路里拿不到有效值。要正确产出，需要真正的库级资源发布（Gradle 的 `processResources`/`generateRClass`）。
    - **最终更正（务必读）**（2026-11-20）：前面几条关于「R 里 id 为 0」的判断**全部是误报**。原因是我用 `grep -o "符号=[0-9]*"` 统计，遇到 `=0x7f070076` 时会在 `0` 处截断，于是看起来像 0。重新用 `=0x[0-9a-f]*` 匹配后确认：`abc_vector_test=0x7f070076`，**主包 R 与 `androidx.appcompat.resources` 的 R 都是正确值**，`--extra-packages` 完全能用。
    - 因此构建脚本的正确配置就是：`aapt2 link` 一次（不加 `--static-lib`），`--extra-packages` 里列出 `androidx.appcompat:androidx.appcompat.resources:com.google.android.material`，再把这些 R 类一起编译进 dex。已验证 `R$drawable` 能拿到 dexClass。
-   - 但即使如此，`TextInputLayout` 的 `endLayout` 仍为 null，`addView` 派发仍报「调用 getEndIconMode 时对象为空」。说明卡点**不在资源、也不在 R 类**，而在 `EndCompoundLayout` 构造内部——这需要继续按 DEX 侧逻辑排查，与构建管线无关。
+   - **已解决**（2026-11-20）：真正的卡点是 `java.util.LinkedHashSet` **没有 host 实现**。`EndCompoundLayout` 用它存监听器，构造期 `initEndIconView → setEndIconMode → dispatchOnEndIconChanged` 就要遍历，集合退化成裸对象后 `iterator()` 返回 null，于是报「调用 hasNext 时对象为空」，`endLayout` / `editText` 一直是 null。补齐该集合后两者立即正常，**样例 APK 首次画出输入框**。
+   - 顺带修掉：`setText(null)` 之前经 `jsString(null)` 变成字面量 `"null"`（应为清空），两处 `setText(CharSequence)` 绑定已挡掉空引用；`themedStyledValue` 对系统资源 id（`0x01xxxxxx`）查不到时改走 `resources.resolve` 的内置映射。
+   - **剩余**：输入框底色是洋红（`0xffff00ff`）。根因是 `boxBackgroundColor` 引用的 `0x7f0d000d` 在资源表里**不存在**（`0x7f0d` 段只有 `mtrl_badge_content_description` 一个条目）。这属于构建产物缺资源，与框架无关，**不建议**在框架侧为它做兜底。
+   - 浮动标签文本控件的尺寸为 `0x0` 属正常：未输入时 hint 由 `CollapsingTextHelper` 自绘，不走 TextView。
    - 教训：统计型 grep 必须用完整模式（`0x[0-9a-f]*`），否则会把十六进制值误读成 0。本文件此前三条基于该误读的结论已作废。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
