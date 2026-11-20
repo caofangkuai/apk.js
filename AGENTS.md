@@ -175,6 +175,14 @@ npm run site
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 - Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染，冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
 
+### 本轮已完成（2026-11-21 第十六轮：Context 与 OpenGL 方法面补全）
+
+1. **Context API 批**（`registry.js`）：补数据/外部目录（`getDataDir`/`getCodeCacheDir`/`getObbDir(s)`/`getExternalCacheDir(s)`/`getExternalFilesDirs`/`getExternalMediaDirs`）、文件 IO（`getFileStreamPath`、`openFileInput/Output` 接 `VIRTUAL_FS`、`deleteFile`、`fileList`）、数据库路径与 `openOrCreateDatabase`、包路径、权限检查与 `enforce*`、Uri 权限、广播与 `startService/bindService` 默认值、壁纸、`create*Context` 返回自身、`getSystemServiceName`（走 `vm.getSystemServiceNameByClass`）。
+2. **OpenGL 方法面**（`opengl.js`）：`GL10` 实例方法从 8 条扩到约 60 条（矩阵、顶点数组、固定管线、纹理、客户端状态）；新增 `GLES_COMMON_METHODS`（约 75 条，shader/program/buffer/texture/uniform/vertexAttrib/draw/query）与 `GLES30_EXTRA_METHODS`（约 31 条，VAO/FBO/RBO/instancing/query/UBO）。
+3. **其余 GL 方法统一桩**：从 android-31 语料取 GL10/GLES20/GLES30 剩余 306 条签名，按返回类型生成默认值（`void→undefined`、`int/long→0`、`boolean→false`、`String→''`、`Buffer→null`），带 `[I`/`[F`/`[J`/`[B` 出参的 getter 会把数组清零。显式实现优先于桩（`Object.assign` 顺序保证）。
+4. **覆盖度**：android-31 方法覆盖 3672 → **4332/8804**（+660；Context +203、GL 家族 +457），GLES20/GLES30 除构造器外全部覆盖。
+5. **回归**：`tests/compat.mjs` 增加 OpenGL 断言（`glGenTextures`/`glGenVertexArrays` 清零、`glCreateProgram→0`、`glGetShaderInfoLog→''`、`glFenceSync→0`、GL10 方法存在）；`test:all`、`build`、`site` 全绿，DeviceInfoHW 渲染与基线像素一致（`changed=0`），Via 冒烟仍通过。
+
 ### 本轮已完成（2026-11-21 第十五轮：View/TextView/Activity API 面补全）
 
 1. **View 状态与度量 API**（`view.js` + `compat.js`）：补 `keepScreenOn`、`scrollContainer`、`revealOnFocusHint`、`showingLayoutBounds`、`nextFocus*`/`nextClusterForward`、`drawingCacheQuality`、`fadingEdgeLength`、滚动条 thumb/track drawable、`accessibilityPaneTitle`/`stateDescription`/`accessibilityTraversal*`；实现 `getBoundsOnScreen`、`getHotspotBounds`、`mapRectFromViewToScreenCoords`、`isVisibleToUser`、`onFocusChanged`/`onFocusLost`、`startActionMode`、`hasExplicitFocusable`。

@@ -1642,6 +1642,126 @@ export function buildFrameworkDefinitions(vm) {
           return vm.makeFile('/storage/emulated/0/Android/data/' + (vm.packageName || 'app') + '/files' + suffix);
         },
         'getNoBackupFilesDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile('/data/user/0/' + (vm.packageName || 'app') + '/no_backup'),
+        'getDataDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile(dataDir(vm)),
+        'getCodeCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile(dataDir(vm) + '/code_cache'),
+        'getObbDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile(externalDir(vm) + '/obb'),
+        'getObbDirs()[Ljava/io/File;': (self, _args, vm) => fileArray(vm, [externalDir(vm) + '/obb']),
+        'getExternalCacheDir()Ljava/io/File;': (self, _args, vm) => vm.makeFile(externalDir(vm) + '/cache'),
+        'getExternalCacheDirs()[Ljava/io/File;': (self, _args, vm) => fileArray(vm, [externalDir(vm) + '/cache']),
+        'getExternalFilesDirs(Ljava/lang/String;)[Ljava/io/File;': (self, [type], vm) =>
+          fileArray(vm, [externalDir(vm) + '/files' + (type ? '/' + jsString(type) : '')]),
+        'getExternalMediaDirs()[Ljava/io/File;': (self, _args, vm) => fileArray(vm, [externalDir(vm) + '/media']),
+        'getFileStreamPath(Ljava/lang/String;)Ljava/io/File;': (self, [name], vm) => vm.makeFile(dataDir(vm) + '/files/' + jsString(name)),
+        'openFileInput(Ljava/lang/String;)Ljava/io/FileInputStream;': (self, [name], vm) => {
+          const bytes = VIRTUAL_FS.read(dataDir(vm) + '/files/' + jsString(name)) || new Uint8Array(0);
+          return makeAssetStream(vm, bytes);
+        },
+        'openFileOutput(Ljava/lang/String;I)Ljava/io/FileOutputStream;': (self, [name, mode], vm) =>
+          makeFileOutput(vm, dataDir(vm) + '/files/' + jsString(name), (mode | 0) === 1),
+        'deleteFile(Ljava/lang/String;)Z': (self, [name], vm) => {
+          const path = VIRTUAL_FS.normalize(dataDir(vm) + '/files/' + jsString(name));
+          return VIRTUAL_FS.files.delete(path);
+        },
+        'fileList()[Ljava/lang/String;': (self, _args, vm) => {
+          const names = VIRTUAL_FS.list(dataDir(vm) + '/files');
+          return vm.newArray('[Ljava/lang/String;', names.length, names);
+        },
+        'getDatabasePath(Ljava/lang/String;)Ljava/io/File;': (self, [name], vm) => vm.makeFile(dataDir(vm) + '/databases/' + jsString(name)),
+        'databaseList()[Ljava/lang/String;': (self, _args, vm) => vm.newArray('[Ljava/lang/String;', 0, []),
+        'deleteDatabase(Ljava/lang/String;)Z': () => false,
+        'openOrCreateDatabase(Ljava/lang/String;ILandroid/database/sqlite/SQLiteDatabase$CursorFactory;)Landroid/database/sqlite/SQLiteDatabase;': () => null,
+        'openOrCreateDatabase(Ljava/lang/String;ILandroid/database/sqlite/SQLiteDatabase$CursorFactory;Landroid/database/DatabaseErrorHandler;)Landroid/database/sqlite/SQLiteDatabase;': () => null,
+        'moveDatabaseFrom(Landroid/content/Context;Ljava/lang/String;)Z': () => false,
+        'moveSharedPreferencesFrom(Landroid/content/Context;Ljava/lang/String;)Z': () => false,
+        'deleteSharedPreferences(Ljava/lang/String;)Z': () => false,
+        'getPackageResourcePath()Ljava/lang/String;': (_self, _args, vm) => '/data/app/' + (vm.packageName || 'app') + '/base.apk',
+        'getPackageCodePath()Ljava/lang/String;': (_self, _args, vm) => '/data/app/' + (vm.packageName || 'app') + '/base.apk',
+        'getOpPackageName()Ljava/lang/String;': (_self, _args, vm) => vm.packageName,
+        'getAttributionTag()Ljava/lang/String;': () => null,
+        'getAttributionSource()Landroid/content/AttributionSource;': () => null,
+        'getParams()Landroid/content/ContextParams;': () => null,
+        'registerComponentCallbacks(Landroid/content/ComponentCallbacks;)V': () => undefined,
+        'unregisterComponentCallbacks(Landroid/content/ComponentCallbacks;)V': () => undefined,
+        'getSystemServiceName(Ljava/lang/Class;)Ljava/lang/String;': (_self, [clazz], vm) => vm.getSystemServiceNameByClass?.(clazz) ?? null,
+        'checkCallingOrSelfPermission(Ljava/lang/String;)I': () => 0,
+        'checkCallingPermission(Ljava/lang/String;)I': () => 0,
+        'enforcePermission(Ljava/lang/String;IILjava/lang/String;)V': () => undefined,
+        'enforceCallingPermission(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'enforceCallingOrSelfPermission(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'checkUriPermission(Landroid/net/Uri;III)I': () => 0,
+        'checkUriPermission(Landroid/net/Uri;Ljava/lang/String;Ljava/lang/String;III)I': () => 0,
+        'checkCallingUriPermission(Landroid/net/Uri;I)I': () => 0,
+        'checkCallingOrSelfUriPermission(Landroid/net/Uri;I)I': () => 0,
+        'checkUriPermissions(Ljava/util/List;III)[I': (_self, [list], vm) => {
+          const size = Array.isArray(list?.$peer?.items) ? list.$peer.items.length : 0;
+          return vm.newArray('[I', size, new Array(size).fill(0));
+        },
+        'checkCallingUriPermissions(Ljava/util/List;I)[I': (_self, [list], vm) => {
+          const size = Array.isArray(list?.$peer?.items) ? list.$peer.items.length : 0;
+          return vm.newArray('[I', size, new Array(size).fill(0));
+        },
+        'checkCallingOrSelfUriPermissions(Ljava/util/List;I)[I': (_self, [list], vm) => {
+          const size = Array.isArray(list?.$peer?.items) ? list.$peer.items.length : 0;
+          return vm.newArray('[I', size, new Array(size).fill(0));
+        },
+        'grantUriPermission(Ljava/lang/String;Landroid/net/Uri;I)V': () => undefined,
+        'revokeUriPermission(Landroid/net/Uri;I)V': () => undefined,
+        'revokeUriPermission(Ljava/lang/String;Landroid/net/Uri;I)V': () => undefined,
+        'enforceUriPermission(Landroid/net/Uri;IIILjava/lang/String;)V': () => undefined,
+        'enforceUriPermission(Landroid/net/Uri;Ljava/lang/String;Ljava/lang/String;IIILjava/lang/String;)V': () => undefined,
+        'enforceCallingUriPermission(Landroid/net/Uri;ILjava/lang/String;)V': () => undefined,
+        'enforceCallingOrSelfUriPermission(Landroid/net/Uri;ILjava/lang/String;)V': () => undefined,
+        'sendBroadcast(Landroid/content/Intent;)V': () => undefined,
+        'sendBroadcast(Landroid/content/Intent;Ljava/lang/String;)V': () => undefined,
+        'sendBroadcastWithMultiplePermissions(Landroid/content/Intent;[Ljava/lang/String;)V': () => undefined,
+        'sendOrderedBroadcast(Landroid/content/Intent;Ljava/lang/String;)V': () => undefined,
+        'sendOrderedBroadcast(Landroid/content/Intent;Ljava/lang/String;Landroid/content/BroadcastReceiver;Landroid/os/Handler;ILjava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'sendOrderedBroadcast(Landroid/content/Intent;Ljava/lang/String;Ljava/lang/String;Landroid/content/BroadcastReceiver;Landroid/os/Handler;ILjava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'sendBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;)V': () => undefined,
+        'sendBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;Ljava/lang/String;)V': () => undefined,
+        'sendOrderedBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;Ljava/lang/String;Landroid/content/BroadcastReceiver;Landroid/os/Handler;ILjava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'sendStickyBroadcast(Landroid/content/Intent;)V': () => undefined,
+        'sendStickyBroadcast(Landroid/content/Intent;Landroid/os/Bundle;)V': () => undefined,
+        'sendStickyOrderedBroadcast(Landroid/content/Intent;Landroid/content/BroadcastReceiver;Landroid/os/Handler;ILjava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'sendStickyBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;)V': () => undefined,
+        'sendStickyOrderedBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;Landroid/content/BroadcastReceiver;Landroid/os/Handler;ILjava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'removeStickyBroadcast(Landroid/content/Intent;)V': () => undefined,
+        'removeStickyBroadcastAsUser(Landroid/content/Intent;Landroid/os/UserHandle;)V': () => undefined,
+        'registerReceiver(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;Ljava/lang/String;Landroid/os/Handler;I)Landroid/content/Intent;': () => null,
+        'unregisterReceiver(Landroid/content/BroadcastReceiver;)V': () => undefined,
+        'startActivities([Landroid/content/Intent;)V': () => undefined,
+        'startActivities([Landroid/content/Intent;Landroid/os/Bundle;)V': () => undefined,
+        'startIntentSender(Landroid/content/IntentSender;Landroid/content/Intent;III)V': () => undefined,
+        'startIntentSender(Landroid/content/IntentSender;Landroid/content/Intent;IIILandroid/os/Bundle;)V': () => undefined,
+        'startService(Landroid/content/Intent;)Landroid/content/ComponentName;': () => null,
+        'startForegroundService(Landroid/content/Intent;)Landroid/content/ComponentName;': () => null,
+        'stopService(Landroid/content/Intent;)Z': () => false,
+        'bindService(Landroid/content/Intent;Landroid/content/ServiceConnection;I)Z': () => false,
+        'bindService(Landroid/content/Intent;ILjava/util/concurrent/Executor;Landroid/content/ServiceConnection;)Z': () => false,
+        'bindIsolatedService(Landroid/content/Intent;ILjava/lang/String;Ljava/util/concurrent/Executor;Landroid/content/ServiceConnection;)Z': () => false,
+        'bindServiceAsUser(Landroid/content/Intent;Landroid/content/ServiceConnection;ILandroid/os/UserHandle;)Z': () => false,
+        'updateServiceGroup(Landroid/content/ServiceConnection;II)V': () => undefined,
+        'unbindService(Landroid/content/ServiceConnection;)V': () => undefined,
+        'startInstrumentation(Landroid/content/ComponentName;Ljava/lang/String;Landroid/os/Bundle;)Z': () => false,
+        'getWallpaper()Landroid/graphics/drawable/Drawable;': () => null,
+        'peekWallpaper()Landroid/graphics/drawable/Drawable;': () => null,
+        'getWallpaperDesiredMinimumWidth()I': () => 0,
+        'getWallpaperDesiredMinimumHeight()I': () => 0,
+        'setWallpaper(Landroid/graphics/Bitmap;)V': () => undefined,
+        'setWallpaper(Ljava/io/InputStream;)V': () => undefined,
+        'clearWallpaper()V': () => undefined,
+        'createPackageContext(Ljava/lang/String;I)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createContextForSplit(Ljava/lang/String;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createConfigurationContext(Landroid/content/res/Configuration;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createDisplayContext(Landroid/view/Display;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createWindowContext(ILandroid/os/Bundle;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createWindowContext(Landroid/view/Display;ILandroid/os/Bundle;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createContext(Landroid/content/ContextParams;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createAttributionContext(Ljava/lang/String;)Landroid/content/Context;': (self) => self.contextObject || self,
+        'createDeviceProtectedStorageContext()Landroid/content/Context;': (self) => self.contextObject || self,
+        'isDeviceProtectedStorage()Z': () => false,
+        'isUiContext()Z': () => true,
+        'getDisplay()Landroid/view/Display;': () => null,
         'getClassLoader()Ljava/lang/ClassLoader;': (self, _args, vm) => {
           if (!vm.classLoaderObject) vm.classLoaderObject = vm.allocateRawObject('Ljava/lang/ClassLoader;');
           return vm.classLoaderObject;
@@ -10580,6 +10700,30 @@ function makeAssetStream(vm, bytes) {
       peer.data = data;
       peer.cursor = 0;
     }
+  }
+  return object;
+}
+
+function dataDir(vm) {
+  return '/data/user/0/' + (vm?.packageName || 'app');
+}
+
+function externalDir(vm) {
+  return '/storage/emulated/0/Android/data/' + (vm?.packageName || 'app');
+}
+
+function fileArray(vm, paths) {
+  return vm.newArray('[Ljava/io/File;', paths.length, paths.map((path) => vm.makeFile(path)));
+}
+
+function makeFileOutput(vm, path, append) {
+  if (!vm || typeof vm.allocateRawObject !== 'function') return null;
+  const object = vm.allocateRawObject('Ljava/io/FileOutputStream;');
+  const peer = vm.registry?.getPeer ? vm.registry.getPeer(object, 'Ljava/io/FileOutputStream;') : null;
+  if (peer) {
+    peer.path = path;
+    const existing = append ? VIRTUAL_FS.read(path) : null;
+    peer.chunks = existing ? [Uint8Array.from(existing)] : [];
   }
   return object;
 }

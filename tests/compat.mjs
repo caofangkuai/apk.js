@@ -245,6 +245,29 @@ function vmPeer() {
   assert.equal(method('Landroid/widget/TextView;', 'getHint()Ljava/lang/CharSequence;')(self, []), '提示');
 }
 
+// OpenGL：无 GPU 时按返回类型给默认值，数组出参清零
+{
+  const gles20 = defOf('Landroid/opengl/GLES20;');
+  const gles30 = defOf('Landroid/opengl/GLES30;');
+  const gl10 = defOf('Ljavax/microedition/khronos/opengles/GL10;');
+  const textures = { $data: [7, 7] };
+  gles20.staticMethods.get('glGenTextures(I[II)V')(null, [2, textures, 0]);
+  assert.deepEqual(textures.$data, [0, 0]);
+  assert.equal(gles20.staticMethods.get('glCreateProgram()I')(), 0);
+  assert.equal(gles20.staticMethods.get('glGetShaderInfoLog(I)Ljava/lang/String;')(), '');
+  assert.equal(gles20.staticMethods.get('glIsProgram(I)Z')(null, [1]), false);
+  const params = { $data: [3, 3] };
+  gles20.staticMethods.get('glGetIntegerv(I[II)V')(null, [0x0d33, params, 0]);
+  assert.deepEqual(params.$data, [0, 0]);
+  const vaos = { $data: [9] };
+  gles30.staticMethods.get('glGenVertexArrays(I[II)V')(null, [1, vaos, 0]);
+  assert.deepEqual(vaos.$data, [0]);
+  assert.equal(gles30.staticMethods.get('glFenceSync(II)J')(), 0);
+  assert.equal(gles30.staticMethods.get('glIsVertexArray(I)Z')(null, [1]), false);
+  assert(gl10.methods.has('glClearStencil(I)V'), 'GL10 应补全 no-op 方法');
+  assert(gl10.methods.has('glGetIntegerv(ILjava/nio/IntBuffer;)V'), 'GL10 应补全 getter');
+}
+
 // 兼容层不能覆盖已有实现
 {
   const canvasDef = defOf('Landroid/graphics/Canvas;');
