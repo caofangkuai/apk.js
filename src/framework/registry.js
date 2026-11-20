@@ -55,7 +55,7 @@ import {
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
 import { DRAWABLE_CLASSES, OUTLINE_CLASSES, SHADER_CLASSES, drawableObject } from './drawables.js';
-import { WEBKIT_CLASSES } from './webkit.js';
+import { WEBKIT_CLASSES, uriObject } from './webkit.js';
 import { OPENGL_CLASSES } from './opengl.js';
 
 export const FRAMEWORK_CLASSES = {};
@@ -528,6 +528,173 @@ function manifestAttrText(node, ...names) {
   return '';
 }
 
+/** 清单里的类名可能是简写（`.MainActivity` / `MainActivity`），按包名补全。 */
+function manifestClassName(rawName, packageName) {
+  const name = String(rawName || '');
+  if (!name) return '';
+  if (name.startsWith('.')) return `${packageName}${name}`;
+  if (!name.includes('.')) return `${packageName}.${name}`;
+  return name;
+}
+
+function manifestApplicationEntries(vm, tagName) {
+  const application = vm?.apk?.manifest?.findChild?.('application');
+  return application?.findAll?.(tagName) || [];
+}
+
+/** 按 AOSP IntentFilter.match 的 action / category 语义匹配清单节点。 */
+function intentFilterMatches(intent, filter) {
+  const actions = (filter?.findAll?.('action') || [])
+    .map((node) => manifestAttrText(node, 'android:name', 'name'))
+    .filter(Boolean);
+  const action = intent?.action ?? null;
+  if (action) {
+    if (!actions.includes(action)) return false;
+  } else if (!actions.length) {
+    return false;
+  }
+  const categories = (filter?.findAll?.('category') || [])
+    .map((node) => manifestAttrText(node, 'android:name', 'name'))
+    .filter(Boolean);
+  for (const category of intent?.categories || []) {
+    if (!categories.includes(category)) return false;
+  }
+  return true;
+}
+
+/** 解析 Intent 的目标组件：显式 className 优先，其次扫描清单里的 intent-filter。 */
+function resolveIntentComponent(vm, intent, _pm) {
+  if (!vm) return null;
+  const packageName = intent?.packageName || vm.packageName || '';
+  if (intent?.className) return { name: intent.className, packageName };
+  for (const node of manifestApplicationEntries(vm, 'activity')) {
+    const name = manifestClassName(manifestAttrText(node, 'android:name', 'name'), packageName);
+    const filters = node?.findAll?.('intent-filter') || [];
+    if (filters.some((filter) => intentFilterMatches(intent, filter))) return { name, packageName };
+  }
+  if (!intent?.action && !(intent?.categories || []).length) {
+    const main = vm.findMainActivity?.(vm.apk?.manifest);
+    if (main) {
+      return { name: manifestClassName(manifestAttrText(main, 'android:name', 'name'), packageName), packageName };
+    }
+  }
+  return null;
+}
+
+function activityInfoObject(vm, info) {
+  const object = vm.allocateRawObject('Landroid/content/pm/ActivityInfo;');
+  object.$peer = { vm, name: info.name, packageName: info.packageName };
+  return object;
+}
+
+/** 组装 ResolveInfo：activityInfo / resolvePackageName / isDefault 与 AOSP 的字段对应。 */
+function resolveInfoObject(vm, info, intent) {
+  const object = vm.allocateRawObject('Landroid/content/pm/ResolveInfo;');
+  object.$peer = {
+    vm,
+    activityInfo: activityInfoObject(vm, info),
+    resolvePackageName: info.packageName,
+    isDefault: false,
+    priority: 0,
+    preferredOrder: 0,
+    match: 0,
+    specificIndex: -1,
+    labelRes: 0,
+    nonLocalizedLabel: null,
+    icon: 0,
+    banner: 0,
+    logo: 0,
+    intent,
+  };
+  return object;
+}
+
+/** 从清单 `<application android:icon|banner|logo>` 取资源 id 并包成 Drawable。 */
+function manifestDrawable(vm, attribute) {
+  const application = vm?.apk?.manifest?.findChild?.('application');
+  if (!application) return null;
+  const raw = application.getAttribute?.(`android:${attribute}`) ?? application.getAttribute?.(attribute);
+  let resId = 0;
+  if (typeof raw === 'number') resId = raw >>> 0;
+  else if (raw && typeof raw === 'object' && raw.reference !== undefined) resId = raw.reference >>> 0;
+  if (!resId) return null;
+  const description = vm.resources?.getDrawable?.(resId);
+  return description ? drawableObject(vm, description) : null;
+}
+
+function applicationIconDrawable(vm) {
+  return manifestDrawable(vm, 'icon');
+}
+
+function applicationBannerDrawable(vm) {
+  return manifestDrawable(vm, 'banner') ?? manifestDrawable(vm, 'icon');
+}
+
+function applicationLogoDrawable(vm) {
+  return manifestDrawable(vm, 'logo') ?? manifestDrawable(vm, 'icon');
+}
+
+/** 按 AOSP 顺序把事件从后往前派发给子视图，任一子视图消费即返回 true。 */
+function dispatchToHostChildren(self, method, ...args) {
+  const children = self?.view?.children || [];
+  for (let i = children.length - 1; i >= 0; i--) {
+    const child = children[i];
+    if (!child || child.visibility === 8) continue;
+    if (typeof child[method] === 'function' && child[method](...args)) return true;
+  }
+  return false;
+}
+
+/** 与 IntentPeer 结构一致的裸对象，供静态工厂方法使用。 */
+function makeIntentObject(vm) {
+  const object = vm.allocateRawObject('Landroid/content/Intent;');
+  object.$peer = {
+    vm,
+    action: null,
+    component: null,
+    className: null,
+    packageName: null,
+    data: null,
+    type: null,
+    identifier: null,
+    categories: [],
+    selector: null,
+    clipData: null,
+    sourceBounds: null,
+    extras: new Map(),
+    flags: 0,
+    setClass(className) {
+      this.className = normalizeClassName(className, this.vm?.packageName);
+      this.packageName = packageOfClassName(this.className) || this.vm?.packageName || null;
+      return this;
+    },
+  };
+  return object;
+}
+
+function cloneIntent(vm, peer) {
+  const object = vm.allocateRawObject('Landroid/content/Intent;');
+  const copy = Object.assign(Object.create(Object.getPrototypeOf(peer)), peer);
+  copy.extras = new Map(peer.extras || []);
+  copy.categories = [...(peer.categories || [])];
+  object.$peer = copy;
+  return object;
+}
+
+function normalizeMimeType(type) {
+  if (type === null || type === undefined) return null;
+  const normalized = String(type).split(';')[0].trim().toLowerCase();
+  return normalized || null;
+}
+
+function intentUriString(peer) {
+  let result = 'intent:';
+  if (peer?.className) result += `#Intent;component=${peer.packageName || ''}/${peer.className};`;
+  else result += '#Intent;';
+  if (peer?.action) result += `action=${peer.action};`;
+  return `${result}end`;
+}
+
 /**
  * 清单 `<application>` 下的 `<meta-data>`：值可能是字符串、数字，或资源引用。
  * 资源引用先查资源表，查不到就保留 null（调用方按缺失处理）。
@@ -783,6 +950,33 @@ function cameraStringList(vm, values) {
   const list = vm.allocateRawObject('Ljava/util/ArrayList;');
   list.$peer = { items: values.map((value) => jsString(value)) };
   return list;
+}
+
+function emptyJavaList(vm) {
+  const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+  list.$peer = { items: [] };
+  return list;
+}
+
+/** 由模拟器配置里的 locale（如 zh-CN）推出 ISO 国家码，供电话/网络信息使用。 */
+function localeRegion(vm) {
+  const locale = String(vm?.resources?.getConfiguration?.()?.locale || 'en-US');
+  const region = locale.split(/[-_]/)[1];
+  return (region || 'us').toLowerCase();
+}
+
+function telephonyObject(vm, descriptor) {
+  const object = vm.allocateRawObject(descriptor);
+  object.$peer = { vm };
+  return object;
+}
+
+function buildSignalStrength(vm) {
+  return telephonyObject(vm, 'Landroid/telephony/SignalStrength;');
+}
+
+function buildServiceState(vm) {
+  return telephonyObject(vm, 'Landroid/telephony/ServiceState;');
 }
 
 function cameraParameters(vm) {
@@ -2586,6 +2780,13 @@ export function buildFrameworkDefinitions(vm) {
           this.component = null;
           this.className = null;
           this.packageName = null;
+          this.data = null;
+          this.type = null;
+          this.identifier = null;
+          this.categories = [];
+          this.selector = null;
+          this.clipData = null;
+          this.sourceBounds = null;
           this.extras = new Map();
           this.flags = 0;
         }
@@ -2601,8 +2802,25 @@ export function buildFrameworkDefinitions(vm) {
           self.action = null;
           self.className = null;
           self.packageName = null;
+          self.data = null;
+          self.type = null;
+          self.identifier = null;
+          self.categories = [];
+          self.selector = null;
+          self.clipData = null;
+          self.sourceBounds = null;
           self.extras = new Map();
           self.flags = 0;
+        },
+        '<init>(Ljava/lang/String;Landroid/net/Uri;)V': (self, [action, data]) => {
+          self.action = jsString(action);
+          self.data = data ?? null;
+        },
+        '<init>(Ljava/lang/String;Landroid/net/Uri;Landroid/content/Context;Ljava/lang/Class;)V': (self, [action, data, _context, klass]) => {
+          self.action = jsString(action);
+          self.data = data ?? null;
+          const descriptor = klass?.$descriptor || klass?.$peer?.descriptor || null;
+          if (descriptor) self.setClass(descriptor);
         },
         '<init>(Landroid/content/Context;Ljava/lang/Class;)V': (self, [context, klass]) => {
           const descriptor = klass?.$descriptor || klass?.$peer?.descriptor || null;
@@ -2617,6 +2835,13 @@ export function buildFrameworkDefinitions(vm) {
           self.component = source?.component ?? null;
           self.className = source?.className ?? null;
           self.packageName = source?.packageName ?? null;
+          self.data = source?.data ?? null;
+          self.type = source?.type ?? null;
+          self.identifier = source?.identifier ?? null;
+          self.categories = [...(source?.categories || [])];
+          self.selector = source?.selector ?? null;
+          self.clipData = source?.clipData ?? null;
+          self.sourceBounds = source?.sourceBounds ?? null;
           self.extras = new Map(source?.extras || []);
           self.flags = source?.flags ?? 0;
         },
@@ -2714,8 +2939,286 @@ export function buildFrameworkDefinitions(vm) {
           object.$peer = { vm, map: new Map(self.extras) };
           return object;
         },
+        'addCategory(Ljava/lang/String;)Landroid/content/Intent;': (self, [category]) => {
+          const value = jsString(category);
+          if (value && !self.categories.includes(value)) self.categories.push(value);
+          return self;
+        },
+        'removeCategory(Ljava/lang/String;)V': (self, [category]) => {
+          const value = jsString(category);
+          self.categories = (self.categories || []).filter((item) => item !== value);
+        },
+        'getCategories()Ljava/util/Set;': (self, _args, vm) => {
+          const set = vm.allocateRawObject('Ljava/util/HashSet;');
+          set.$peer = { items: [...(self.categories || [])] };
+          return set;
+        },
+        'hasCategory(Ljava/lang/String;)Z': (self, [category]) => (self.categories || []).includes(jsString(category)),
+        'getData()Landroid/net/Uri;': (self, _args, vm) => {
+          if (!self.data) return null;
+          if (typeof self.data === 'string') return uriObject(vm, self.data);
+          return self.data;
+        },
+        'getDataString()Ljava/lang/String;': (self) => {
+          if (!self.data) return null;
+          if (typeof self.data === 'string') return self.data;
+          return self.data?.$peer?.$value ?? null;
+        },
+        'getScheme()Ljava/lang/String;': (self) => {
+          const value = self.data?.$peer?.$scheme;
+          return value ?? null;
+        },
+        'getType()Ljava/lang/String;': (self) => self.type ?? null,
+        'resolveType(Landroid/content/Context;)Ljava/lang/String;': (self) => self.type ?? null,
+        'resolveType(Landroid/content/ContentResolver;)Ljava/lang/String;': (self) => self.type ?? null,
+        'resolveTypeIfNeeded(Landroid/content/ContentResolver;)Ljava/lang/String;': (self) => self.type ?? null,
+        'setData(Landroid/net/Uri;)Landroid/content/Intent;': (self, [data]) => {
+          self.data = data ?? null;
+          return self;
+        },
+        'setDataAndNormalize(Landroid/net/Uri;)Landroid/content/Intent;': (self, [data]) => {
+          self.data = data ?? null;
+          return self;
+        },
+        'setType(Ljava/lang/String;)Landroid/content/Intent;': (self, [type]) => {
+          self.type = jsString(type);
+          return self;
+        },
+        'setTypeAndNormalize(Ljava/lang/String;)Landroid/content/Intent;': (self, [type]) => {
+          self.type = normalizeMimeType(jsString(type));
+          return self;
+        },
+        'setDataAndType(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;': (self, [data, type]) => {
+          self.data = data ?? null;
+          self.type = jsString(type);
+          return self;
+        },
+        'setDataAndTypeAndNormalize(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;': (self, [data, type]) => {
+          self.data = data ?? null;
+          self.type = normalizeMimeType(jsString(type));
+          return self;
+        },
+        'getIdentifier()Ljava/lang/String;': (self) => self.identifier ?? null,
+        'setIdentifier(Ljava/lang/String;)Landroid/content/Intent;': (self, [identifier]) => {
+          self.identifier = jsString(identifier);
+          return self;
+        },
+        'getSelector()Landroid/content/Intent;': (self) => self.selector ?? null,
+        'setSelector(Landroid/content/Intent;)V': (self, [selector]) => { self.selector = selector ?? null; },
+        'getClipData()Landroid/content/ClipData;': (self) => self.clipData ?? null,
+        'setClipData(Landroid/content/ClipData;)V': (self, [clipData]) => { self.clipData = clipData ?? null; },
+        'setExtrasClassLoader(Ljava/lang/ClassLoader;)V': () => undefined,
+        'hasFileDescriptors()Z': () => false,
+        'getSourceBounds()Landroid/graphics/Rect;': (self) => self.sourceBounds ?? null,
+        'setSourceBounds(Landroid/graphics/Rect;)V': (self, [bounds]) => { self.sourceBounds = bounds ?? null; },
+        'getParcelableArrayExtra(Ljava/lang/String;)[Landroid/os/Parcelable;': (self, [key]) => {
+          const value = self.extras.get(jsString(key));
+          return Array.isArray(value) ? value : null;
+        },
+        'getParcelableArrayListExtra(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getIntegerArrayListExtra(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getStringArrayListExtra(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getCharSequenceArrayListExtra(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getBooleanArrayExtra(Ljava/lang/String;)[Z': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getByteArrayExtra(Ljava/lang/String;)[B': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getShortArrayExtra(Ljava/lang/String;)[S': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getCharArrayExtra(Ljava/lang/String;)[C': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getLongArrayExtra(Ljava/lang/String;)[J': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getFloatArrayExtra(Ljava/lang/String;)[F': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getDoubleArrayExtra(Ljava/lang/String;)[D': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getCharSequenceArrayExtra(Ljava/lang/String;)[Ljava/lang/CharSequence;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'getBundleExtra(Ljava/lang/String;)Landroid/os/Bundle;': (self, [key]) => self.extras.get(jsString(key)) ?? null,
+        'putExtra(Ljava/lang/String;D)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), Number(value));
+          return self;
+        },
+        'putExtra(Ljava/lang/String;Ljava/lang/CharSequence;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;Landroid/os/Parcelable;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[Landroid/os/Parcelable;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[Z)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[B)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[S)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[C)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[J)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[F)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[D)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtra(Ljava/lang/String;[Ljava/lang/CharSequence;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putParcelableArrayListExtra(Ljava/lang/String;Ljava/util/ArrayList;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putIntegerArrayListExtra(Ljava/lang/String;Ljava/util/ArrayList;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putStringArrayListExtra(Ljava/lang/String;Ljava/util/ArrayList;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putCharSequenceArrayListExtra(Ljava/lang/String;Ljava/util/ArrayList;)Landroid/content/Intent;': (self, [key, value]) => {
+          self.extras.set(jsString(key), value);
+          return self;
+        },
+        'putExtras(Landroid/content/Intent;)Landroid/content/Intent;': (self, [other]) => {
+          const source = other?.$peer || other;
+          for (const [key, value] of source?.extras || []) self.extras.set(String(key), value);
+          return self;
+        },
+        'replaceExtras(Landroid/content/Intent;)Landroid/content/Intent;': (self, [other]) => {
+          const source = other?.$peer || other;
+          self.extras = new Map(source?.extras || []);
+          return self;
+        },
+        'replaceExtras(Landroid/os/Bundle;)Landroid/content/Intent;': (self, [bundle]) => {
+          const data = bundle?.$peer?.map || bundle?.map;
+          self.extras = new Map(data instanceof Map ? data : []);
+          return self;
+        },
+        'removeFlags(I)V': (self, [flags]) => {
+          self.flags = (self.flags & ~(flags | 0)) >>> 0;
+        },
+        'clone()Ljava/lang/Object;': (self, _args, vm) => cloneIntent(vm, self),
+        'cloneFilter()Landroid/content/Intent;': (self, _args, vm) => {
+          const copy = cloneIntent(vm, self);
+          copy.$peer.extras = new Map();
+          return copy;
+        },
+        'filterEquals(Landroid/content/Intent;)Z': (self, [other]) => {
+          const peer = other?.$peer || other;
+          if (!peer) return false;
+          return self.action === peer.action
+            && self.type === peer.type
+            && self.identifier === peer.identifier
+            && self.className === peer.className
+            && self.packageName === peer.packageName
+            && String(self.data?.$peer?.$value ?? self.data ?? '') === String(peer.data?.$peer?.$value ?? peer.data ?? '')
+            && (self.categories || []).join(',') === (peer.categories || []).join(',');
+        },
+        'filterHashCode()I': (self) => String(`${self.action}|${self.type}|${self.className}|${self.packageName}`).length,
+        'fillIn(Landroid/content/Intent;I)I': (self, [other, flags]) => {
+          const peer = other?.$peer || other;
+          if (!peer) return flags | 0;
+          let remaining = flags | 0;
+          const copyFields = [['action', 0x01], ['data', 0x02], ['type', 0x04], ['className', 0x08], ['packageName', 0x08], ['identifier', 0x10]];
+          for (const [field, bit] of copyFields) {
+            if ((remaining & bit) && (self[field] === null || self[field] === undefined)) {
+              self[field] = peer[field] ?? null;
+              remaining &= ~bit;
+            }
+          }
+          if ((remaining & 0x20) && !(self.categories || []).length) {
+            self.categories = [...(peer.categories || [])];
+            remaining &= ~0x20;
+          }
+          return remaining;
+        },
+        'resolveActivity(Landroid/content/pm/PackageManager;)Landroid/content/ComponentName;': (self, [pm], vm) => {
+          const info = resolveIntentComponent(vm, self, pm);
+          if (!info) return null;
+          return { $descriptor: 'Landroid/content/ComponentName;', packageName: info.packageName, className: info.name };
+        },
+        'resolveActivityInfo(Landroid/content/pm/PackageManager;I)Landroid/content/pm/ActivityInfo;': (self, [_pm, flags], vm) => {
+          const info = resolveIntentComponent(vm, self, null);
+          return info ? activityInfoObject(vm, info) : null;
+        },
+        'toURI()Ljava/lang/String;': (self) => intentUriString(self),
+        'toUri(I)Ljava/lang/String;': (self) => intentUriString(self),
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'readFromParcel(Landroid/os/Parcel;)V': () => undefined,
         'toString()Ljava/lang/String;': (self) =>
           `Intent { ${self.action ? `act=${self.action} ` : ''}${self.className ? `cmp=${self.packageName || ''}/${self.className}` : ''} }`,
+      },
+      staticMethods: {
+        'createChooser(Landroid/content/Intent;Ljava/lang/CharSequence;)Landroid/content/Intent;': (_self, [intent], vm) => {
+          const chooser = vm.allocateRawObject('Landroid/content/Intent;');
+          chooser.$peer = { vm, action: 'android.intent.action.CHOOSER', extras: new Map([['android.intent.extra.INTENT', intent]]) };
+          return chooser;
+        },
+        'createChooser(Landroid/content/Intent;Ljava/lang/CharSequence;Landroid/content/IntentSender;)Landroid/content/Intent;': (_self, [intent], vm) => {
+          const chooser = vm.allocateRawObject('Landroid/content/Intent;');
+          chooser.$peer = { vm, action: 'android.intent.action.CHOOSER', extras: new Map([['android.intent.extra.INTENT', intent]]) };
+          return chooser;
+        },
+        'makeMainActivity(Landroid/content/ComponentName;)Landroid/content/Intent;': (_self, [component], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.MAIN';
+          intent.$peer.categories = ['android.intent.category.LAUNCHER'];
+          if (component?.$peer) {
+            intent.$peer.className = component.$peer.className;
+            intent.$peer.packageName = component.$peer.packageName;
+          }
+          return intent;
+        },
+        'makeMainSelectorActivity(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;': (_self, [selectorAction, selectorCategory], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.MAIN';
+          intent.$peer.categories = ['android.intent.category.LAUNCHER'];
+          return intent;
+        },
+        'makeRestartActivityTask(Landroid/content/ComponentName;)Landroid/content/Intent;': (_self, [component], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.MAIN';
+          intent.$peer.flags = 0x10000000 | 0x00008000;
+          if (component?.$peer) {
+            intent.$peer.className = component.$peer.className;
+            intent.$peer.packageName = component.$peer.packageName;
+          }
+          return intent;
+        },
+        'getIntent(Ljava/lang/String;)Landroid/content/Intent;': (_self, [uri], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.VIEW';
+          intent.$peer.data = uriObject(vm, jsString(uri));
+          return intent;
+        },
+        'getIntentOld(Ljava/lang/String;)Landroid/content/Intent;': (_self, [uri], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.VIEW';
+          intent.$peer.data = uriObject(vm, jsString(uri));
+          return intent;
+        },
+        'parseUri(Ljava/lang/String;I)Landroid/content/Intent;': (_self, [uri], vm) => {
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.VIEW';
+          intent.$peer.data = uriObject(vm, jsString(uri));
+          return intent;
+        },
+        'parseIntent(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;)Landroid/content/Intent;': () => null,
+        'normalizeMimeType(Ljava/lang/String;)Ljava/lang/String;': (_self, [type]) => normalizeMimeType(jsString(type)),
       },
       staticFields: new Map([
         ['ACTION_MAIN:Ljava/lang/String;', 'android.intent.action.MAIN'],
@@ -3500,6 +4003,254 @@ export function buildFrameworkDefinitions(vm) {
         'onNestedPreScroll(Landroid/view/View;II[II)V': () => undefined,
         'onNestedFling(Landroid/view/View;FFZ)Z': () => false,
         'onNestedPreFling(Landroid/view/View;FF)Z': () => false,
+        'onNestedScroll(Landroid/view/View;IIII)V': () => undefined,
+        // 以下按 AOSP ViewGroup 的转发语义实现：事件先给子视图，子视图不消费再返回 false。
+        'focusableViewAvailable(Landroid/view/View;)V': () => undefined,
+        'showContextMenuForChild(Landroid/view/View;)Z': () => false,
+        'showContextMenuForChild(Landroid/view/View;FF)Z': () => false,
+        'startActionModeForChild(Landroid/view/View;Landroid/view/ActionMode$Callback;)Landroid/view/ActionMode;': () => null,
+        'startActionModeForChild(Landroid/view/View;Landroid/view/ActionMode$Callback;I)Landroid/view/ActionMode;': () => null,
+        'requestChildRectangleOnScreen(Landroid/view/View;Landroid/graphics/Rect;Z)Z': () => false,
+        'requestSendAccessibilityEvent(Landroid/view/View;Landroid/view/accessibility/AccessibilityEvent;)Z': () => true,
+        'childHasTransientStateChanged(Landroid/view/View;Z)V': () => undefined,
+        'dispatchUnhandledMove(Landroid/view/View;I)Z': () => false,
+        'clearChildFocus(Landroid/view/View;)V': (self, [view]) => {
+          const child = unwrapView(view);
+          if (!self.view || !child) return;
+          if (self.view.focusedChild === child) {
+            self.view.focusedChild = null;
+            self.view.focused = false;
+            child.focused = false;
+          }
+        },
+        'addFocusables(Ljava/util/ArrayList;II)V': (self, [list, _direction, _focusableMode], vm) => {
+          const items = list?.$peer?.items || [];
+          for (const child of self.view?.children || []) {
+            if (child.visibility === 8 || child.focusable === false) continue;
+            items.push(viewObject(vm, child));
+          }
+          if (list?.$peer) list.$peer.items = items;
+        },
+        'addKeyboardNavigationClusters(Ljava/util/Collection;I)V': () => undefined,
+        'setTouchscreenBlocksFocus(Z)V': (self, [value]) => { self.touchscreenBlocksFocus = !!value; },
+        'getTouchscreenBlocksFocus()Z': (self) => !!self?.touchscreenBlocksFocus,
+        'findViewsWithText(Ljava/util/ArrayList;Ljava/lang/CharSequence;I)V': (self, [list, text], vm) => {
+          const needle = String(text ?? '').toLowerCase();
+          const items = list?.$peer?.items || [];
+          const visit = (view) => {
+            const content = String(view?.text ?? view?.hint ?? '').toLowerCase();
+            if (content && content.includes(needle)) items.push(viewObject(vm, view));
+            for (const child of view?.children || []) visit(child);
+          };
+          for (const child of self.view?.children || []) visit(child);
+          if (list?.$peer) list.$peer.items = items;
+        },
+        'dispatchWindowFocusChanged(Z)V': (self, [hasFocus]) => {
+          for (const child of self.view?.children || []) child.dispatchWindowFocusChanged?.(!!hasFocus);
+        },
+        'addTouchables(Ljava/util/ArrayList;)V': (self, [list], vm) => {
+          const items = list?.$peer?.items || [];
+          for (const child of self.view?.children || []) {
+            if (child.visibility === 8 || child.clickable !== true) continue;
+            items.push(viewObject(vm, child));
+          }
+          if (list?.$peer) list.$peer.items = items;
+        },
+        'dispatchDisplayHint(I)V': (self, [hint]) => {
+          for (const child of self.view?.children || []) child.dispatchDisplayHint?.(hint | 0);
+        },
+        'dispatchVisibilityChanged(Landroid/view/View;I)V': (self, [source, visibility]) => {
+          for (const child of self.view?.children || []) child.dispatchVisibilityChanged?.(source, visibility | 0);
+        },
+        'dispatchWindowVisibilityChanged(I)V': (self, [visibility]) => {
+          for (const child of self.view?.children || []) child.dispatchWindowVisibilityChanged?.(visibility | 0);
+        },
+        'dispatchConfigurationChanged(Landroid/content/res/Configuration;)V': (self, [configuration]) => {
+          for (const child of self.view?.children || []) child.dispatchConfigurationChanged?.(configuration);
+        },
+        'recomputeViewAttributes(Landroid/view/View;)V': () => undefined,
+        'dispatchDragEvent(Landroid/view/DragEvent;)Z': () => false,
+        'dispatchWindowSystemUiVisiblityChanged(I)V': (self, [visibility]) => {
+          for (const child of self.view?.children || []) child.dispatchWindowSystemUiVisiblityChanged?.(visibility | 0);
+        },
+        'dispatchSystemUiVisibilityChanged(I)V': (self, [visibility]) => {
+          for (const child of self.view?.children || []) child.dispatchSystemUiVisibilityChanged?.(visibility | 0);
+        },
+        'dispatchKeyEventPreIme(Landroid/view/KeyEvent;)Z': () => false,
+        'dispatchKeyEvent(Landroid/view/KeyEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchKeyEvent', event),
+        'dispatchKeyShortcutEvent(Landroid/view/KeyEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchKeyShortcutEvent', event),
+        'dispatchTrackballEvent(Landroid/view/MotionEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchTrackballEvent', event),
+        'dispatchCapturedPointerEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchPointerCaptureChanged(Z)V': (self, [hasCapture]) => {
+          for (const child of self.view?.children || []) child.dispatchPointerCaptureChanged?.(!!hasCapture);
+        },
+        'onResolvePointerIcon(Landroid/view/MotionEvent;I)Landroid/view/PointerIcon;': () => null,
+        'dispatchHoverEvent(Landroid/view/MotionEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchHoverEvent', event),
+        'addChildrenForAccessibility(Ljava/util/ArrayList;)V': (self, [list], vm) => {
+          const items = list?.$peer?.items || [];
+          for (const child of self.view?.children || []) items.push(viewObject(vm, child));
+          if (list?.$peer) list.$peer.items = items;
+        },
+        'onInterceptHoverEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchGenericPointerEvent(Landroid/view/MotionEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchGenericPointerEvent', event),
+        'dispatchGenericFocusedEvent(Landroid/view/MotionEvent;)Z': (self, [event]) =>
+          dispatchToHostChildren(self, 'dispatchGenericFocusedEvent', event),
+        'onInterceptTouchEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'requestFocus(ILandroid/graphics/Rect;)Z': (self) => {
+          if (!self.view) return false;
+          if (self.view.focusable === false) return false;
+          self.view.focused = true;
+          return true;
+        },
+        'onRequestFocusInDescendants(ILandroid/graphics/Rect;)Z': (self, [direction]) => {
+          const children = self.view?.children || [];
+          const forward = (direction & 0x42) !== 0 || (direction | 0) === 0x42;
+          const ordered = forward ? children : [...children].reverse();
+          for (const child of ordered) {
+            if (child.visibility === 8) continue;
+            if (child.requestFocus?.(direction | 0, null)) return true;
+          }
+          return false;
+        },
+        'restoreDefaultFocus()Z': (self) => {
+          const children = self.view?.children || [];
+          for (const child of children) {
+            if (child.visibility === 8) continue;
+            if (child.requestFocus?.()) return true;
+          }
+          return false;
+        },
+        'dispatchStartTemporaryDetach()V': (self) => {
+          for (const child of self.view?.children || []) child.dispatchStartTemporaryDetach?.();
+        },
+        'dispatchFinishTemporaryDetach()V': (self) => {
+          for (const child of self.view?.children || []) child.dispatchFinishTemporaryDetach?.();
+        },
+        'notifySubtreeAccessibilityStateChanged(Landroid/view/View;Landroid/view/View;I)V': () => undefined,
+        'onNestedPrePerformAccessibilityAction(Landroid/view/View;ILandroid/os/Bundle;)Z': () => false,
+        'dispatchSaveInstanceState(Landroid/util/SparseArray;)V': () => undefined,
+        'dispatchFreezeSelfOnly(Landroid/util/SparseArray;)V': () => undefined,
+        'dispatchRestoreInstanceState(Landroid/util/SparseArray;)V': () => undefined,
+        'dispatchThawSelfOnly(Landroid/util/SparseArray;)V': () => undefined,
+        'setChildrenDrawingCacheEnabled(Z)V': (self, [value]) => { self.childrenDrawingCacheEnabled = !!value; },
+        'getOverlay()Landroid/view/ViewGroupOverlay;': () => null,
+        'getChildDrawingOrder(I)I': (_self, [index]) => index | 0,
+        'dispatchSetSelected(Z)V': (self, [selected]) => {
+          for (const child of self.view?.children || []) child.setSelected?.(!!selected);
+        },
+        'dispatchSetActivated(Z)V': (self, [activated]) => {
+          for (const child of self.view?.children || []) child.setActivated?.(!!activated);
+        },
+        'dispatchSetPressed(Z)V': (self, [pressed]) => {
+          for (const child of self.view?.children || []) child.setPressed?.(!!pressed);
+        },
+        'dispatchDrawableHotspotChanged(FF)V': (self, [x, y]) => {
+          for (const child of self.view?.children || []) child.dispatchDrawableHotspotChanged?.(Number(x), Number(y));
+        },
+        'setStaticTransformationsEnabled(Z)V': (self, [value]) => { self.staticTransformationsEnabled = !!value; },
+        'getChildStaticTransformation(Landroid/view/View;Landroid/view/animation/Transformation;)Z': () => false,
+        'updateViewLayout(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view, params]) => {
+          const child = unwrapView(view);
+          if (!child) return;
+          if (params && typeof params === 'object') child.layoutParams = params.$peer ? coerceLayoutParams(params) : params;
+          child.requestLayout?.();
+          self.view?.requestLayout?.();
+        },
+        'cleanupLayoutState(Landroid/view/View;)V': (self, [view]) => {
+          const child = unwrapView(view);
+          if (child) child.__layoutRequested = false;
+        },
+        'attachLayoutAnimationParameters(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;II)V': () => undefined,
+        'removeViewsInLayout(II)V': (self, [start, count]) => {
+          if (self.view?.children) self.view.children.splice(start | 0, count | 0);
+          self.view?.requestLayout?.();
+        },
+        'removeViews(II)V': (self, [start, count]) => {
+          if (self.view?.children) {
+            for (const child of self.view.children.splice(start | 0, count | 0)) child.parent = null;
+          }
+          self.view?.requestLayout?.();
+          self.view?.invalidate?.();
+        },
+        'detachViewsFromParent(II)V': (self, [start, count]) => {
+          if (!self.view?.children) return;
+          for (const child of self.view.children.splice(start | 0, count | 0)) {
+            child.parent = null;
+            child.__detachedFromParent = true;
+          }
+        },
+        'onDescendantInvalidated(Landroid/view/View;Landroid/view/View;)V': (self) => self.view?.invalidate?.(),
+        'invalidateChild(Landroid/view/View;Landroid/graphics/Rect;)V': (self) => self.view?.invalidate?.(),
+        'invalidateChildInParent([ILandroid/graphics/Rect;)Landroid/view/ViewParent;': () => null,
+        'offsetRectIntoDescendantCoords(Landroid/view/View;Landroid/graphics/Rect;)V': (self, [view, rect]) => {
+          const child = unwrapView(view);
+          const target = rect?.$peer?.rect || rect;
+          if (!child || !target) return;
+          let dx = 0;
+          let dy = 0;
+          let node = child;
+          while (node && node !== self.view) {
+            dx += node.left || 0;
+            dy += node.top || 0;
+            node = node.parent;
+          }
+          target.offset(-dx, -dy);
+        },
+        'canAnimate()Z': () => false,
+        'startLayoutAnimation()V': () => undefined,
+        'scheduleLayoutAnimation()V': () => undefined,
+        'setLayoutAnimation(Landroid/view/animation/LayoutAnimationController;)V': (self, [controller]) => {
+          self.layoutAnimation = controller ?? null;
+        },
+        'getLayoutAnimation()Landroid/view/animation/LayoutAnimationController;': (self) => self?.layoutAnimation ?? null,
+        'isAnimationCacheEnabled()Z': (self) => self?.animationCacheEnabled !== false,
+        'setAnimationCacheEnabled(Z)V': (self, [value]) => { self.animationCacheEnabled = !!value; },
+        'isAlwaysDrawnWithCacheEnabled()Z': (self) => self?.alwaysDrawnWithCache !== false,
+        'setAlwaysDrawnWithCacheEnabled(Z)V': (self, [value]) => { self.alwaysDrawnWithCache = !!value; },
+        'isChildrenDrawnWithCacheEnabled()Z': (self) => !!self?.childrenDrawnWithCache,
+        'setChildrenDrawnWithCacheEnabled(Z)V': (self, [value]) => { self.childrenDrawnWithCache = !!value; },
+        'getPersistentDrawingCache()I': (self) => self?.persistentDrawingCache ?? 2,
+        'setPersistentDrawingCache(I)V': (self, [value]) => { self.persistentDrawingCache = value | 0; },
+        'generateLayoutParams(Landroid/view/ViewGroup$LayoutParams;)Landroid/view/ViewGroup$LayoutParams;': (_self, [params]) => params ?? null,
+        'debug(I)V': () => undefined,
+        'measureChild(Landroid/view/View;II)V': (self, [view, widthSpec, heightSpec]) => {
+          const child = unwrapView(view);
+          self.view?.measureChild?.(child, widthSpec | 0, heightSpec | 0);
+        },
+        'clearDisappearingChildren()V': () => undefined,
+        'suppressLayout(Z)V': (self, [suppress]) => { self.layoutSuppressed = !!suppress; },
+        'isLayoutSuppressed()Z': (self) => !!self?.layoutSuppressed,
+        'gatherTransparentRegion(Landroid/graphics/Region;)Z': () => false,
+        'requestTransparentRegion(Landroid/view/View;)V': () => undefined,
+        'dispatchWindowInsetsAnimationPrepare(Landroid/view/WindowInsetsAnimation;)V': () => undefined,
+        'dispatchWindowInsetsAnimationStart(Landroid/view/WindowInsetsAnimation;Landroid/view/WindowInsetsAnimation$Bounds;)Landroid/view/WindowInsetsAnimation$Bounds;': (_self, [_animation, bounds]) => bounds ?? null,
+        'dispatchWindowInsetsAnimationProgress(Landroid/view/WindowInsets;Ljava/util/List;)Landroid/view/WindowInsets;': (_self, [insets]) => insets ?? null,
+        'dispatchWindowInsetsAnimationEnd(Landroid/view/WindowInsetsAnimation;)V': () => undefined,
+        'dispatchScrollCaptureSearch(Landroid/graphics/Rect;Landroid/graphics/Point;Ljava/util/function/Consumer;)V': () => undefined,
+        'getLayoutAnimationListener()Landroid/view/animation/Animation$AnimationListener;': (self) =>
+          self?.layoutAnimationListener ?? null,
+        'setLayoutAnimationListener(Landroid/view/animation/Animation$AnimationListener;)V': (self, [listener]) => {
+          self.layoutAnimationListener = listener ?? null;
+        },
+        'onCreateDrawableState(I)[I': (self, [extraSpace], vm) => {
+          const base = self.view?.getDrawableState?.() ?? [];
+          const array = vm.newArray('[I', base.length + (extraSpace | 0), null);
+          const target = array?.$data;
+          if (Array.isArray(target)) {
+            for (let i = 0; i < base.length; i++) target[i] = base[i] | 0;
+          }
+          return array;
+        },
+        'setAddStatesFromChildren(Z)V': (self, [value]) => { self.addStatesFromChildren = !!value; },
+        'addStatesFromChildren()Z': (self) => !!self?.addStatesFromChildren,
+        'childDrawableStateChanged(Landroid/view/View;)V': () => undefined,
+        'shouldDelayChildPressedState()Z': () => true,
+        'dispatchCreateViewTranslationRequest(Ljava/util/Map;[ILandroid/view/translation/TranslationCapability;Ljava/util/List;)V': () => undefined,
       },
       staticMethods: {
         'getChildMeasureSpec(III)I': (_self, [spec, padding, childDimension]) => {
@@ -3710,6 +4461,173 @@ export function buildFrameworkDefinitions(vm) {
         self.screen?.invalidate?.();
         vm?.requestLayout?.();
       },
+      '<init>(Landroid/content/Context;)V': (self, [context]) => {
+        self.context = context ?? null;
+      },
+      'getContext()Landroid/content/Context;': (self, _args, vm) => self.context ?? vm?.contextObject ?? null,
+      'getWindowStyle()Landroid/content/res/TypedArray;': (self, _args, vm) => createTypedArray(vm, []),
+      'setContainer(Landroid/view/Window;)V': (self, [container]) => { self.container = container ?? null; },
+      'getContainer()Landroid/view/Window;': (self) => self?.container ?? null,
+      'hasChildren()Z': (self) => !!self?.container,
+      'setWindowManager(Landroid/view/WindowManager;Landroid/os/IBinder;Ljava/lang/String;)V': (self, [manager]) => {
+        self.windowManager = manager ?? null;
+      },
+      'setWindowManager(Landroid/view/WindowManager;Landroid/os/IBinder;Ljava/lang/String;Z)V': (self, [manager]) => {
+        self.windowManager = manager ?? null;
+      },
+      'getWindowManager()Landroid/view/WindowManager;': (self) =>
+        self?.windowManager ?? { $descriptor: 'Landroid/view/WindowManager;' },
+      'addOnFrameMetricsAvailableListener(Landroid/view/Window$OnFrameMetricsAvailableListener;Landroid/os/Handler;)V': () => undefined,
+      'removeOnFrameMetricsAvailableListener(Landroid/view/Window$OnFrameMetricsAvailableListener;)V': () => undefined,
+      'setRestrictedCaptionAreaListener(Landroid/view/Window$OnRestrictedCaptionAreaChangedListener;)V': () => undefined,
+      'setHideOverlayWindows(Z)V': () => undefined,
+      'takeSurface(Landroid/view/SurfaceHolder$Callback2;)V': () => undefined,
+      'takeInputQueue(Landroid/view/InputQueue$Callback;)V': () => undefined,
+      'setGravity(I)V': (self, [gravity]) => {
+        self.gravity = gravity | 0;
+        if (self.attributes?.$peer) self.attributes.$peer.gravity = gravity | 0;
+      },
+      'setType(I)V': (self, [type]) => {
+        self.type = type | 0;
+        if (self.attributes?.$peer) self.attributes.$peer.type = type | 0;
+      },
+      'setFormat(I)V': (self, [format]) => {
+        self.format = format | 0;
+        if (self.attributes?.$peer) self.attributes.$peer.format = format | 0;
+      },
+      'setWindowAnimations(I)V': (self, [resId]) => {
+        self.windowAnimations = resId | 0;
+        if (self.attributes?.$peer) self.attributes.$peer.windowAnimations = resId | 0;
+      },
+      'setColorMode(I)V': (self, [mode]) => { self.colorMode = mode | 0; },
+      'getColorMode()I': (self) => self?.colorMode | 0,
+      'isWideColorGamut()Z': () => false,
+      'setPreferMinimalPostProcessing(Z)V': () => undefined,
+      'setDimAmount(F)V': (self, [amount]) => {
+        self.dimAmount = Number(amount);
+        if (self.attributes?.$peer) self.attributes.$peer.dimAmount = Number(amount);
+      },
+      'setAttributes(Landroid/view/WindowManager$LayoutParams;)V': (self, [params]) => {
+        self.attributes = params ?? null;
+      },
+      'getForcedWindowFlags()I': () => 0,
+      'hasSoftInputMode()Z': (self) => self?.softInputMode !== undefined,
+      'setSustainedPerformanceMode(Z)V': () => undefined,
+      'makeActive()V': (self) => { self.active = true; },
+      'isActive()Z': (self) => !!self?.active,
+      'requireViewById(I)Landroid/view/View;': (self, [id], vm) => {
+        if (self.dialog) {
+          const view = unwrapView(self.dialog.contentView);
+          return view ? viewObject(vm, view.findViewById(id >>> 0)) || null : null;
+        }
+        const view = self.window?.decorView?.findViewById(id >>> 0);
+        return view ? viewObject(self.vm, view) : null;
+      },
+      'addContentView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view, params], vm) => {
+        const target = unwrapView(view);
+        const parent = self.window?.contentView;
+        if (!target || !parent || typeof parent.addView !== 'function') return;
+        target.layoutParams = params ?? target.layoutParams ?? null;
+        parent.addView(target);
+        self.screen?.invalidate?.();
+        vm?.requestLayout?.();
+      },
+      'getLayoutInflater()Landroid/view/LayoutInflater;': (self, _args, vm) => layoutInflaterObject(vm),
+      'setTitleColor(I)V': () => undefined,
+      'openPanel(ILandroid/view/KeyEvent;)V': () => undefined,
+      'closePanel(I)V': () => undefined,
+      'togglePanel(ILandroid/view/KeyEvent;)V': () => undefined,
+      'invalidatePanelMenu(I)V': () => undefined,
+      'performPanelShortcut(IILandroid/view/KeyEvent;I)Z': () => false,
+      'performPanelIdentifierAction(III)Z': () => false,
+      'closeAllPanels()V': () => undefined,
+      'performContextMenuIdentifierAction(II)Z': () => false,
+      'onConfigurationChanged(Landroid/content/res/Configuration;)V': () => undefined,
+      'setElevation(F)V': (self, [elevation]) => {
+        self.elevation = Number(elevation);
+        if (self.window?.decorView) self.window.decorView.elevation = Number(elevation);
+      },
+      'setClipToOutline(Z)V': () => undefined,
+      'setBackgroundBlurRadius(I)V': () => undefined,
+      'setFeatureDrawableResource(II)V': () => undefined,
+      'setFeatureDrawableUri(ILandroid/net/Uri;)V': () => undefined,
+      'setFeatureDrawable(ILandroid/graphics/drawable/Drawable;)V': () => undefined,
+      'setFeatureDrawableAlpha(II)V': () => undefined,
+      'setFeatureInt(II)V': () => undefined,
+      'takeKeyEvents(Z)V': () => undefined,
+      'superDispatchKeyEvent(Landroid/view/KeyEvent;)Z': () => false,
+      'superDispatchKeyShortcutEvent(Landroid/view/KeyEvent;)Z': () => false,
+      'superDispatchTouchEvent(Landroid/view/MotionEvent;)Z': () => false,
+      'superDispatchTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+      'superDispatchGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+      'saveHierarchyState()Landroid/os/Bundle;': (_self, _args, vm) => vm.allocateRawObject('Landroid/os/Bundle;'),
+      'restoreHierarchyState(Landroid/os/Bundle;)V': () => undefined,
+      'onActive()V': () => undefined,
+      'getFeatures()I': (self) => self?.features | 0,
+      'hasFeature(I)Z': (self, [feature]) => ((self?.features | 0) & (feature | 0)) !== 0,
+      'getLocalFeatures()I': (self) => self?.localFeatures | 0,
+      'setDefaultWindowFormat(I)V': (self, [format]) => { self.defaultWindowFormat = format | 0; },
+      'setChildDrawable(ILandroid/graphics/drawable/Drawable;)V': () => undefined,
+      'setChildInt(II)V': () => undefined,
+      'isShortcutKey(ILandroid/view/KeyEvent;)Z': () => false,
+      'setVolumeControlStream(I)V': (self, [stream]) => { self.volumeControlStream = stream | 0; },
+      'getVolumeControlStream()I': (self) => self?.volumeControlStream | 0,
+      'setMediaController(Landroid/media/session/MediaController;)V': (self, [controller]) => { self.mediaController = controller ?? null; },
+      'getMediaController()Landroid/media/session/MediaController;': (self) => self?.mediaController ?? null,
+      'setUiOptions(I)V': (self, [options]) => { self.uiOptions = options | 0; },
+      'setUiOptions(II)V': (self, [options, mask]) => {
+        self.uiOptions = ((self.uiOptions | 0) & ~(mask | 0)) | ((options | 0) & (mask | 0));
+      },
+      'setIcon(I)V': (self, [resId]) => { self.icon = resId | 0; },
+      'setLogo(I)V': (self, [resId]) => { self.logo = resId | 0; },
+      'setLocalFocus(ZZ)V': () => undefined,
+      'injectInputEvent(Landroid/view/InputEvent;)V': () => undefined,
+      'getTransitionManager()Landroid/transition/TransitionManager;': (self) => self?.transitionManager ?? null,
+      'setTransitionManager(Landroid/transition/TransitionManager;)V': (self, [manager]) => { self.transitionManager = manager ?? null; },
+      'getContentScene()Landroid/transition/Scene;': (self) => self?.contentScene ?? null,
+      'setEnterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.enterTransition = value ?? null; },
+      'setReturnTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.returnTransition = value ?? null; },
+      'setExitTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.exitTransition = value ?? null; },
+      'setReenterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.reenterTransition = value ?? null; },
+      'getEnterTransition()Landroid/transition/Transition;': (self) => self?.enterTransition ?? null,
+      'getReturnTransition()Landroid/transition/Transition;': (self) => self?.returnTransition ?? null,
+      'getExitTransition()Landroid/transition/Transition;': (self) => self?.exitTransition ?? null,
+      'getReenterTransition()Landroid/transition/Transition;': (self) => self?.reenterTransition ?? null,
+      'setSharedElementEnterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.sharedEnterTransition = value ?? null; },
+      'setSharedElementReturnTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.sharedReturnTransition = value ?? null; },
+      'setSharedElementExitTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.sharedExitTransition = value ?? null; },
+      'setSharedElementReenterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.sharedReenterTransition = value ?? null; },
+      'getSharedElementEnterTransition()Landroid/transition/Transition;': (self) => self?.sharedEnterTransition ?? null,
+      'getSharedElementReturnTransition()Landroid/transition/Transition;': (self) => self?.sharedReturnTransition ?? null,
+      'getSharedElementExitTransition()Landroid/transition/Transition;': (self) => self?.sharedExitTransition ?? null,
+      'getSharedElementReenterTransition()Landroid/transition/Transition;': (self) => self?.sharedReenterTransition ?? null,
+      'setAllowEnterTransitionOverlap(Z)V': (self, [value]) => { self.allowEnterOverlap = !!value; },
+      'getAllowEnterTransitionOverlap()Z': (self) => self?.allowEnterOverlap !== false,
+      'setAllowReturnTransitionOverlap(Z)V': (self, [value]) => { self.allowReturnOverlap = !!value; },
+      'getAllowReturnTransitionOverlap()Z': (self) => self?.allowReturnOverlap !== false,
+      'getTransitionBackgroundFadeDuration()J': (self) => self?.backgroundFadeDuration ?? 0,
+      'setTransitionBackgroundFadeDuration(J)V': (self, [duration]) => { self.backgroundFadeDuration = Number(duration) || 0; },
+      'getSharedElementsUseOverlay()Z': (self) => self?.sharedElementsUseOverlay !== false,
+      'setSharedElementsUseOverlay(Z)V': (self, [value]) => { self.sharedElementsUseOverlay = !!value; },
+      'getStatusBarColor()I': (self) => self?.window?.statusBarColor ?? 0xfff8f9fa,
+      'getNavigationBarColor()I': (self) => self?.window?.navigationBarColor ?? 0xffffffff,
+      'setNavigationBarDividerColor(I)V': (self, [color]) => { self.navigationBarDividerColor = color >>> 0; },
+      'getNavigationBarDividerColor()I': (self) => self?.navigationBarDividerColor ?? 0,
+      'setStatusBarContrastEnforced(Z)V': (self, [value]) => { self.statusBarContrastEnforced = !!value; },
+      'isStatusBarContrastEnforced()Z': (self) => self?.statusBarContrastEnforced !== false,
+      'setNavigationBarContrastEnforced(Z)V': (self, [value]) => { self.navigationBarContrastEnforced = !!value; },
+      'isNavigationBarContrastEnforced()Z': (self) => self?.navigationBarContrastEnforced !== false,
+      'setSystemGestureExclusionRects(Ljava/util/List;)V': (self, [rects]) => { self.gestureExclusionRects = rects ?? null; },
+      'getSystemGestureExclusionRects()Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+      'registerScrollCaptureCallback(Landroid/view/ScrollCaptureCallback;)V': () => undefined,
+      'unregisterScrollCaptureCallback(Landroid/view/ScrollCaptureCallback;)V': () => undefined,
+      'setDecorCaptionShade(I)V': (self, [shade]) => { self.decorCaptionShade = shade | 0; },
+      'setResizingCaptionDrawable(Landroid/graphics/drawable/Drawable;)V': () => undefined,
+      'getInsetsController()Landroid/view/WindowInsetsController;': () => null,
+      'getRootSurfaceControl()Landroid/view/AttachedSurfaceControl;': () => null,
+    },
+    staticMethods: {
+      'getDefaultFeatures(Landroid/content/Context;)I': () => 0x41,
     },
   }));
   defs.push(nativeDef('Landroid/view/WindowManager;', {
@@ -3792,7 +4710,12 @@ export function buildFrameworkDefinitions(vm) {
       'beginTransaction()Landroid/app/FragmentTransaction;': (self) => self.beginTransaction?.() ?? null,
       'executePendingTransactions()Z': (self) => self.executePendingTransactions?.() ?? true,
       'isDestroyed()Z': () => false,
-      'getFragments()Ljava/util/List;': () => null,
+      'getFragments()Ljava/util/List;': (self, _args, vm) => {
+        const items = self.getFragments?.() ?? [];
+        const list = emptyJavaList(vm);
+        list.$peer = { items: [...items] };
+        return list;
+      },
     },
   }));
   defs.push(nativeDef('Landroid/app/FragmentTransaction;', {
@@ -3813,7 +4736,133 @@ export function buildFrameworkDefinitions(vm) {
       'isEmpty()Z': (self) => self.isEmpty?.() ?? true,
     },
   }));
-  defs.push(nativeDef('Landroid/app/Fragment;', { super: 'Ljava/lang/Object;' }));
+  defs.push(nativeDef('Landroid/app/Fragment;', {
+    super: 'Ljava/lang/Object;',
+    methods: {
+      'equals(Ljava/lang/Object;)Z': (self, [other]) => other === self,
+      'hashCode()I': (self, _args, vm) => vm.identityHash(self),
+      'toString()Ljava/lang/String;': (self) => `Fragment{${self?.$tag || ''}}`,
+      'getId()I': (self) => self?.$id | 0,
+      'getTag()Ljava/lang/String;': (self) => self?.$tag ?? null,
+      'setArguments(Landroid/os/Bundle;)V': (self, [args]) => { self.$arguments = args ?? null; },
+      'getArguments()Landroid/os/Bundle;': (self) => self?.$arguments ?? null,
+      'isStateSaved()Z': () => false,
+      'setInitialSavedState(Landroid/app/Fragment$SavedState;)V': (self, [state]) => { self.$initialSavedState = state ?? null; },
+      'setTargetFragment(Landroid/app/Fragment;I)V': (self, [fragment, code]) => {
+        self.$target = fragment ?? null;
+        self.$targetRequestCode = code | 0;
+      },
+      'getTargetFragment()Landroid/app/Fragment;': (self) => self?.$target ?? null,
+      'getTargetRequestCode()I': (self) => self?.$targetRequestCode | 0,
+      'getContext()Landroid/content/Context;': (self, _args, vm) => self?.$context ?? vm?.contextObject ?? null,
+      'getActivity()Landroid/app/Activity;': (self, _args, vm) => self?.$activity ?? vm?.activity ?? null,
+      'getHost()Ljava/lang/Object;': (self, _args, vm) => self?.$activity ?? vm?.activity ?? null,
+      'getResources()Landroid/content/res/Resources;': (self, _args, vm) => vm?.resources ?? null,
+      'getText(I)Ljava/lang/CharSequence;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
+      'getString(I)Ljava/lang/String;': (self, [resId], vm) => vm.resources.getString(resId >>> 0),
+      'getString(I[Ljava/lang/Object;)Ljava/lang/String;': (self, [resId, args], vm) => {
+        const values = Array.isArray(args?.$data) ? args.$data : Array.isArray(args) ? args : [];
+        return vm.resources.getString(resId >>> 0, ...values);
+      },
+      'getFragmentManager()Landroid/app/FragmentManager;': (self, _args, vm) => self?.$fragmentManager ?? getFragmentManagerObject(vm),
+      'getChildFragmentManager()Landroid/app/FragmentManager;': (self, _args, vm) => getFragmentManagerObject(vm),
+      'getParentFragment()Landroid/app/Fragment;': (self) => self?.$parentFragment ?? null,
+      'isAdded()Z': (self) => !!self?.$added,
+      'isDetached()Z': (self) => !!self?.$detached,
+      'isRemoving()Z': (self) => !!self?.$removing,
+      'isInLayout()Z': () => false,
+      'isResumed()Z': (self) => !!self?.$resumed,
+      'isVisible()Z': (self) => !!self?.$added && !self?.$hidden && !!self?.$view,
+      'isHidden()Z': (self) => !!self?.$hidden,
+      'onHiddenChanged(Z)V': () => undefined,
+      'setRetainInstance(Z)V': (self, [retain]) => { self.$retainInstance = !!retain; },
+      'getRetainInstance()Z': (self) => !!self?.$retainInstance,
+      'setHasOptionsMenu(Z)V': (self, [value]) => { self.$hasOptionsMenu = !!value; },
+      'setMenuVisibility(Z)V': (self, [value]) => { self.$menuVisible = !!value; },
+      'setUserVisibleHint(Z)V': (self, [value]) => { self.$userVisibleHint = !!value; },
+      'getUserVisibleHint()Z': (self) => self?.$userVisibleHint !== false,
+      'getLoaderManager()Landroid/app/LoaderManager;': () => null,
+      'startActivity(Landroid/content/Intent;)V': (self, [intent], vm) => { vm.startActivity(intent, null); },
+      'startActivity(Landroid/content/Intent;Landroid/os/Bundle;)V': (self, [intent], vm) => { vm.startActivity(intent, null); },
+      'startActivityForResult(Landroid/content/Intent;I)V': (self, [intent], vm) => { vm.startActivity(intent, null); },
+      'startActivityForResult(Landroid/content/Intent;ILandroid/os/Bundle;)V': (self, [intent], vm) => { vm.startActivity(intent, null); },
+      'startIntentSenderForResult(Landroid/content/IntentSender;ILandroid/content/Intent;IIILandroid/os/Bundle;)V': () => undefined,
+      'onActivityResult(IILandroid/content/Intent;)V': () => undefined,
+      'requestPermissions([Ljava/lang/String;I)V': () => undefined,
+      'onRequestPermissionsResult(I[Ljava/lang/String;[I)V': () => undefined,
+      'shouldShowRequestPermissionRationale(Ljava/lang/String;)Z': () => false,
+      'onGetLayoutInflater(Landroid/os/Bundle;)Landroid/view/LayoutInflater;': (self, _args, vm) => layoutInflaterObject(vm),
+      'getLayoutInflater()Landroid/view/LayoutInflater;': (self, _args, vm) => layoutInflaterObject(vm),
+      'onInflate(Landroid/util/AttributeSet;Landroid/os/Bundle;)V': () => undefined,
+      'onInflate(Landroid/content/Context;Landroid/util/AttributeSet;Landroid/os/Bundle;)V': () => undefined,
+      'onInflate(Landroid/app/Activity;Landroid/util/AttributeSet;Landroid/os/Bundle;)V': () => undefined,
+      'onAttachFragment(Landroid/app/Fragment;)V': () => undefined,
+      'onAttach(Landroid/content/Context;)V': (self, [context]) => { self.$context = context ?? null; },
+      'onAttach(Landroid/app/Activity;)V': (self, [activity]) => {
+        self.$activity = activity ?? null;
+        self.$context = self.$context ?? activity ?? null;
+      },
+      'onCreateAnimator(IZI)Landroid/animation/Animator;': () => null,
+      'onCreate(Landroid/os/Bundle;)V': () => undefined,
+      'onCreateView(Landroid/view/LayoutInflater;Landroid/view/ViewGroup;Landroid/os/Bundle;)Landroid/view/View;': () => null,
+      'onViewCreated(Landroid/view/View;Landroid/os/Bundle;)V': () => undefined,
+      'getView()Landroid/view/View;': (self) => self?.$view ?? null,
+      'onActivityCreated(Landroid/os/Bundle;)V': () => undefined,
+      'onViewStateRestored(Landroid/os/Bundle;)V': () => undefined,
+      'onStart()V': () => undefined,
+      'onResume()V': (self) => { self.$resumed = true; },
+      'onSaveInstanceState(Landroid/os/Bundle;)V': () => undefined,
+      'onMultiWindowModeChanged(ZLandroid/content/res/Configuration;)V': () => undefined,
+      'onMultiWindowModeChanged(Z)V': () => undefined,
+      'onPictureInPictureModeChanged(ZLandroid/content/res/Configuration;)V': () => undefined,
+      'onPictureInPictureModeChanged(Z)V': () => undefined,
+      'onConfigurationChanged(Landroid/content/res/Configuration;)V': () => undefined,
+      'onPause()V': (self) => { self.$resumed = false; },
+      'onStop()V': () => undefined,
+      'onLowMemory()V': () => undefined,
+      'onTrimMemory(I)V': () => undefined,
+      'onDestroyView()V': (self) => { self.$view = null; },
+      'onDestroy()V': () => undefined,
+      'onDetach()V': (self) => { self.$context = null; self.$activity = null; },
+      'onCreateOptionsMenu(Landroid/view/Menu;Landroid/view/MenuInflater;)V': () => undefined,
+      'onPrepareOptionsMenu(Landroid/view/Menu;)V': () => undefined,
+      'onDestroyOptionsMenu()V': () => undefined,
+      'onOptionsItemSelected(Landroid/view/MenuItem;)Z': () => false,
+      'onOptionsMenuClosed(Landroid/view/Menu;)V': () => undefined,
+      'onCreateContextMenu(Landroid/view/ContextMenu;Landroid/view/View;Landroid/view/ContextMenu$ContextMenuInfo;)V': () => undefined,
+      'registerForContextMenu(Landroid/view/View;)V': () => undefined,
+      'unregisterForContextMenu(Landroid/view/View;)V': () => undefined,
+      'onContextItemSelected(Landroid/view/MenuItem;)Z': () => false,
+      'setEnterSharedElementCallback(Landroid/app/SharedElementCallback;)V': () => undefined,
+      'setExitSharedElementCallback(Landroid/app/SharedElementCallback;)V': () => undefined,
+      'setEnterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$enterTransition = value ?? null; },
+      'getEnterTransition()Landroid/transition/Transition;': (self) => self?.$enterTransition ?? null,
+      'setReturnTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$returnTransition = value ?? null; },
+      'getReturnTransition()Landroid/transition/Transition;': (self) => self?.$returnTransition ?? null,
+      'setExitTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$exitTransition = value ?? null; },
+      'getExitTransition()Landroid/transition/Transition;': (self) => self?.$exitTransition ?? null,
+      'setReenterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$reenterTransition = value ?? null; },
+      'getReenterTransition()Landroid/transition/Transition;': (self) => self?.$reenterTransition ?? null,
+      'setSharedElementEnterTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$sharedEnterTransition = value ?? null; },
+      'getSharedElementEnterTransition()Landroid/transition/Transition;': (self) => self?.$sharedEnterTransition ?? null,
+      'setSharedElementReturnTransition(Landroid/transition/Transition;)V': (self, [value]) => { self.$sharedReturnTransition = value ?? null; },
+      'getSharedElementReturnTransition()Landroid/transition/Transition;': (self) => self?.$sharedReturnTransition ?? null,
+      'setAllowEnterTransitionOverlap(Z)V': (self, [value]) => { self.$allowEnterOverlap = !!value; },
+      'getAllowEnterTransitionOverlap()Z': (self) => self?.$allowEnterOverlap !== false,
+      'setAllowReturnTransitionOverlap(Z)V': (self, [value]) => { self.$allowReturnOverlap = !!value; },
+      'getAllowReturnTransitionOverlap()Z': (self) => self?.$allowReturnOverlap !== false,
+      'postponeEnterTransition()V': () => undefined,
+      'startPostponedEnterTransition()V': () => undefined,
+      'dump(Ljava/lang/String;Ljava/io/FileDescriptor;Ljava/io/PrintWriter;[Ljava/lang/String;)V': () => undefined,
+    },
+    staticMethods: {
+      'instantiate(Landroid/content/Context;Ljava/lang/String;)Landroid/app/Fragment;': (_self, [context, name], vm) =>
+        instantiateFragment(vm, context, name, null),
+      'instantiate(Landroid/content/Context;Ljava/lang/String;Landroid/os/Bundle;)Landroid/app/Fragment;': (_self, [context, name, args], vm) =>
+        instantiateFragment(vm, context, name, args),
+    },
+  }));
+
 
   defs.push(nativeDef('Ljava/lang/reflect/Method;', {
     super: 'Ljava/lang/Object;',
@@ -7702,8 +8751,153 @@ function vmShowChild(self, index) {
           };
           return info;
         },
-        'queryIntentActivities(Landroid/content/Intent;I)Ljava/util/List;': () => null,
-        'resolveActivity(Landroid/content/Intent;I)Landroid/content/pm/ResolveInfo;': () => null,
+        'queryIntentActivities(Landroid/content/Intent;I)Ljava/util/List;': (_self, [intent], vm) => {
+          const list = emptyJavaList(vm);
+          const peer = intent?.$peer || intent;
+          const info = resolveIntentComponent(vm, peer, null);
+          if (!info) return list;
+          list.$peer = { items: [resolveInfoObject(vm, info, peer)] };
+          return list;
+        },
+        'resolveActivity(Landroid/content/Intent;I)Landroid/content/pm/ResolveInfo;': (_self, [intent], vm) => {
+          const peer = intent?.$peer || intent;
+          const info = resolveIntentComponent(vm, peer, null);
+          return info ? resolveInfoObject(vm, info, peer) : null;
+        },
+        'queryBroadcastReceivers(Landroid/content/Intent;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'resolveService(Landroid/content/Intent;I)Landroid/content/pm/ResolveInfo;': () => null,
+        'queryIntentServices(Landroid/content/Intent;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'queryIntentContentProviders(Landroid/content/Intent;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'resolveContentProvider(Ljava/lang/String;I)Landroid/content/pm/ProviderInfo;': () => null,
+        'queryContentProviders(Ljava/lang/String;II)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'queryIntentActivityOptions(Landroid/content/ComponentName;[Landroid/content/Intent;Landroid/content/Intent;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getLaunchIntentForPackage(Ljava/lang/String;)Landroid/content/Intent;': (_self, [pkg], vm) => {
+          const requested = jsString(pkg);
+          if (requested && vm.packageName && requested !== vm.packageName) return null;
+          const main = vm.findMainActivity?.(vm.apk?.manifest);
+          if (!main) return null;
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.MAIN';
+          intent.$peer.categories = ['android.intent.category.LAUNCHER'];
+          intent.$peer.flags = 0x10000000 | 0x20000000;
+          intent.$peer.className = manifestClassName(manifestAttrText(main, 'android:name', 'name'), vm.packageName || '');
+          intent.$peer.packageName = vm.packageName || null;
+          return intent;
+        },
+        'getLeanbackLaunchIntentForPackage(Ljava/lang/String;)Landroid/content/Intent;': (_self, [pkg], vm) => {
+          const requested = jsString(pkg);
+          if (requested && vm.packageName && requested !== vm.packageName) return null;
+          const main = vm.findMainActivity?.(vm.apk?.manifest);
+          if (!main) return null;
+          const intent = makeIntentObject(vm);
+          intent.$peer.action = 'android.intent.action.MAIN';
+          intent.$peer.categories = ['android.intent.category.LEANBACK_LAUNCHER'];
+          intent.$peer.flags = 0x10000000 | 0x20000000;
+          intent.$peer.className = manifestClassName(manifestAttrText(main, 'android:name', 'name'), vm.packageName || '');
+          intent.$peer.packageName = vm.packageName || null;
+          return intent;
+        },
+        'getPackageUid(Ljava/lang/String;I)I': (_self, [pkg], vm) =>
+          jsString(pkg) === (vm.packageName || '') ? 10000 : -1,
+        'getPackageGids(Ljava/lang/String;)[I': (_self, [pkg], vm) =>
+          jsString(pkg) === (vm.packageName || '') ? vm.newArray('[I', 1, [10000]) : vm.newArray('[I', 0, null),
+        'getPackageGids(Ljava/lang/String;I)[I': (_self, [pkg], vm) =>
+          jsString(pkg) === (vm.packageName || '') ? vm.newArray('[I', 1, [10000]) : vm.newArray('[I', 0, null),
+        'getPackagesForUid(I)[Ljava/lang/String;': (_self, [uid], vm) =>
+          (uid | 0) === 10000 && vm.packageName
+            ? vm.newArray('[Ljava/lang/String;', 1, [vm.packageName])
+            : vm.newArray('[Ljava/lang/String;', 0, null),
+        'getNameForUid(I)Ljava/lang/String;': (_self, [uid], vm) => ((uid | 0) === 10000 ? vm.packageName || null : null),
+        'checkPermission(Ljava/lang/String;Ljava/lang/String;)I': () => 0,
+        'checkSignatures(Ljava/lang/String;Ljava/lang/String;)I': () => 0,
+        'checkSignatures(II)I': () => 0,
+        'isPermissionRevokedByPolicy(Ljava/lang/String;Ljava/lang/String;)Z': () => false,
+        'addPermission(Landroid/content/pm/PermissionInfo;)Z': () => true,
+        'addPermissionAsync(Landroid/content/pm/PermissionInfo;)Z': () => true,
+        'removePermission(Ljava/lang/String;)V': () => undefined,
+        'getPermissionInfo(Ljava/lang/String;I)Landroid/content/pm/PermissionInfo;': () => null,
+        'queryPermissionsByGroup(Ljava/lang/String;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getPermissionGroupInfo(Ljava/lang/String;I)Landroid/content/pm/PermissionGroupInfo;': () => null,
+        'getAllPermissionGroups(I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getPackagesHoldingPermissions([Ljava/lang/String;I)Ljava/util/List;': (_self, _args, vm) => {
+          const list = emptyJavaList(vm);
+          const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
+          info.$peer = { vm, packageName: vm.packageName || '', versionName: '1.0', versionCode: 1 };
+          list.$peer = { items: [info] };
+          return list;
+        },
+        'getPlatformPermissionsForGroup(Ljava/lang/String;Ljava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': () => undefined,
+        'getGroupOfPlatformPermission(Ljava/lang/String;Ljava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': () => undefined,
+        'getWhitelistedRestrictedPermissions(Ljava/lang/String;I)Ljava/util/Set;': (_self, _args, vm) => {
+          const set = vm.allocateRawObject('Ljava/util/HashSet;');
+          set.$peer = { items: [] };
+          return set;
+        },
+        'addWhitelistedRestrictedPermission(Ljava/lang/String;Ljava/lang/String;I)Z': () => true,
+        'removeWhitelistedRestrictedPermission(Ljava/lang/String;Ljava/lang/String;I)Z': () => true,
+        'setAutoRevokeWhitelisted(Ljava/lang/String;Z)Z': () => true,
+        'isAutoRevokeWhitelisted(Ljava/lang/String;)Z': () => false,
+        'getBackgroundPermissionOptionLabel()Ljava/lang/CharSequence;': () => 'Allow',
+        'getTargetSdkVersion(Ljava/lang/String;)I': () => 31,
+        'getReceiverInfo(Landroid/content/ComponentName;I)Landroid/content/pm/ActivityInfo;': () => null,
+        'getServiceInfo(Landroid/content/ComponentName;I)Landroid/content/pm/ServiceInfo;': () => null,
+        'getProviderInfo(Landroid/content/ComponentName;I)Landroid/content/pm/ProviderInfo;': () => null,
+        'getModuleInfo(Ljava/lang/String;I)Landroid/content/pm/ModuleInfo;': () => null,
+        'getInstalledModules(I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'isInstantApp()Z': () => false,
+        'isInstantApp(Ljava/lang/String;)Z': () => false,
+        'getInstantAppCookieMaxBytes()I': () => 0,
+        'getInstantAppCookie()[B': (_self, _args, vm) => vm.newArray('[B', 0, null),
+        'clearInstantAppCookie()V': () => undefined,
+        'updateInstantAppCookie([B)V': () => undefined,
+        'getSharedLibraries(I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getChangedPackages(I)Landroid/content/pm/ChangedPackages;': () => null,
+        'getInstrumentationInfo(Landroid/content/ComponentName;I)Landroid/content/pm/InstrumentationInfo;': () => null,
+        'queryInstrumentation(Ljava/lang/String;I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getDefaultActivityIcon()Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationIconDrawable(vm),
+        'getApplicationIcon(Landroid/content/pm/ApplicationInfo;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationIconDrawable(vm),
+        'getApplicationIcon(Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationIconDrawable(vm),
+        'getActivityIcon(Landroid/content/ComponentName;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationIconDrawable(vm),
+        'getActivityIcon(Landroid/content/Intent;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationIconDrawable(vm),
+        'getActivityBanner(Landroid/content/ComponentName;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationBannerDrawable(vm),
+        'getActivityBanner(Landroid/content/Intent;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationBannerDrawable(vm),
+        'getApplicationBanner(Landroid/content/pm/ApplicationInfo;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationBannerDrawable(vm),
+        'getApplicationBanner(Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationBannerDrawable(vm),
+        'getActivityLogo(Landroid/content/ComponentName;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationLogoDrawable(vm),
+        'getActivityLogo(Landroid/content/Intent;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationLogoDrawable(vm),
+        'getApplicationLogo(Landroid/content/pm/ApplicationInfo;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationLogoDrawable(vm),
+        'getApplicationLogo(Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) => applicationLogoDrawable(vm),
+        'getUserBadgedIcon(Landroid/graphics/drawable/Drawable;Landroid/os/UserHandle;)Landroid/graphics/drawable/Drawable;': (_self, [icon]) => icon ?? null,
+        'getUserBadgedDrawableForDensity(Landroid/graphics/drawable/Drawable;Landroid/os/UserHandle;Landroid/graphics/Rect;I)Landroid/graphics/drawable/Drawable;': (_self, [icon]) => icon ?? null,
+        'getUserBadgedLabel(Ljava/lang/CharSequence;Landroid/os/UserHandle;)Ljava/lang/CharSequence;': (_self, [label]) => label ?? null,
+        'getText(Ljava/lang/String;ILandroid/content/pm/ApplicationInfo;)Ljava/lang/CharSequence;': (_self, [_pkg, resId], vm) =>
+          vm.resources.getString(resId >>> 0),
+        'getXml(Ljava/lang/String;ILandroid/content/pm/ApplicationInfo;)Landroid/content/res/XmlResourceParser;': () => null,
+        'getApplicationLabel(Landroid/content/pm/ApplicationInfo;)Ljava/lang/CharSequence;': (_self, [info], vm) =>
+          info?.$peer?.label ?? applicationLabel(vm, info?.$peer?.packageName),
+        'getResourcesForActivity(Landroid/content/ComponentName;)Landroid/content/res/Resources;': (_self, _args, vm) => vm.resourcesObject,
+        'getResourcesForApplication(Landroid/content/pm/ApplicationInfo;)Landroid/content/res/Resources;': (_self, _args, vm) => vm.resourcesObject,
+        'getResourcesForApplication(Landroid/content/pm/ApplicationInfo;Landroid/content/res/Configuration;)Landroid/content/res/Resources;': (_self, _args, vm) => vm.resourcesObject,
+        'getResourcesForApplication(Ljava/lang/String;)Landroid/content/res/Resources;': (_self, _args, vm) => vm.resourcesObject,
+        'getPackageArchiveInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;': () => null,
+        'verifyPendingInstall(II)V': () => undefined,
+        'extendVerificationTimeout(IIJ)V': () => undefined,
+        'setInstallerPackageName(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'getInstallerPackageName(Ljava/lang/String;)Ljava/lang/String;': () => null,
+        'getInstallSourceInfo(Ljava/lang/String;)Landroid/content/pm/InstallSourceInfo;': () => null,
+        'addPackageToPreferred(Ljava/lang/String;)V': () => undefined,
+        'removePackageFromPreferred(Ljava/lang/String;)V': () => undefined,
+        'getPreferredPackages(I)Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'addPreferredActivity(Landroid/content/IntentFilter;I[Landroid/content/ComponentName;Landroid/content/ComponentName;)V': () => undefined,
+        'clearPackagePreferredActivities(Ljava/lang/String;)V': () => undefined,
+        'currentToCanonicalPackageNames([Ljava/lang/String;)[Ljava/lang/String;': (_self, [names]) => names ?? null,
+        'canonicalToCurrentPackageNames([Ljava/lang/String;)[Ljava/lang/String;': (_self, [names]) => names ?? null,
+        'getPackageInfo(Landroid/content/pm/VersionedPackage;I)Landroid/content/pm/PackageInfo;': (_self, [versioned], vm) => {
+          const pkg = versioned?.$peer?.packageName ?? null;
+          const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
+          info.$peer = { vm, packageName: pkg || vm.packageName || '', versionName: '1.0', versionCode: 1 };
+          return info;
+        },
         'getSystemAvailableFeatures()[Landroid/content/pm/FeatureInfo;': (_self, _args, vm) => {
           const names = systemFeatureNames();
           const array = vm.newArray('[Landroid/content/pm/FeatureInfo;', names.length, null);
@@ -7749,7 +8943,17 @@ function vmShowChild(self, index) {
     })
   );
   defs.push(
-    nativeDef('Landroid/content/pm/ResolveInfo;', { super: 'Ljava/lang/Object;' })
+    nativeDef('Landroid/content/pm/ResolveInfo;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'loadLabel(Landroid/content/pm/PackageManager;)Ljava/lang/CharSequence;': (self, _args, vm) =>
+          self?.nonLocalizedLabel ?? applicationLabel(vm, self?.resolvePackageName ?? vm?.packageName ?? ''),
+        'loadIcon(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) =>
+          applicationIconDrawable(vm),
+        'toString()Ljava/lang/String;': (self) =>
+          `ResolveInfo{${self?.activityInfo?.name ?? self?.resolvePackageName ?? ''}}`,
+      },
+    })
   );
   defs.push(
     nativeDef('Landroid/content/pm/ApplicationInfo;', { super: 'Landroid/content/pm/PackageItemInfo;' })
@@ -8011,10 +9215,212 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/telephony/TelephonyManager;', {
       super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['SIM_STATE_UNKNOWN:I', 0], ['SIM_STATE_ABSENT:I', 1], ['SIM_STATE_PIN_REQUIRED:I', 2],
+        ['SIM_STATE_PUK_REQUIRED:I', 3], ['SIM_STATE_NETWORK_LOCKED:I', 4], ['SIM_STATE_READY:I', 5],
+        ['SIM_STATE_NOT_READY:I', 6], ['SIM_STATE_PERM_DISABLED:I', 7], ['SIM_STATE_CARD_IO_ERROR:I', 8],
+        ['SIM_STATE_CARD_RESTRICTED:I', 9], ['SIM_STATE_LOADED:I', 10],
+        ['PHONE_TYPE_NONE:I', 0], ['PHONE_TYPE_GSM:I', 1], ['PHONE_TYPE_CDMA:I', 2], ['PHONE_TYPE_SIP:I', 3],
+        ['NETWORK_TYPE_UNKNOWN:I', 0], ['NETWORK_TYPE_GPRS:I', 1], ['NETWORK_TYPE_EDGE:I', 2],
+        ['NETWORK_TYPE_UMTS:I', 3], ['NETWORK_TYPE_CDMA:I', 4], ['NETWORK_TYPE_EVDO_0:I', 5],
+        ['NETWORK_TYPE_EVDO_A:I', 6], ['NETWORK_TYPE_1xRTT:I', 7], ['NETWORK_TYPE_HSDPA:I', 8],
+        ['NETWORK_TYPE_HSUPA:I', 9], ['NETWORK_TYPE_HSPA:I', 10], ['NETWORK_TYPE_IDEN:I', 11],
+        ['NETWORK_TYPE_EVDO_B:I', 12], ['NETWORK_TYPE_LTE:I', 13], ['NETWORK_TYPE_EHRPD:I', 14],
+        ['NETWORK_TYPE_HSPAP:I', 15], ['NETWORK_TYPE_GSM:I', 16], ['NETWORK_TYPE_TD_SCDMA:I', 17],
+        ['NETWORK_TYPE_IWLAN:I', 18], ['NETWORK_TYPE_LTE_CA:I', 19], ['NETWORK_TYPE_NR:I', 20],
+        ['CALL_STATE_IDLE:I', 0], ['CALL_STATE_RINGING:I', 1], ['CALL_STATE_OFFHOOK:I', 2],
+        ['DATA_UNKNOWN:I', -1], ['DATA_DISCONNECTED:I', 0], ['DATA_CONNECTING:I', 1],
+        ['DATA_CONNECTED:I', 2], ['DATA_SUSPENDED:I', 3],
+        ['DATA_ACTIVITY_NONE:I', 0], ['DATA_ACTIVITY_IN:I', 1], ['DATA_ACTIVITY_OUT:I', 2],
+        ['DATA_ACTIVITY_INOUT:I', 3], ['DATA_ACTIVITY_DORMANT:I', 4],
+        ['NETWORK_SELECTION_MODE_UNKNOWN:I', 0], ['NETWORK_SELECTION_MODE_AUTOMATIC:I', 1],
+        ['NETWORK_SELECTION_MODE_MANUAL:I', 2],
+        ['MULTI_SIM_UNKNOWN:I', 0], ['MULTI_SIM_POSSIBLE:I', 1], ['MULTI_SIM_UNSUPPORTED:I', 2],
+        ['UNSUPPORTED_CARD_ID:I', -2], ['EUICC_CARD_ID_UNSUPPORTED:I', -1],
+        ['DEFAULT_SUBSCRIPTION_ID:I', 1],
+      ]),
       methods: {
+        'createForSubscriptionId(I)Landroid/telephony/TelephonyManager;': (self) => self,
+        'createForPhoneAccountHandle(Landroid/telecom/PhoneAccountHandle;)Landroid/telephony/TelephonyManager;': () => null,
+        'getPhoneCount()I': () => 1,
+        'getActiveModemCount()I': () => 1,
+        'getSupportedModemCount()I': () => 1,
+        'isMultiSimSupported()I': () => 2,
+        'switchMultiSimConfig(I)V': () => undefined,
+        'isModemEnabledForSlot(I)Z': () => true,
+        'getDeviceSoftwareVersion()Ljava/lang/String;': () => 'unknown',
         'getDeviceId()Ljava/lang/String;': () => null,
-        'getNetworkOperatorName()Ljava/lang/String;': () => '',
-        'getSimState()I': () => 0,
+        'getDeviceId(I)Ljava/lang/String;': () => null,
+        'getImei()Ljava/lang/String;': () => null,
+        'getImei(I)Ljava/lang/String;': () => null,
+        'getMeid()Ljava/lang/String;': () => null,
+        'getMeid(I)Ljava/lang/String;': () => null,
+        'getNai()Ljava/lang/String;': () => null,
+        'getSubscriberId()Ljava/lang/String;': () => null,
+        'getSimSerialNumber()Ljava/lang/String;': () => null,
+        'getLine1Number()Ljava/lang/String;': () => null,
+        'setLine1NumberForDisplay(Ljava/lang/String;Ljava/lang/String;)Z': () => false,
+        'getVoiceMailNumber()Ljava/lang/String;': () => null,
+        'setVoiceMailNumber(Ljava/lang/String;Ljava/lang/String;)Z': () => false,
+        'getVoiceMailAlphaTag()Ljava/lang/String;': () => '',
+        'getVisualVoicemailPackageName()Ljava/lang/String;': () => null,
+        'getTypeAllocationCode()Ljava/lang/String;': () => null,
+        'getTypeAllocationCode(I)Ljava/lang/String;': () => null,
+        'getManufacturerCode()Ljava/lang/String;': () => null,
+        'getManufacturerCode(I)Ljava/lang/String;': () => null,
+        'getGroupIdLevel1()Ljava/lang/String;': () => null,
+        'getCellLocation()Landroid/telephony/CellLocation;': () => null,
+        'getAllCellInfo()Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'requestCellInfoUpdate(Ljava/util/concurrent/Executor;Landroid/telephony/TelephonyManager$CellInfoCallback;)V': () => undefined,
+        'getPhoneType()I': () => 1,
+        'getNetworkOperator()Ljava/lang/String;': () => '00101',
+        'getNetworkOperatorName()Ljava/lang/String;': () => 'apk.js',
+        'getNetworkSpecifier()Ljava/lang/String;': () => null,
+        'getCarrierConfig()Landroid/os/PersistableBundle;': () => null,
+        'isNetworkRoaming()Z': () => false,
+        'getNetworkCountryIso()Ljava/lang/String;': (self, _args, vm) => localeRegion(vm),
+        'getNetworkCountryIso(I)Ljava/lang/String;': (self, _args, vm) => localeRegion(vm),
+        'getNetworkType()I': () => 13,
+        'getDataNetworkType()I': () => 13,
+        'getVoiceNetworkType()I': () => 13,
+        'hasIccCard()Z': () => true,
+        'getSimState()I': () => 5,
+        'getSimState(I)I': () => 5,
+        'getSimOperator()Ljava/lang/String;': () => '00101',
+        'getSimOperatorName()Ljava/lang/String;': () => 'apk.js',
+        'getSimCountryIso()Ljava/lang/String;': (self, _args, vm) => localeRegion(vm),
+        'getCardIdForDefaultEuicc()I': () => -2,
+        'getUiccCardsInfo()Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'getCallState()I': () => 0,
+        'getCallStateForSubscription()I': () => 0,
+        'getDataActivity()I': () => 0,
+        'getDataState()I': () => 2,
+        'listen(Landroid/telephony/PhoneStateListener;I)V': () => undefined,
+        'isVoiceCapable()Z': () => true,
+        'isSmsCapable()Z': () => true,
+        'isDataCapable()Z': () => true,
+        'isDataConnectionAllowed()Z': () => true,
+        'isConcurrentVoiceAndDataSupported()Z': () => true,
+        'setDataEnabled(Z)V': () => undefined,
+        'isDataEnabled()Z': () => true,
+        'setDataEnabledForReason(IZ)V': () => undefined,
+        'isDataEnabledForReason(I)Z': () => true,
+        'isDataRoamingEnabled()Z': () => false,
+        'canChangeDtmfToneLength()Z': () => false,
+        'isWorldPhone()Z': () => false,
+        'isTtyModeSupported()Z': () => false,
+        'isRttSupported()Z': () => false,
+        'isHearingAidCompatibilitySupported()Z': () => false,
+        'getMmsUserAgent()Ljava/lang/String;': () => 'apk.js',
+        'getMmsUAProfUrl()Ljava/lang/String;': () => '',
+        'iccOpenLogicalChannel(Ljava/lang/String;)Landroid/telephony/IccOpenLogicalChannelResponse;': () => null,
+        'iccOpenLogicalChannel(Ljava/lang/String;I)Landroid/telephony/IccOpenLogicalChannelResponse;': () => null,
+        'iccCloseLogicalChannel(I)Z': () => false,
+        'iccTransmitApduLogicalChannel(IIIIIILjava/lang/String;)Ljava/lang/String;': () => null,
+        'iccTransmitApduBasicChannel(IIIIILjava/lang/String;)Ljava/lang/String;': () => null,
+        'iccExchangeSimIO(IIIIILjava/lang/String;)[B': () => null,
+        'sendEnvelopeWithStatus(Ljava/lang/String;)Ljava/lang/String;': () => null,
+        'getSubscriptionId()I': () => 1,
+        'getSubscriptionId(Landroid/telecom/PhoneAccountHandle;)I': () => 1,
+        'getPhoneAccountHandle()Landroid/telecom/PhoneAccountHandle;': () => null,
+        'getIccAuthentication(IILjava/lang/String;)Ljava/lang/String;': () => null,
+        'getForbiddenPlmns()[Ljava/lang/String;': (_self, _args, vm) => vm.newArray('[Ljava/lang/String;', 0, null),
+        'setForbiddenPlmns(Ljava/util/List;)I': () => 0,
+        'setNetworkSelectionModeAutomatic()V': () => undefined,
+        'setNetworkSelectionModeManual(Ljava/lang/String;Z)Z': () => false,
+        'setNetworkSelectionModeManual(Ljava/lang/String;ZI)Z': () => false,
+        'getNetworkSelectionMode()I': () => 1,
+        'getManualNetworkSelectionPlmn()Ljava/lang/String;': () => null,
+        'isManualNetworkSelectionAllowed()Z': () => true,
+        'setPreferredNetworkTypeToGlobal()Z': () => true,
+        'hasCarrierPrivileges()Z': () => false,
+        'setOperatorBrandOverride(Ljava/lang/String;)Z': () => false,
+        'setCallComposerStatus(I)V': () => undefined,
+        'getCallComposerStatus()I': () => 0,
+        'uploadCallComposerPicture(Ljava/nio/file/Path;Ljava/lang/String;Ljava/util/concurrent/Executor;Landroid/os/OutcomeReceiver;)V': () => undefined,
+        'uploadCallComposerPicture(Ljava/io/InputStream;Ljava/lang/String;Ljava/util/concurrent/Executor;Landroid/os/OutcomeReceiver;)V': () => undefined,
+        'setVisualVoicemailSmsFilterSettings(Landroid/telephony/VisualVoicemailSmsFilterSettings;)V': () => undefined,
+        'sendVisualVoicemailSms(Ljava/lang/String;ILjava/lang/String;Landroid/app/PendingIntent;)V': () => undefined,
+        'sendDialerSpecialCode(Ljava/lang/String;)V': () => undefined,
+        'sendUssdRequest(Ljava/lang/String;Landroid/telephony/TelephonyManager$UssdResponseCallback;Landroid/os/Handler;)V': () => undefined,
+        'requestNetworkScan(Landroid/telephony/NetworkScanRequest;Ljava/util/concurrent/Executor;Landroid/telephony/TelephonyScanManager$NetworkScanCallback;)Landroid/telephony/NetworkScan;': () => null,
+        'isVoicemailVibrationEnabled(Landroid/telecom/PhoneAccountHandle;)Z': () => false,
+        'setVoicemailVibrationEnabled(Landroid/telecom/PhoneAccountHandle;Z)V': () => undefined,
+        'getVoicemailRingtoneUri(Landroid/telecom/PhoneAccountHandle;)Landroid/net/Uri;': () => null,
+        'setVoicemailRingtoneUri(Landroid/telecom/PhoneAccountHandle;Landroid/net/Uri;)V': () => undefined,
+        'getSimCarrierId()I': () => 0,
+        'getSimCarrierIdName()Ljava/lang/CharSequence;': () => 'apk.js',
+        'getSimSpecificCarrierId()I': () => 0,
+        'getSimSpecificCarrierIdName()Ljava/lang/CharSequence;': () => 'apk.js',
+        'getCarrierIdFromSimMccMnc()I': () => 0,
+        'getSignalStrength()Landroid/telephony/SignalStrength;': (_self, _args, vm) => buildSignalStrength(vm),
+        'getServiceState()Landroid/telephony/ServiceState;': (_self, _args, vm) => buildServiceState(vm),
+        'getEmergencyNumberList()Ljava/util/Map;': (_self, _args, vm) => vm.allocateRawObject('Ljava/util/HashMap;'),
+        'getEmergencyNumberList(I)Ljava/util/Map;': (_self, _args, vm) => vm.allocateRawObject('Ljava/util/HashMap;'),
+        'isEmergencyNumber(Ljava/lang/String;)Z': (_self, [number]) => /^(112|110|119|120|122|911|999)$/.test(String(number ?? '')),
+        'setPreferredOpportunisticDataSubscription(IZLjava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': () => undefined,
+        'getPreferredOpportunisticDataSubscription()I': () => 1,
+        'updateAvailableNetworks(Ljava/util/List;Ljava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': () => undefined,
+      },
+      staticMethods: {
+        'getMaximumCallComposerPictureSize()J': () => 0,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/telephony/SignalStrength;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getLevel()I': () => 4,
+        'getAsuLevel()I': () => 97,
+        'getDbm()I': () => -50,
+        'getGsmLevel()I': () => 4,
+        'getGsmDbm()I': () => -50,
+        'getGsmAsuLevel()I': () => 97,
+        'getGsmSignalStrength()I': () => 31,
+        'getGsmBitErrorRate()I': () => 0,
+        'getCdmaLevel()I': () => 0,
+        'getCdmaDbm()I': () => -1,
+        'getCdmaEcio()I': () => -1,
+        'getEvdoLevel()I': () => 0,
+        'getEvdoDbm()I': () => -1,
+        'getEvdoEcio()I': () => -1,
+        'getEvdoSnr()I': () => -1,
+        'getLteLevel()I': () => 4,
+        'getLteRsrp()I': () => -50,
+        'getLteRsrq()I': () => -10,
+        'getLteRssnr()I': () => 300,
+        'getLteCqi()I': () => 15,
+        'getNrLevel()I': () => 4,
+        'getCellSignalStrengths()Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+        'isGsm()Z': () => true,
+        'toString()Ljava/lang/String;': () => 'SignalStrength: level=4 gsmLevel=4 gsmDbm=-50',
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/telephony/ServiceState;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getState()I': () => 0,
+        'getVoiceRegState()I': () => 0,
+        'getDataRegState()I': () => 0,
+        'getVoiceNetworkType()I': () => 13,
+        'getDataNetworkType()I': () => 13,
+        'getOperatorAlphaLong()Ljava/lang/CharSequence;': () => 'apk.js',
+        'getOperatorAlphaShort()Ljava/lang/CharSequence;': () => 'apk.js',
+        'getOperatorNumeric()Ljava/lang/String;': () => '00101',
+        'getRoaming()Z': () => false,
+        'getIsManualSelection()Z': () => false,
+        'getCdmaRoamingIndicator()I': () => 0,
+        'getCdmaDefaultRoamingIndicator()I': () => 0,
+        'getCdmaEriIconMode()I': () => 0,
+        'getCdmaEriIconIndex()I': () => 0,
+        'getChannelNumber()I': () => 0,
+        'getDuplexMode()I': () => 0,
+        'getNrState()I': () => 0,
       },
     })
   );
@@ -9736,8 +11142,378 @@ function viewMethods() {
     'clearAnimation()V': (self) => {
       if (self.view) self.view.animation = null;
     },
+    'toString()Ljava/lang/String;': (self) => `View{${self.view?.id ?? ''} ${self.view?.left ?? 0},${self.view?.top ?? 0}}`,
+    'dispatchWindowInsetsAnimationPrepare(Landroid/view/WindowInsetsAnimation;)V': () => undefined,
+    'dispatchWindowInsetsAnimationStart(Landroid/view/WindowInsetsAnimation;Landroid/view/WindowInsetsAnimation$Bounds;)Landroid/view/WindowInsetsAnimation$Bounds;': (_self, [_animation, bounds]) => bounds ?? null,
+    'dispatchWindowInsetsAnimationProgress(Landroid/view/WindowInsets;Ljava/util/List;)Landroid/view/WindowInsets;': (_self, [insets]) => insets ?? null,
+    'dispatchWindowInsetsAnimationEnd(Landroid/view/WindowInsetsAnimation;)V': () => undefined,
+    'setSystemGestureExclusionRects(Ljava/util/List;)V': (self, [rects]) => { self.view && (self.view.gestureExclusionRects = rects ?? null); },
+    'getSystemGestureExclusionRects()Ljava/util/List;': (_self, _args, vm) => emptyJavaList(vm),
+    'getLocationInSurface([I)V': (self, [out]) => {
+      const view = self.view;
+      const values = out?.$data;
+      if (!view || !Array.isArray(values)) return;
+      const point = view.getLocationInWindow?.() ?? { x: view.left || 0, y: view.top || 0 };
+      values[0] = point.x | 0;
+      values[1] = point.y | 0;
+    },
+    'getWindowInsetsController()Landroid/view/WindowInsetsController;': () => null,
+    'requestFitSystemWindows()V': () => undefined,
+    'setFocusable(I)V': (self, [value]) => { if (self.view) self.view.focusable = (value | 0) !== 0; },
+    'setAutofillHints([Ljava/lang/String;)V': (self, [hints]) => { self.autofillHints = hints ?? null; },
+    'setSoundEffectsEnabled(Z)V': (self, [value]) => { self.soundEffectsEnabled = !!value; },
+    'isSoundEffectsEnabled()Z': (self) => self?.soundEffectsEnabled !== false,
+    'setHapticFeedbackEnabled(Z)V': (self, [value]) => { self.hapticFeedbackEnabled = !!value; },
+    'isHapticFeedbackEnabled()Z': (self) => self?.hapticFeedbackEnabled !== false,
+    'setHasTransientState(Z)V': (self, [value]) => { self.hasTransientStateFlag = !!value; },
+    'setWillNotCacheDrawing(Z)V': (self, [value]) => { self.willNotCacheDrawing = !!value; },
+    'willNotCacheDrawing()Z': (self) => !!self?.willNotCacheDrawing,
+    'setAllowClickWhenDisabled(Z)V': (self, [value]) => { self.allowClickWhenDisabled = !!value; },
+    'isContextClickable()Z': (self) => !!self.view?.contextClickable,
+    'setContextClickable(Z)V': (self, [value]) => { if (self.view) self.view.contextClickable = !!value; },
+    'dispatchSetPressed(Z)V': (self, [pressed]) => { self.view?.setPressed?.(!!pressed); },
+    'isSaveEnabled()Z': (self) => self?.saveEnabled !== false,
+    'setSaveEnabled(Z)V': (self, [value]) => { self.saveEnabled = !!value; },
+    'getFilterTouchesWhenObscured()Z': (self) => !!self?.filterTouchesWhenObscured,
+    'setFilterTouchesWhenObscured(Z)V': (self, [value]) => { self.filterTouchesWhenObscured = !!value; },
+    'isSaveFromParentEnabled()Z': (self) => self?.saveFromParentEnabled !== false,
+    'getFocusable()I': (self) => (self.view?.focusable === false ? 0 : 0x11),
+    'isScreenReaderFocusable()Z': (self) => !!self?.screenReaderFocusable,
+    'setScreenReaderFocusable(Z)V': (self, [value]) => { self.screenReaderFocusable = !!value; },
+    'isAccessibilityHeading()Z': (self) => !!self?.accessibilityHeading,
+    'setAccessibilityHeading(Z)V': (self, [value]) => { self.accessibilityHeading = !!value; },
+    'focusSearch(I)Landroid/view/View;': () => null,
+    'isKeyboardNavigationCluster()Z': (self) => !!self?.keyboardNavigationCluster,
+    'setKeyboardNavigationCluster(Z)V': (self, [value]) => { self.keyboardNavigationCluster = !!value; },
+    'isFocusedByDefault()Z': (self) => !!self?.focusedByDefault,
+    'setFocusedByDefault(Z)V': (self, [value]) => { self.focusedByDefault = !!value; },
+    'keyboardNavigationClusterSearch(Landroid/view/View;I)Landroid/view/View;': () => null,
+    'dispatchUnhandledMove(Landroid/view/View;I)Z': () => false,
+    'setDefaultFocusHighlightEnabled(Z)V': (self, [value]) => { self.defaultFocusHighlightEnabled = !!value; },
+    'getDefaultFocusHighlightEnabled()Z': (self) => self?.defaultFocusHighlightEnabled !== false,
+    'getFocusables(I)Ljava/util/ArrayList;': (self, [_direction], vm) => {
+      const list = emptyJavaList(vm);
+      const view = self.view;
+      if (view && view.visibility !== 8 && view.focusable !== false) list.$peer.items.push(viewObject(vm, view));
+      return list;
+    },
+    'addFocusables(Ljava/util/ArrayList;I)V': (self, [list, direction], vm) => {
+      const items = list?.$peer?.items || [];
+      const view = self.view;
+      if (view && view.visibility !== 8 && view.focusable !== false) items.push(viewObject(vm, view));
+      if (list?.$peer) list.$peer.items = items;
+    },
+    'addFocusables(Ljava/util/ArrayList;II)V': (self, [list], vm) => {
+      const items = list?.$peer?.items || [];
+      const view = self.view;
+      if (view && view.visibility !== 8 && view.focusable !== false) items.push(viewObject(vm, view));
+      if (list?.$peer) list.$peer.items = items;
+    },
+    'addKeyboardNavigationClusters(Ljava/util/Collection;I)V': () => undefined,
+    'findViewsWithText(Ljava/util/ArrayList;Ljava/lang/CharSequence;I)V': (self, [list, text], vm) => {
+      const needle = String(text ?? '').toLowerCase();
+      const content = String(self.view?.text ?? self.view?.hint ?? '').toLowerCase();
+      if (!needle || !content.includes(needle)) return;
+      const items = list?.$peer?.items || [];
+      items.push(viewObject(vm, self.view));
+      if (list?.$peer) list.$peer.items = items;
+    },
+    'getTouchables()Ljava/util/ArrayList;': (self, _args, vm) => {
+      const list = emptyJavaList(vm);
+      if (self.view?.clickable === true) list.$peer.items.push(viewObject(vm, self.view));
+      return list;
+    },
+    'addTouchables(Ljava/util/ArrayList;)V': (self, [list], vm) => {
+      if (self.view?.clickable !== true) return;
+      const items = list?.$peer?.items || [];
+      items.push(viewObject(vm, self.view));
+      if (list?.$peer) list.$peer.items = items;
+    },
+    'isAccessibilityFocused()Z': (self) => !!self.view?.accessibilityFocused,
+    'restoreDefaultFocus()Z': (self) => {
+      const view = self.view;
+      if (!view || view.focusable === false) return false;
+      view.focused = true;
+      return true;
+    },
+    'requestFocus(I)Z': (self) => {
+      const view = self.view;
+      if (!view || view.focusable === false || view.visibility !== 0) return false;
+      view.focused = true;
+      view.requestFocus?.();
+      return true;
+    },
+    'requestFocus(ILandroid/graphics/Rect;)Z': (self) => {
+      const view = self.view;
+      if (!view || view.focusable === false || view.visibility !== 0) return false;
+      view.focused = true;
+      view.requestFocus?.();
+      return true;
+    },
+    'requestFocusFromTouch()Z': (self) => {
+      const view = self.view;
+      if (!view) return false;
+      view.focused = true;
+      return true;
+    },
+    'isImportantForAccessibility()Z': () => true,
+    'getParentForAccessibility()Landroid/view/ViewParent;': (self, _args, vm) => {
+      const parent = self.view?.parent;
+      return parent ? viewObject(vm, parent) : null;
+    },
+    'addChildrenForAccessibility(Ljava/util/ArrayList;)V': (self, [list], vm) => {
+      if (!self.view) return;
+      const items = list?.$peer?.items || [];
+      items.push(viewObject(vm, self.view));
+      if (list?.$peer) list.$peer.items = items;
+    },
+    'setTransitionVisibility(I)V': (self, [visibility]) => {
+      if (self.view) self.view.visibility = visibility | 0;
+    },
+    'dispatchNestedPrePerformAccessibilityAction(ILandroid/os/Bundle;)Z': () => false,
+    'performAccessibilityAction(ILandroid/os/Bundle;)Z': () => false,
+    'isTemporarilyDetached()Z': (self) => !!self?.temporarilyDetached,
+    'dispatchStartTemporaryDetach()V': (self) => { self.temporarilyDetached = true; },
+    'onStartTemporaryDetach()V': () => undefined,
+    'dispatchFinishTemporaryDetach()V': (self) => { self.temporarilyDetached = false; },
+    'onFinishTemporaryDetach()V': () => undefined,
+    'getKeyDispatcherState()Landroid/view/KeyEvent$DispatcherState;': () => null,
+    'dispatchKeyEventPreIme(Landroid/view/KeyEvent;)Z': () => false,
+    'dispatchKeyEvent(Landroid/view/KeyEvent;)Z': (self, [event]) => self.view?.dispatchKeyEvent?.(event) ?? false,
+    'dispatchKeyShortcutEvent(Landroid/view/KeyEvent;)Z': () => false,
+    'onFilterTouchEventForSecurity(Landroid/view/MotionEvent;)Z': () => true,
+    'dispatchTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'dispatchCapturedPointerEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'dispatchGenericMotionEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => self.view?.dispatchGenericMotionEvent?.(event) ?? false,
+    'dispatchHoverEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => self.view?.dispatchHoverEvent?.(event) ?? false,
+    'dispatchGenericPointerEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'dispatchGenericFocusedEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'dispatchWindowFocusChanged(Z)V': (self, [hasFocus]) => {
+      if (self.view) self.view.hasWindowFocus = !!hasFocus;
+    },
+    'onWindowFocusChanged(Z)V': () => undefined,
+    'dispatchVisibilityChanged(Landroid/view/View;I)V': (self, [_source, visibility]) => {
+      if (self.view) self.view.visibility = visibility | 0;
+    },
+    'onVisibilityChanged(Landroid/view/View;I)V': () => undefined,
+    'dispatchDisplayHint(I)V': () => undefined,
+    'onDisplayHint(I)V': () => undefined,
+    'dispatchWindowVisibilityChanged(I)V': (self, [visibility]) => {
+      if (self.view) self.view.windowVisibility = visibility | 0;
+    },
+    'onWindowVisibilityChanged(I)V': () => undefined,
+    'onVisibilityAggregated(Z)V': () => undefined,
+    'getWindowVisibility()I': () => 0,
+    'dispatchConfigurationChanged(Landroid/content/res/Configuration;)V': () => undefined,
+    'onConfigurationChanged(Landroid/content/res/Configuration;)V': () => undefined,
+    'isInTouchMode()Z': () => true,
+    'onKeyPreIme(ILandroid/view/KeyEvent;)Z': () => false,
+    'onKeyDown(ILandroid/view/KeyEvent;)Z': () => false,
+    'onKeyLongPress(ILandroid/view/KeyEvent;)Z': () => false,
+    'onKeyUp(ILandroid/view/KeyEvent;)Z': () => false,
+    'onKeyMultiple(IILandroid/view/KeyEvent;)Z': () => false,
+    'onKeyShortcut(ILandroid/view/KeyEvent;)Z': () => false,
+    'onCheckIsTextEditor()Z': () => false,
+    'onCreateInputConnection(Landroid/view/inputmethod/EditorInfo;)Landroid/view/inputmethod/InputConnection;': () => null,
+    'checkInputConnectionProxy(Landroid/view/View;)Z': () => false,
+    'createContextMenu(Landroid/view/ContextMenu;)V': () => undefined,
+    'getContextMenuInfo()Landroid/view/ContextMenu$ContextMenuInfo;': () => null,
+    'onCreateContextMenu(Landroid/view/ContextMenu;)V': () => undefined,
+    'onTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'onGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+    'onHoverEvent(Landroid/view/MotionEvent;)Z': () => true,
+    'isHovered()Z': (self) => !!self.view?.hovered,
+    'setHovered(Z)V': (self, [hovered]) => { if (self.view) self.view.hovered = !!hovered; },
+    'onHoverChanged(Z)V': () => undefined,
+    'setTouchDelegate(Landroid/view/TouchDelegate;)V': (self, [delegate]) => { self.touchDelegate = delegate ?? null; },
+    'getTouchDelegate()Landroid/view/TouchDelegate;': (self) => self?.touchDelegate ?? null,
+    'requestUnbufferedDispatch(Landroid/view/MotionEvent;)V': () => undefined,
+    'requestUnbufferedDispatch(I)V': () => undefined,
+    'onScrollChanged(IIII)V': (self) => self.view?.invalidate?.(),
+    'onSizeChanged(IIII)V': () => undefined,
+    'dispatchDraw(Landroid/graphics/Canvas;)V': (self, [canvas]) =>
+      self.view?.dispatchDraw?.(canvas?.$peer?.canvas || canvas),
+    'isPivotSet()Z': (self) => !!self.view?.pivotSet,
+    'resetPivot()V': (self) => { if (self.view) self.view.pivotSet = false; },
+    'forceHasOverlappingRendering(Z)V': (self, [value]) => { self.forceOverlappingRendering = !!value; },
+    'getHasOverlappingRendering()Z': (self) => self?.forceOverlappingRendering !== false,
+    'hasOverlappingRendering()Z': () => true,
+    'setTransitionAlpha(F)V': (self, [alpha]) => {
+      self.transitionAlpha = Number(alpha);
+      if (self.view) self.view.transitionAlpha = Number(alpha);
+    },
+    'getTransitionAlpha()F': (self) => self?.transitionAlpha ?? 1,
+    'setForceDarkAllowed(Z)V': (self, [value]) => { self.forceDarkAllowed = !!value; },
+    'isForceDarkAllowed()Z': (self) => self?.forceDarkAllowed !== false,
+    'setTop(I)V': (self, [top]) => { if (self.view) self.view.top = top | 0; },
+    'isDirty()Z': (self) => !!self.view?.isDirty,
+    'setBottom(I)V': (self, [bottom]) => { if (self.view) self.view.bottom = bottom | 0; },
+    'setLeft(I)V': (self, [left]) => { if (self.view) self.view.left = left | 0; },
+    'setRight(I)V': (self, [right]) => { if (self.view) self.view.right = right | 0; },
+    'setAnimationMatrix(Landroid/graphics/Matrix;)V': (self, [matrix]) => { self.animationMatrix = matrix ?? null; },
+    'getAnimationMatrix()Landroid/graphics/Matrix;': (self) => self?.animationMatrix ?? null,
+    'getStateListAnimator()Landroid/animation/StateListAnimator;': (self) => self?.stateListAnimator ?? null,
+    'setStateListAnimator(Landroid/animation/StateListAnimator;)V': (self, [animator]) => { self.stateListAnimator = animator ?? null; },
+    'setOutlineSpotShadowColor(I)V': (self, [color]) => { self.outlineSpotShadowColor = color >>> 0; },
+    'getOutlineSpotShadowColor()I': (self) => self?.outlineSpotShadowColor ?? 0xff000000,
+    'setOutlineAmbientShadowColor(I)V': (self, [color]) => { self.outlineAmbientShadowColor = color >>> 0; },
+    'getOutlineAmbientShadowColor()I': (self) => self?.outlineAmbientShadowColor ?? 0xff000000,
+    'getFocusedRect(Landroid/graphics/Rect;)V': (self, [rect]) => {
+      const target = rect?.$peer?.rect || rect;
+      const view = self.view;
+      if (!target || !view) return;
+      target.set?.(0, 0, view.width | 0, view.height | 0);
+      if (typeof target.set !== 'function') {
+        target.left = 0; target.top = 0; target.right = view.width | 0; target.bottom = view.height | 0;
+      }
+    },
+    'getGlobalVisibleRect(Landroid/graphics/Rect;)Z': (self, [rect]) => {
+      const view = self.view;
+      if (!view) return false;
+      const point = view.getLocationInWindow?.() ?? { x: view.left || 0, y: view.top || 0 };
+      const target = rect?.$peer?.rect || rect;
+      const width = view.width | 0;
+      const height = view.height | 0;
+      if (target && typeof target.set === 'function') target.set(point.x | 0, point.y | 0, (point.x + width) | 0, (point.y + height) | 0);
+      else if (target) {
+        target.left = point.x | 0; target.top = point.y | 0;
+        target.right = (point.x + width) | 0; target.bottom = (point.y + height) | 0;
+      }
+      return true;
+    },
+    'invalidate(Landroid/graphics/Rect;)V': (self) => self.view?.invalidate?.(),
+    'invalidate(IIII)V': (self) => self.view?.invalidate?.(),
+    'isOpaque()Z': () => false,
+    'getHandler()Landroid/os/Handler;': (self) => self.vm?.handlerObject ?? null,
+    'removeCallbacks(Ljava/lang/Runnable;)Z': () => true,
+    'postInvalidate(IIII)V': (self) => self.view?.invalidate?.(),
+    'postInvalidateDelayed(J)V': (self) => self.view?.invalidate?.(),
+    'postInvalidateDelayed(JIIII)V': (self) => self.view?.invalidate?.(),
+    'postInvalidateOnAnimation(IIII)V': (self) => self.view?.invalidate?.(),
+    'computeScroll()V': (self) => self.view?.computeScroll?.(),
+    'isHorizontalFadingEdgeEnabled()Z': (self) => !!self.view?.horizontalFadingEdgeEnabled,
+    'setHorizontalFadingEdgeEnabled(Z)V': (self, [value]) => {
+      if (self.view) self.view.horizontalFadingEdgeEnabled = !!value;
+    },
+    'isVerticalFadingEdgeEnabled()Z': (self) => !!self.view?.verticalFadingEdgeEnabled,
+    'setVerticalFadingEdgeEnabled(Z)V': (self, [value]) => {
+      if (self.view) self.view.verticalFadingEdgeEnabled = !!value;
+    },
+    'getTopFadingEdgeStrength()F': () => 0,
+    'getBottomFadingEdgeStrength()F': () => 0,
+    'getLeftFadingEdgeStrength()F': () => 0,
+    'getRightFadingEdgeStrength()F': () => 0,
+    'onDrawScrollBars(Landroid/graphics/Canvas;)V': (self, [canvas]) =>
+      self.view?.drawScrollBars?.(canvas?.$peer?.canvas || canvas),
+    'onScreenStateChanged(I)V': () => undefined,
+    'onRtlPropertiesChanged(I)V': () => undefined,
+    'canResolveLayoutDirection()Z': () => true,
+    'isLayoutDirectionResolved()Z': () => true,
+    'getWindowAttachCount()I': () => 1,
+    'getWindowId()Landroid/view/WindowId;': () => null,
+    'onCancelPendingInputEvents()V': () => undefined,
+    'dispatchSaveInstanceState(Landroid/util/SparseArray;)V': () => undefined,
+    'onSaveInstanceState()Landroid/os/Parcelable;': () => null,
+    'dispatchRestoreInstanceState(Landroid/util/SparseArray;)V': () => undefined,
+    'onRestoreInstanceState(Landroid/os/Parcelable;)V': () => undefined,
+    'getDrawingTime()J': (self) => self.vm?.engine?.lastFrameTime ?? 0,
+    'setDuplicateParentStateEnabled(Z)V': (self, [value]) => { self.duplicateParentState = !!value; },
+    'isDuplicateParentStateEnabled()Z': (self) => !!self?.duplicateParentState,
+    'setRenderEffect(Landroid/graphics/RenderEffect;)V': (self, [effect]) => { self.renderEffect = effect ?? null; },
+    'setLayerPaint(Landroid/graphics/Paint;)V': (self, [paint]) => { self.layerPaint = paint ?? null; },
+    'buildLayer()V': () => undefined,
+    'setDrawingCacheEnabled(Z)V': (self, [value]) => { self.drawingCacheEnabled = !!value; },
+    'isDrawingCacheEnabled()Z': (self) => !!self?.drawingCacheEnabled,
+    'getDrawingCache()Landroid/graphics/Bitmap;': () => null,
+    'getDrawingCache(Z)Landroid/graphics/Bitmap;': () => null,
+    'destroyDrawingCache()V': () => undefined,
+    'setDrawingCacheBackgroundColor(I)V': (self, [color]) => { self.drawingCacheBackgroundColor = color >>> 0; },
+    'getDrawingCacheBackgroundColor()I': (self) => self?.drawingCacheBackgroundColor ?? 0,
+    'buildDrawingCache()V': () => undefined,
+    'buildDrawingCache(Z)V': () => undefined,
+    'isPaddingOffsetRequired()Z': () => false,
+    'getLeftPaddingOffset()I': () => 0,
+    'getRightPaddingOffset()I': () => 0,
+    'getTopPaddingOffset()I': () => 0,
+    'getBottomPaddingOffset()I': () => 0,
+    'setClipBounds(Landroid/graphics/Rect;)V': (self, [bounds]) => {
+      if (self.view) self.view.clipBounds = bounds ?? null;
+    },
+    'getClipBounds()Landroid/graphics/Rect;': (self) => self.view?.clipBounds ?? null,
+    'getClipBounds(Landroid/graphics/Rect;)Z': (self, [out]) => {
+      const bounds = self.view?.clipBounds;
+      if (!bounds) return false;
+      const target = out?.$peer?.rect || out;
+      if (!target) return false;
+      const left = bounds.left ?? 0;
+      const top = bounds.top ?? 0;
+      const right = bounds.right ?? 0;
+      const bottom = bounds.bottom ?? 0;
+      if (typeof target.set === 'function') target.set(left, top, right, bottom);
+      else Object.assign(target, { left, top, right, bottom });
+      return true;
+    },
+    'getOverlay()Landroid/view/ViewOverlay;': () => null,
+    'setLeftTopRightBottom(IIII)V': (self, [left, top, right, bottom]) => {
+      const view = self.view;
+      if (!view) return;
+      view.left = left | 0;
+      view.top = top | 0;
+      view.right = right | 0;
+      view.bottom = bottom | 0;
+    },
+    'onFinishInflate()V': () => undefined,
+    'invalidateDrawable(Landroid/graphics/drawable/Drawable;)V': (self) => self.view?.invalidate?.(),
+    'scheduleDrawable(Landroid/graphics/drawable/Drawable;Ljava/lang/Runnable;J)V': () => undefined,
+    'unscheduleDrawable(Landroid/graphics/drawable/Drawable;Ljava/lang/Runnable;)V': () => undefined,
+    'unscheduleDrawable(Landroid/graphics/drawable/Drawable;)V': () => undefined,
+    'verifyDrawable(Landroid/graphics/drawable/Drawable;)Z': (self, [drawable]) => {
+      const view = self.view;
+      if (!view) return false;
+      return drawable === view.background || drawable === view.foreground;
+    },
+    'drawableHotspotChanged(FF)V': (self, [x, y]) => {
+      if (self.view) self.view.drawableHotspot = { x: Number(x), y: Number(y) };
+    },
+    'dispatchDrawableHotspotChanged(FF)V': (self, [x, y]) => {
+      if (self.view) self.view.drawableHotspot = { x: Number(x), y: Number(y) };
+    },
+    'onCreateDrawableState(I)[I': (self, [extraSpace], vm) => {
+      const base = self.view?.getDrawableState?.() ?? [];
+      const array = vm.newArray('[I', base.length + (extraSpace | 0), null);
+      const target = array?.$data;
+      if (Array.isArray(target)) {
+        for (let i = 0; i < base.length; i++) target[i] = base[i] | 0;
+      }
+      return array;
+    },
+    'setBackgroundTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.backgroundTintBlendMode = mode ?? null; },
+    'getBackgroundTintBlendMode()Landroid/graphics/BlendMode;': (self) => self?.backgroundTintBlendMode ?? null,
+    'getForegroundGravity()I': (self) => self.view?.foregroundGravity ?? 0x800033,
+    'setForegroundTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.foregroundTintBlendMode = mode ?? null; },
+    'getForegroundTintBlendMode()Landroid/graphics/BlendMode;': (self) => self?.foregroundTintBlendMode ?? null,
+    'onDrawForeground(Landroid/graphics/Canvas;)V': (self, [canvas]) =>
+      self.view?.drawForeground?.(canvas?.$peer?.canvas || canvas),
+    'getSourceLayoutResId()I': (self) => self.view?.sourceLayoutResId | 0,
+    'dispatchSetSelected(Z)V': (self, [selected]) => { self.view?.setSelected?.(!!selected); },
+    'dispatchSetActivated(Z)V': (self, [activated]) => { self.view?.setActivated?.(!!activated); },
+    'transformMatrixToGlobal(Landroid/graphics/Matrix;)V': () => undefined,
+    'transformMatrixToLocal(Landroid/graphics/Matrix;)V': () => undefined,
+    'requireViewById(I)Landroid/view/View;': (self, [id], vm) => {
+      const view = self.view?.findViewById?.(id >>> 0);
+      return view ? viewObject(vm, view) : null;
+    },
+    'getUniqueDrawingId()J': (self) => {
+      const view = self.view;
+      if (!view) return 0;
+      if (view.uniqueDrawingId === undefined) view.uniqueDrawingId = ++VIEW_DRAWING_ID_COUNTER;
+      return view.uniqueDrawingId;
+    },
+    'isInLayout()Z': () => false,
   };
 }
+
+let VIEW_DRAWING_ID_COUNTER = 0;
 
 let VIEW_ID_COUNTER = 0x7f100000;
 
@@ -9778,7 +11554,13 @@ function makeFragmentTransaction(vm, manager, fragments, pending) {
     add: (containerId, fragment, tag) => {
       ops.push(() => {
         const key = jsString(tag) || `fragment-${fragments.size}`;
-        if (fragment) fragment.$fragmentId = containerId >>> 0;
+        if (fragment) {
+          fragment.$fragmentId = containerId >>> 0;
+          const peer = fragment.$peer || (fragment.$peer = {});
+          peer.$id = containerId >>> 0;
+          peer.$tag = jsString(tag) || key;
+          peer.$added = true;
+        }
         fragments.set(key, fragment);
       });
       return object;
@@ -9810,6 +11592,26 @@ function makeFragmentTransaction(vm, manager, fragments, pending) {
     isEmpty: () => ops.length === 0,
   };
   object.$peer = self;
+  return object;
+}
+
+function layoutInflaterObject(vm) {
+  const object = vm.allocateRawObject('Landroid/view/LayoutInflater;');
+  object.$peer = { vm, context: vm.contextObject, resources: vm.resources };
+  return object;
+}
+
+/** 对应 Fragment.instantiate：按类名实例化并注入 context / arguments。 */
+function instantiateFragment(vm, context, name, args) {
+  const className = jsString(name);
+  if (!className || className === 'null') return null;
+  const descriptor = `L${className.replace(/\./g, '/')};`;
+  const object = vm.instantiate(descriptor, []);
+  if (!object) return null;
+  const peer = object.$peer || (object.$peer = {});
+  peer.$vm = vm;
+  peer.$context = context ?? vm.contextObject ?? null;
+  if (args) peer.$arguments = args;
   return object;
 }
 

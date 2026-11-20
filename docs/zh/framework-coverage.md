@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：19
-- 注册的 native 类：421
-- 方法/构造函数键（静态统计）：5041
+- 注册的 native 类：423
+- 方法/构造函数键（静态统计）：5924
 
 ## Native 类清单
 
@@ -141,6 +141,8 @@
 | `Landroid/provider/Settings$Global;` | registry.js |
 | `Landroid/system/Os;` | registry.js |
 | `Landroid/system/StructUtsname;` | registry.js |
+| `Landroid/telephony/ServiceState;` | registry.js |
+| `Landroid/telephony/SignalStrength;` | registry.js |
 | `Landroid/telephony/TelephonyManager;` | registry.js |
 | `Landroid/text/method/LinkMovementMethod;` | java-core.js |
 | `Landroid/text/SpannableString;` | java-core.js |
