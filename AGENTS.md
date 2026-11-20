@@ -170,9 +170,44 @@ npm run site
 - 推送认证注意：GitHub 不接受 `用户名:token` 形式（会返回 401），要用 `x-access-token:token` 作为凭据，或写进 `~/.git-credentials` 的 `https://x-access-token:<token>@github.com` 行配合 `git config credential.helper store`。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables、compat。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
+- Via 浏览器（`/tmp/via.apk`）：能渲染隐私弹窗、完成 Firebase 组件图构建，止于 `MissingDependencyException`；下一步要在 `PackageManager` / manifest meta-data 层补 `ComponentRegistrar` 发现，才能继续推进。
+
+### 本轮已完成（2026-11-21 第十二轮：集合/反射语义修正与 AOSP 绘制管线对照）
+
+1. **`new HashSet(Collection)` 缺失**：`java.util.HashSet` 只有 `()` / `(I)` 构造，`new HashSet(this.a)` 生成的集合始终为空。Firebase 的 `Component.Builder` 用它保存 provided 接口，导致依赖图里每个组件都「没有提供任何接口」，`ComponentRuntime` 的拓扑排序提前结束并误报 `DependencyCycleException: []`。已补 `(Collection)` / `(IF)` / `(IFZ)` 三个构造，`LinkedHashSet` 同步补 `(IF)` / `(IFZ)`。
+2. **`Collections.newSetFromMap(Map)` 缺失**：返回 null 会让 `n2.v.<init>` 的 `addAll` 直接 NPE。现按 Map 的键构造 Set 副本（调用方只把返回值当容器用）。
+3. **Map 值语义**：只覆写 `hashCode`、不覆写 `toString` 的键类（Firebase 的 `Qualified`）此前用 `hash:toString` 做规范化键，等值实例查不到彼此。改为 `findValueSlot()`：对值对象用 dex `equals` 线性比对已有原始键，身份键仅用于普通对象。注意这与第三轮「不要凭直觉加缓存」的结论不冲突——这里是语义修正，不是缓存。
+4. **`java.lang.Class` 的 `equals` / `hashCode` / `toString`**：此前缺省走 `Object` 的身份比较，`Class` 相等应比较 descriptor。补上后 `Qualified.equals` 里的 `Class.equals` 才能正确返回。
+5. **`String.format("%s", 对象)`**：改为调用覆写了 `toString` 的 dex 实现（`javaValueToString`），异常消息不再是 `[object Object]`。
+6. **Via 浏览器 APK 冒烟**：从「隐私弹窗后立刻崩溃」推进到完成 Firebase 组件图构建，最终停在 `MissingDependencyException`（缺少 `android.content.Context` 等提供方）。已确认 Map/Set/Class 语义正确（逐键比对字段后确认是真实缺失），剩余原因是 Firebase 的 `ComponentRegistrar` 发现链路（manifest meta-data / `ComponentDiscoveryService`）尚未支持，与 Via 本身无关，属于通用宿主缺口。
+7. **回归**：DeviceInfoHW 18 个标签页全部 `clicked=true`、`未绑定=0`、`异常=0`；`npm run test:all`（38 项）、`npm run build`、`npm run site` 全绿；SDK 方法覆盖 3251/8744（较上轮 +32）。
+
+### AOSP UI 绘制逻辑对照（本轮审计结论）
+
+按 AOSP `View.draw(Canvas)` 的顺序逐段核对 `src/framework/view.js`：
+
+| AOSP 阶段 | 本项目实现 | 结论 |
+| --- | --- | --- |
+| `computeScroll()` | `computeScrollWithDex()`，DEX 覆写优先 | 一致 |
+| 阴影（RenderNode 负责） | `drawElevation()` 离屏 ambient/spot 双 Pass | 近似；AOSP 由父级 RenderNode 统一绘制，遮挡关系略有差异 |
+| `drawBackground()` | `drawBackground()` + `drawElevationOverlay()` | 一致（overlay 仅在暗色/主题启用时叠加） |
+| `onDraw()` | 宿主 `onDraw`，DEX 覆写优先 | 一致 |
+| `dispatchDraw()` | `dispatchDraw()`：`clipChildren` → `clipToPadding` → 滚动平移 → 按 Z 排序 → 跳过 GONE/INVISIBLE | 与 `ViewGroup.dispatchDraw` 一致 |
+| `onDrawForeground()` | `drawForeground()`（前景 drawable + tint） | 前景一致；滚动条/默认焦点高亮仍未绘制 |
+| `alpha` / `translation` | `canvas.translate` + `globalAlpha` | 一致 |
+| DEX 覆写 `draw()` 的 super 调用 | `$dexDrawActive` 防止二次平移 | 与 AOSP「先定位画布再调用 super」一致 |
+
+测量/布局侧：`MeasureSpec` 三态、`MATCH_PARENT` 二趟测量、`LinearLayout` 权重递减分配与 baseline 对齐、`FrameLayout` 二趟测量都已按 AOSP 实现（见第五轮记录）。已知剩余差距：
+
+1. 滚动条（`scrollbars` / `scrollbarThumb`）与 `defaultFocusHighlight` 未绘制，AOSP 在 `onDrawForeground` 末段绘制。
+2. 阴影由子视图自绘而非父级统一合成，重叠区域可能比原生更暗。
+3. `View.draw` 未处理 `matrix` 与 `clipToOutline` 之外的硬件层（`setLayerType`）。
+4. `elevation overlay` 目前对所有背景生效，Material 只在背景色等于 `colorSurface` 时叠加。
+
+这四条都不影响 DeviceInfoHW / 自建 Material 样例的像素对照，已记录在下方「仍待修复的系统性 UI 差异」。
 
 ### 本轮已完成（2026-11-20 第十一轮：真实 NinePatch 块越界修复）
 

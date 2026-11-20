@@ -15,6 +15,7 @@
 - [ ] 支持 `WebView` 加载 `assets/` 内 HTML
 - [ ] 补 `ContentProvider` 与 `FileProvider` 的最小实现
 - [ ] `MediaPlayer` / `SoundPool` 走 Web Audio
+- [ ] `PackageManager` 读取 manifest `meta-data` / `ComponentProvider`，补齐 Firebase `ComponentRegistrar` 发现链路
 
 ### Framework
 

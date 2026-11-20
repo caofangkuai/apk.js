@@ -2,9 +2,9 @@
 
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
-- 源文件：17
-- 注册的 native 类：372
-- 方法/构造函数键（静态统计）：3608
+- 源文件：19
+- 注册的 native 类：410
+- 方法/构造函数键（静态统计）：4363
 
 ## Native 类清单
 
@@ -130,6 +130,8 @@
 | `Landroid/os/SystemClock;` | registry.js |
 | `Landroid/os/SystemProperties;` | registry.js |
 | `Landroid/os/Trace;` | registry.js |
+| `Landroid/os/UserHandle;` | registry.js |
+| `Landroid/os/UserManager;` | registry.js |
 | `Landroid/preference/PreferenceManager;` | java-core.js |
 | `Landroid/provider/Settings$Global;` | registry.js |
 | `Landroid/system/Os;` | registry.js |
@@ -191,9 +193,27 @@
 | `Landroid/view/WindowInsets;` | registry.js |
 | `Landroid/view/WindowInsets$Builder;` | registry.js |
 | `Landroid/view/WindowManager;` | registry.js |
+| `Landroid/webkit/ClientCertRequest;` | webkit.js |
+| `Landroid/webkit/CookieManager;` | webkit.js |
+| `Landroid/webkit/GeolocationPermissions$Callback;` | webkit.js |
+| `Landroid/webkit/HttpAuthHandler;` | webkit.js |
+| `Landroid/webkit/JsPromptResult;` | webkit.js |
+| `Landroid/webkit/JsResult;` | webkit.js |
+| `Landroid/webkit/MimeTypeMap;` | webkit.js |
+| `Landroid/webkit/PermissionRequest;` | webkit.js |
+| `Landroid/webkit/SslErrorHandler;` | webkit.js |
+| `Landroid/webkit/URLUtil;` | webkit.js |
+| `Landroid/webkit/WebBackForwardList;` | webkit.js |
 | `Landroid/webkit/WebChromeClient;` | registry.js |
+| `Landroid/webkit/WebChromeClient$FileChooserParams;` | webkit.js |
+| `Landroid/webkit/WebHistoryItem;` | webkit.js |
+| `Landroid/webkit/WebResourceError;` | webkit.js |
+| `Landroid/webkit/WebResourceRequest;` | webkit.js |
 | `Landroid/webkit/WebSettings;` | registry.js |
+| `Landroid/webkit/WebStorage;` | webkit.js |
 | `Landroid/webkit/WebView;` | registry.js |
+| `Landroid/webkit/WebView$HitTestResult;` | webkit.js |
+| `Landroid/webkit/WebView$WebViewTransport;` | webkit.js |
 | `Landroid/webkit/WebViewClient;` | registry.js |
 | `Landroid/widget/AbsListView;` | registry.js |
 | `Landroid/widget/AbsoluteLayout;` | registry.js |
@@ -262,14 +282,18 @@
 | `Landroid/widget/ViewSwitcher;` | registry.js |
 | `Ljava/io/BufferedReader;` | java-core.js |
 | `Ljava/io/Closeable;` | java-core.js |
+| `Ljava/io/EOFException;` | java-core.js |
 | `Ljava/io/File;` | java-core.js |
 | `Ljava/io/FileDescriptor;` | java-core.js |
 | `Ljava/io/FileInputStream;` | java-core.js |
+| `Ljava/io/FileNotFoundException;` | java-core.js |
 | `Ljava/io/FileOutputStream;` | java-core.js |
 | `Ljava/io/FileReader;` | java-core.js |
 | `Ljava/io/FileWriter;` | java-core.js |
 | `Ljava/io/Flushable;` | java-core.js |
 | `Ljava/io/InputStream;` | registry.js |
+| `Ljava/io/InterruptedIOException;` | java-core.js |
+| `Ljava/io/IOException;` | java-core.js |
 | `Ljava/io/OutputStream;` | java-core.js |
 | `Ljava/io/PrintStream;` | java-core.js |
 | `Ljava/io/PrintWriter;` | java-core.js |
@@ -278,6 +302,7 @@
 | `Ljava/io/Serializable;` | java-core.js |
 | `Ljava/io/StringReader;` | java-core.js |
 | `Ljava/io/StringWriter;` | java-core.js |
+| `Ljava/io/UnsupportedEncodingException;` | java-core.js |
 | `Ljava/io/Writer;` | java-core.js |
 | `Ljava/lang/ArithmeticException;` | java-core.js |
 | `Ljava/lang/ArrayIndexOutOfBoundsException;` | java-core.js |
@@ -320,6 +345,16 @@
 | `Ljava/lang/Throwable;` | java-core.js |
 | `Ljava/lang/UnsupportedOperationException;` | java-core.js |
 | `Ljava/math/BigDecimal;` | java-core.js |
+| `Ljava/net/ConnectException;` | java-core.js |
+| `Ljava/net/HttpURLConnection;` | java-core.js |
+| `Ljava/net/MalformedURLException;` | java-core.js |
+| `Ljava/net/SocketException;` | java-core.js |
+| `Ljava/net/SocketTimeoutException;` | java-core.js |
+| `Ljava/net/UnknownHostException;` | java-core.js |
+| `Ljava/net/URI;` | java-core.js |
+| `Ljava/net/URISyntaxException;` | java-core.js |
+| `Ljava/net/URL;` | java-core.js |
+| `Ljava/net/URLConnection;` | java-core.js |
 | `Ljava/security/KeyFactory;` | registry.js |
 | `Ljava/security/PublicKey;` | registry.js |
 | `Ljava/security/spec/X509EncodedKeySpec;` | registry.js |
@@ -361,6 +396,7 @@
 | `Ljava/util/ListIterator;` | java-core.js |
 | `Ljava/util/Locale;` | java-core.js |
 | `Ljava/util/Map;` | java-core.js |
+| `Ljava/util/Map$Entry;` | java-core.js |
 | `Ljava/util/Objects;` | java-core.js |
 | `Ljava/util/Random;` | java-core.js |
 | `Ljava/util/regex/Matcher;` | java-core.js |
@@ -379,6 +415,8 @@
 | `Ljavax/microedition/khronos/egl/EGL10;` | opengl.js |
 | `Ljavax/microedition/khronos/opengles/GL;` | opengl.js |
 | `Ljavax/microedition/khronos/opengles/GL10;` | opengl.js |
+| `Ljavax/net/ssl/HttpsURLConnection;` | java-core.js |
+| `Ljavax/net/ssl/SSLException;` | java-core.js |
 | `Lorg/json/JSONArray;` | registry.js |
 | `Lorg/json/JSONObject;` | registry.js |
 | `Lorg/xmlpull/v1/XmlPullParser;` | registry.js |

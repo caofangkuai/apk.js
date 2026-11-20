@@ -400,44 +400,12 @@ function mapKey(value, vm) {
   if (typeof value === 'string') return 'str:' + value;
   if (typeof value === 'boolean') return 'bool:' + value;
   if (isJavaObject(value)) {
-    if (globalThis.__DBG_B0) {
-      const desc = vm?.registry?.classNameOf?.(value);
-      globalThis.__DBG_KEYS ??= new Set();
-      if (desc && !globalThis.__DBG_KEYS.has(desc)) {
-        globalThis.__DBG_KEYS.add(desc);
-        console.error('MAPKEY_DESC', desc);
-      }
-    }
     const peer = value.$peer;
     if (peer && peer.value !== undefined && typeof peer.value !== 'object') return 'num:' + peer.value;
     if (value.$string !== undefined) return 'str:' + value.$string;
-    // 覆写了 hashCode 的类按 Java 值语义做键，否则回落到对象身份。
-    // Firebase 的 Qualified 等值对象都依赖这条规则，漏掉会出现「明明同一个
-    // 依赖却查不到提供方」，最终被误判成循环依赖。
-    if (vm && classOverridesMethod(vm, value, 'hashCode', '()I')) {
-      if (globalThis.__DBG_B0 && String(vm.registry.classNameOf(value)).includes('n2/b0;')) {
-        console.error('B0OVERRIDE', vm.registry.classNameOf(value), value.$valueKey);
-      }
-      if (value.$valueKey === undefined) {
-        let hash = 0;
-        let text = '';
-        try {
-          hash = toInt(vm.invokeByName('hashCode', '()I', value, []));
-        } catch (error) {
-          hash = hashCode(value);
-        }
-        try {
-          text = jsString(vm.invokeByName('toString', '()Ljava/lang/String;', value, []));
-        } catch (error) {
-          text = '';
-        }
-        value.$valueKey = `val:${hash | 0}:${text}`;
-        if (globalThis.__DBG_B0 && String(vm.registry.classNameOf(value)).includes('n2/b0;')) {
-          console.error('B0KEY', vm.registry.classNameOf(value), value.$valueKey);
-        }
-      }
-      return value.$valueKey;
-    }
+    // 覆写了 hashCode 的类需要按 Java 值语义比较（equals），不能靠身份键，
+    // 也不能靠 toString（很多等值类并不覆写 toString，默认实现带身份哈希）。
+    // mapKey 只给出身份槽位，真正的等值查找由 findValueSlot 用 equals 完成。
     if (peer && typeof peer.toString === 'function') {
       const text = peer.toString();
       if (typeof text === 'string' && text !== '[object Object]') return 'str:' + text;
@@ -453,6 +421,28 @@ function mapKey(value, vm) {
   return 'str:' + String(value);
 }
 let mapKeyCounter = 0;
+
+/**
+ * 值语义对象的等值查找：Java 的 HashMap 用 hashCode + equals 定位键。
+ * 只覆写 hashCode 不覆写 toString 的类（Firebase 的 Qualified 就是典型）
+ * 用身份键会查不到「本应相等」的另一个实例，表现为依赖边丢失、
+ * 拓扑排序提前结束、最后被误判成循环依赖。
+ */
+function findValueSlot(self, key, vm) {
+  if (!vm || !isJavaObject(key) || !self.rawKeys || self.rawKeys.size === 0) return null;
+  if (!classOverridesMethod(vm, key, 'hashCode', '()I')) return null;
+  for (const [slot, raw] of self.rawKeys) {
+    if (raw === key) return slot;
+    if (!isJavaObject(raw)) continue;
+    try {
+      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw]) === true) return slot;
+    } catch (error) {
+      // equals 抛错按不相等处理，避免把宿主异常带进 Map 语义。
+    }
+  }
+  return null;
+}
+
 
 /**
  * Class.forName：缺失的应用/库类必须抛 ClassNotFoundException，
@@ -640,6 +630,15 @@ export const JAVA_CORE_CLASSES = {
       'forName(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;': (self, [name], vm) => forNameClass(vm, name),
     },
     methods: {
+      'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+        if (self === other) return true;
+        if (!other || typeof other !== 'object') return false;
+        const left = self.$descriptor;
+        const right = other.$descriptor;
+        return !!left && left === right;
+      },
+      'hashCode()I': (self) => hashCode(self.$descriptor || ''),
+      'toString()Ljava/lang/String;': (self) => `class ${self.$name || descriptorToName(self.$descriptor || '')}`,
       'getName()Ljava/lang/String;': (self) => self.$name || descriptorToName(self.$descriptor || ''),
       'getCanonicalName()Ljava/lang/String;': (self) => self.$name || descriptorToName(self.$descriptor || ''),
       'getSimpleName()Ljava/lang/String;': (self) => {
@@ -1008,8 +1007,8 @@ export const JAVA_CORE_CLASSES = {
       'valueOf(Z)Ljava/lang/String;': (_self, [value]) => (value ? 'true' : 'false'),
       'valueOf(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value)),
       'valueOf(Ljava/lang/Object;)Ljava/lang/String;': (_self, [value]) => (value === null ? 'null' : jsString(value)),
-      'format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [locale, format, args]) => formatJavaString(format, args),
-      'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args]) => formatJavaString(format, args),
+      'format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [locale, format, args], vm) => formatJavaString(format, args, vm),
+      'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;': (_self, [format, args], vm) => formatJavaString(format, args, vm),
       'join(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;': (_self, [separator, parts]) =>
         (isJavaArray(parts) ? parts.$data : []).map(jsString).join(jsString(separator)),
     },
@@ -2806,6 +2805,14 @@ JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections
       items.sort(compare);
     },
     'synchronizedMap(Ljava/util/Map;)Ljava/util/Map;': (_self, [map]) => map ?? null,
+    // Set 视图以 Map 的键为内容；这里返回独立副本，调用方（Firebase 的
+    // ComponentRuntime）只把返回的 Set 当作容器使用，不再回读原 Map。
+    'newSetFromMap(Ljava/util/Map;)Ljava/util/Set;': (_self, [map], vm) => {
+      const peer = map?.$peer ?? map;
+      if (!peer || (!peer.map && !peer.rawKeys)) return makeSet(vm, []);
+      const keys = peer.rawKeys ? [...peer.rawKeys.values()] : [...peer.map.keys()];
+      return makeSet(vm, keys);
+    },
     'synchronizedList(Ljava/util/List;)Ljava/util/List;': (_self, [list]) => list ?? null,
     'synchronizedSet(Ljava/util/Set;)Ljava/util/Set;': (_self, [set]) => set ?? null,
     'synchronizedCollection(Ljava/util/Collection;)Ljava/util/Collection;': (_self, [collection]) => collection ?? null,
@@ -3692,26 +3699,35 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     '<init>(I)V': (self) => {
       self.setItems = [];
     },
-    'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
-      if (globalThis.__DBG_B0 && String(vm?.registry?.classNameOf?.(value)).includes('n2/q$b;')) {
-        console.error('HS_ADD', 'size', self.setItems.length, 'idx', self.setItems.indexOf(value));
+    '<init>(IF)V': (self) => {
+      self.setItems = [];
+    },
+    '<init>(IFZ)V': (self) => {
+      self.setItems = [];
+    },
+    // new HashSet(collection)：漏掉这个构造会让集合保持空，
+    // 依赖它的组件注册（Firebase Component.Builder）直接看不到任何接口。
+    '<init>(Ljava/util/Collection;)V': (self, [source]) => {
+      self.setItems = [];
+      for (const item of collectionItems(source)) {
+        if (!self.setItems.includes(item)) self.setItems.push(item);
       }
+    },
+    'add(Ljava/lang/Object;)Z': (self, [value]) => {
+      if (!self.setItems) self.setItems = [];
       if (self.setItems.includes(value)) return false;
       self.setItems.push(value);
       return true;
     },
-    'remove(Ljava/lang/Object;)Z': (self, [value], vm) => {
-      const index = self.setItems.indexOf(value);
-      if (globalThis.__DBG_B0 && String(vm?.registry?.classNameOf?.(value)).includes('n2/q$b;')) {
-        console.error('HS_REMOVE', 'size', self.setItems.length, 'idx', index);
-      }
+    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
+      const index = (self.setItems || []).indexOf(value);
       if (index < 0) return false;
       self.setItems.splice(index, 1);
       return true;
     },
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => self.setItems.includes(value),
-    'size()I': (self) => self.setItems.length,
-    'isEmpty()Z': (self) => self.setItems.length === 0,
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.setItems || []).includes(value),
+    'size()I': (self) => (self.setItems || []).length,
+    'isEmpty()Z': (self) => (self.setItems || []).length === 0,
     'clear()V': (self) => {
       self.setItems = [];
     },
@@ -3732,6 +3748,12 @@ JAVA_CORE_CLASSES['Ljava/util/LinkedHashSet;'] = nativeDef('Ljava/util/LinkedHas
       self.setItems = [];
     },
     '<init>(I)V': (self) => {
+      self.setItems = [];
+    },
+    '<init>(IF)V': (self) => {
+      self.setItems = [];
+    },
+    '<init>(IFZ)V': (self) => {
       self.setItems = [];
     },
     '<init>(Ljava/util/Collection;)V': (self, [source]) => {
@@ -4378,17 +4400,7 @@ function mapMethods() {
       self.map = new Map(other?.map || []);
     },
     'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
-      if (globalThis.__DBG_B0) {
-        const d = key && typeof key === 'object' ? (vm?.registry?.classNameOf?.(key) || String(key)) : typeof key + ':' + key;
-        globalThis.__PUTBUF ??= [];
-        globalThis.__PUTBUF.push(d + '#size' + self.map.size);
-        if (globalThis.__PUTBUF.length > 80) globalThis.__PUTBUF.shift();
-        if (!globalThis.__PUTEXIT && typeof process !== 'undefined') {
-          globalThis.__PUTEXIT = true;
-          process.on('exit', () => console.error('PUTTAIL', JSON.stringify(globalThis.__PUTBUF)));
-        }
-      }
-      const k = mapKey(key, vm);
+      const k = findValueSlot(self, key, vm) ?? mapKey(key, vm);
       if (!self.rawKeys) self.rawKeys = new Map();
       const previous = self.map.get(k);
       self.map.set(k, value);
@@ -4400,19 +4412,21 @@ function mapMethods() {
       if (!self.rawKeys) self.rawKeys = new Map();
       if (other.rawKeys) {
         for (const [k, v] of other.map) {
-          self.map.set(k, v);
-          self.rawKeys.set(k, other.rawKeys.get(k) ?? k);
+          const raw = other.rawKeys.get(k) ?? k;
+          const slot = findValueSlot(self, raw, vm) ?? k;
+          self.map.set(slot, v);
+          self.rawKeys.set(slot, raw);
         }
         return;
       }
       for (const [k, v] of other.map) {
-        const canonical = mapKey(k, vm);
+        const canonical = findValueSlot(self, k, vm) ?? mapKey(k, vm);
         self.map.set(canonical, v);
         self.rawKeys.set(canonical, k);
       }
     },
     'putIfAbsent(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
-      const k = mapKey(key, vm);
+      const k = findValueSlot(self, key, vm) ?? mapKey(key, vm);
       if (self.map.has(k) && self.map.get(k) != null) return self.map.get(k);
       if (!self.rawKeys) self.rawKeys = new Map();
       self.map.set(k, value);
@@ -4420,19 +4434,13 @@ function mapMethods() {
       return null;
     },
     'getOrDefault(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, fallback], vm) => {
-      const value = self.map.get(mapKey(key, vm));
+      const value = self.map.get(findValueSlot(self, key, vm) ?? mapKey(key, vm));
       return value == null ? fallback : value;
     },
-    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => self.map.get(mapKey(key, vm)) ?? null,
-    'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) => {
-      if (globalThis.__DBG_B0) {
-        const d = key && typeof key === 'object' ? (vm?.registry?.classNameOf?.(key) || String(key)) : typeof key + ':' + key;
-        if (String(d).includes('n2/') || String(d).includes('q$')) {
-          console.error('CK', d, 'mapSize', self.map.size, 'vkey', mapKey(key, vm));
-        }
-      }
-      return self.map.has(mapKey(key, vm));
-    },
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) =>
+      self.map.get(findValueSlot(self, key, vm) ?? mapKey(key, vm)) ?? null,
+    'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) =>
+      self.map.has(findValueSlot(self, key, vm) ?? mapKey(key, vm)),
     'containsValue(Ljava/lang/Object;)Z': (self, [value], vm) => {
       const target = mapKey(value, vm);
       for (const v of self.map.values()) if (mapKey(v, vm) === target) return true;
@@ -4478,7 +4486,7 @@ function mapMethods() {
       });
     },
     'remove(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => {
-      const k = mapKey(key, vm);
+      const k = findValueSlot(self, key, vm) ?? mapKey(key, vm);
       const previous = self.map.get(k);
       self.map.delete(k);
       self.rawKeys?.delete(k);
@@ -5850,7 +5858,7 @@ function unboxJavaValue(value) {
   return value;
 }
 
-function formatJavaString(format, args) {
+function formatJavaString(format, args, vm) {
   const values = Array.isArray(args) ? args : (isJavaArray(args) ? args.$data : []);
   let index = 0;
   return jsString(format).replace(/%([0-9]+\$)?(?:\.(\d+))?([sdifxX%])/g, (match, positional, precision, type) => {
@@ -5861,8 +5869,21 @@ function formatJavaString(format, args) {
     if (type === 'f') return (Number(value) || 0).toFixed(precision === undefined ? 2 : Math.min(20, Number(precision) || 0));
     if (type === 'x') return (Number(value) || 0).toString(16);
     if (type === 'X') return (Number(value) || 0).toString(16).toUpperCase();
-    return value === null || value === undefined ? 'null' : jsString(value);
+    return javaValueToString(value, vm);
   });
+}
+
+/** %s / String.valueOf：覆写了 toString 的 Java 对象必须走它。 */
+function javaValueToString(value, vm) {
+  if (value === null || value === undefined) return 'null';
+  if (vm && isJavaObject(value) && classOverridesMethod(vm, value, 'toString', '()Ljava/lang/String;')) {
+    try {
+      return jsString(vm.invokeByName('toString', '()Ljava/lang/String;', value, []));
+    } catch (error) {
+      // toString 抛错时退回普通字符串化。
+    }
+  }
+  return jsString(value);
 }
 
 export { formatJavaString };
