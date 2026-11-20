@@ -9824,6 +9824,14 @@ function themedStyledValue(vm, raw) {
   if (!id) return raw;
   const table = vm.resources?.table;
   const entry = table?.getEntry?.(id);
+  // 系统资源（0x01xxxxxx）不在 APK 的 arsc 里，getEntry 查不到，
+  // 但 resources.resolve 有内置映射。少了这一步，引用会被原样当成颜色值，
+  // 最终渲染成洋红一类的错色。
+  if (!entry && (id >>> 24) === 0x01) {
+    const resolved = vm.resources?.resolve?.(id);
+    if (typeof resolved === 'number') return resolved >>> 0;
+    return raw;
+  }
   if (entry && entry.typeName !== 'attr') return raw;
   const key = entry?.key || frameworkColorAttrKey(id);
   if (!key) return raw;
