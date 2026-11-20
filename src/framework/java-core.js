@@ -436,9 +436,12 @@ function findValueSlot(self, key, vm) {
     if (raw === key) return slot;
     if (!isJavaObject(raw)) continue;
     try {
-      const equal = vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw]);
-      if (equal === true) return slot;
+      // dex 里返回 Z 的方法给的是数字 1/0，不能只认布尔 true。
+      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw])) return slot;
     } catch (error) {
+      if (globalThis.__DBG_FB && key.$dexClass?.descriptor === 'Ln2/b0;') {
+        console.error('[FB eq-err]', fbDescribeQualified(vm, key), error?.message);
+      }
       // equals 抛错按不相等处理，避免把宿主异常带进 Map 语义。
     }
   }
@@ -460,7 +463,8 @@ function findSetIndex(self, value, vm) {
     if (item === value) return index;
     if (!isJavaObject(item)) continue;
     try {
-      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', value, [item]) === true) return index;
+      // 同上：dex 的 equals 返回 1/0，按真假判断。
+      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', value, [item])) return index;
     } catch (_error) {
       // equals 抛错按不相等处理
     }
@@ -2841,12 +2845,26 @@ JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections
     'synchronizedList(Ljava/util/List;)Ljava/util/List;': (_self, [list]) => list ?? null,
     'synchronizedSet(Ljava/util/Set;)Ljava/util/Set;': (_self, [set]) => set ?? null,
     'synchronizedCollection(Ljava/util/Collection;)Ljava/util/Collection;': (_self, [collection]) => collection ?? null,
+    // 目标既可能是 List 也可能是 Set：Set 要走 equals 去重，
+    // 否则 Firebase 的 Component.Builder 会把额外接口丢掉。
     'addAll(Ljava/util/Collection;[Ljava/lang/Object;)Z': (_self, [collection, values], vm) => {
-      const list = collection?.items;
-      if (!Array.isArray(list)) return false;
+      const target = collection?.$peer ?? collection;
       const items = arrayValues(values) || [];
-      list.push(...items);
-      return items.length > 0;
+      if (!items.length || !target) return false;
+      if (Array.isArray(target.items)) {
+        target.items.push(...items);
+        return true;
+      }
+      if (Array.isArray(target.setItems)) {
+        let added = false;
+        for (const item of items) {
+          if (findSetIndex(target, item, vm) >= 0) continue;
+          target.setItems.push(item);
+          added = true;
+        }
+        return added;
+      }
+      return false;
     },
   },
 });
@@ -3740,6 +3758,13 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     },
     'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
       if (!self.setItems) self.setItems = [];
+      if (globalThis.__DBG_FB) {
+        const info = fbDescribeQualified(vm, value);
+        if (info) {
+          if (!self.__fbsid) self.__fbsid = (globalThis.__FB_SET_SEQ = (globalThis.__FB_SET_SEQ || 0) + 1);
+          console.error('[FB setadd] sid=' + self.__fbsid + ' size=' + self.setItems.length + ' ' + info);
+        }
+      }
       if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems.push(value);
       return true;
@@ -4408,6 +4433,24 @@ function listMethods() {
   };
 }
 
+function fbDescribeQualified(vm, key) {
+  if (!globalThis.__DBG_FB || !isJavaObject(key)) return '';
+  try {
+    if (key.$dexClass?.descriptor !== 'Ln2/b0;') return '';
+    const parts = [];
+    for (const [name, value] of key.$fields || []) {
+      let text;
+      if (isJavaObject(value)) text = value.$descriptor || value.$name || value.$dexClass?.descriptor;
+      else if (value && typeof value === 'object') text = value.$descriptor || value.$name || String(value);
+      else text = String(value);
+      parts.push(`${name.replace(/^.*->/, '')}=${text}`);
+    }
+    return 'Q{' + parts.join(',') + '}';
+  } catch (_error) {
+    return 'Q{?}';
+  }
+}
+
 function mapMethods() {
   return {
     '<init>()V': (self) => {
@@ -4427,6 +4470,14 @@ function mapMethods() {
     },
     'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
       const k = findValueSlot(self, key, vm) ?? mapKey(key, vm);
+      if (globalThis.__DBG_FB) {
+        const info = fbDescribeQualified(vm, key);
+        if (info) {
+          if (!self.__fbid) self.__fbid = (globalThis.__FB_SEQ = (globalThis.__FB_SEQ || 0) + 1);
+          const vc = isJavaObject(value) ? (value.$descriptor || value.$dexClass?.descriptor || value.$nativeClass) : String(value);
+          console.error('[FB put] id=' + self.__fbid + ' map=' + self.map.size + ' raw=' + (self.rawKeys ? self.rawKeys.size : -1) + ' ' + info + ' value=' + vc);
+        }
+      }
       if (!self.rawKeys) self.rawKeys = new Map();
       const previous = self.map.get(k);
       self.map.set(k, value);
@@ -4463,10 +4514,26 @@ function mapMethods() {
       const value = self.map.get(findValueSlot(self, key, vm) ?? mapKey(key, vm));
       return value == null ? fallback : value;
     },
-    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) =>
-      self.map.get(findValueSlot(self, key, vm) ?? mapKey(key, vm)) ?? null,
-    'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) =>
-      self.map.has(findValueSlot(self, key, vm) ?? mapKey(key, vm)),
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => {
+      const slot = findValueSlot(self, key, vm) ?? mapKey(key, vm);
+      if (globalThis.__DBG_FB) {
+        const info = fbDescribeQualified(vm, key);
+        if (info) console.error('[FB get] size=' + self.map.size + ' ' + info + ' found=' + self.map.has(slot));
+      }
+      return self.map.get(slot) ?? null;
+    },
+    'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) => {
+      const slot = findValueSlot(self, key, vm) ?? mapKey(key, vm);
+      const has = self.map.has(slot);
+      if (globalThis.__DBG_FB) {
+        const info = fbDescribeQualified(vm, key);
+        if (info) {
+          if (!self.__fbid) self.__fbid = (globalThis.__FB_SEQ = (globalThis.__FB_SEQ || 0) + 1);
+          console.error('[FB ck] id=' + self.__fbid + ' map=' + self.map.size + ' raw=' + (self.rawKeys ? self.rawKeys.size : -1) + ' ' + info + ' found=' + has);
+        }
+      }
+      return has;
+    },
     'containsValue(Ljava/lang/Object;)Z': (self, [value], vm) => {
       const target = mapKey(value, vm);
       for (const v of self.map.values()) if (mapKey(v, vm) === target) return true;
