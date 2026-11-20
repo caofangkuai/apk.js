@@ -206,6 +206,149 @@ function findFocusedDescendant(view) {
   return view.child ? findFocusedDescendant(view.child) : null;
 }
 
+/** 把 0..1 的通道值打包成 ARGB 整数（对应 AOSP Color.rgb / Color.argb）。 */
+function packArgb(alpha, red, green, blue) {
+  const channel = (value) => Math.max(0, Math.min(255, Math.round(Number(value) * 255)));
+  return (((channel(alpha) << 24) | (channel(red) << 16) | (channel(green) << 8) | channel(blue)) >>> 0);
+}
+
+/** 本模拟器使用「低 32 位 ARGB + 第 32 位标记」的 64 位颜色表示，保证 pack/toArgb 往返一致。 */
+function colorLongFromArgb(argb) {
+  return (BigInt(argb >>> 0) | (1n << 32n));
+}
+
+function colorArgb(color) {
+  try {
+    return Number(BigInt.asUintN(64, BigInt(color)) & 0xffffffffn) >>> 0;
+  } catch (_) {
+    return toInt(color) >>> 0;
+  }
+}
+
+function colorObject(vm, argb) {
+  const object = vm.allocateRawObject('Landroid/graphics/Color;');
+  object.$peer = { vm, argb: argb >>> 0 };
+  return object;
+}
+
+function colorLuminance(argb) {
+  return 0.2126 * (((argb >>> 16) & 0xff) / 255) + 0.7152 * (((argb >>> 8) & 0xff) / 255) + 0.0722 * ((argb & 0xff) / 255);
+}
+
+/** RGB→HSV，输入输出均为 0..1（对应 AOSP Color.RGBToHSV 的 float 约定）。 */
+function rgbToHsv(red, green, blue) {
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  let hue = 0;
+  if (delta > 0) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue /= 6;
+    if (hue < 0) hue += 1;
+  }
+  return [hue, max === 0 ? 0 : delta / max, max];
+}
+
+function writeHsv(out, hsv) {
+  if (!out?.$data) return;
+  for (let i = 0; i < 3; i++) out.$data[i] = hsv[i];
+}
+
+function hsvToArgb(alpha, hsv) {
+  const values = hsv?.$data || [];
+  const hue = ((Number(values[0]) || 0) % 1 + 1) % 1;
+  const saturation = Math.max(0, Math.min(1, Number(values[1]) || 0));
+  const value = Math.max(0, Math.min(1, Number(values[2]) || 0));
+  const sector = hue * 6;
+  const index = Math.floor(sector) % 6;
+  const fraction = sector - Math.floor(sector);
+  const p = value * (1 - saturation);
+  const q = value * (1 - saturation * fraction);
+  const t = value * (1 - saturation * (1 - fraction));
+  const table = [[value, t, p], [q, value, p], [p, value, t], [p, q, value], [t, p, value], [value, p, q]];
+  const [r, g, b] = table[index] || [0, 0, 0];
+  const alphaByte = Math.max(0, Math.min(255, Math.round(Number(alpha) || 0)));
+  return (((alphaByte << 24) | (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255)) >>> 0);
+}
+
+/** 读取 Java Rect 对象的边界，并补上 Canvas 适配器需要的 width()/height()。 */
+function rectPeerBounds(rect) {
+  const peer = rect?.$peer ?? rect;
+  if (!peer) return null;
+  const left = Number(peer.left) || 0;
+  const top = Number(peer.top) || 0;
+  const right = Number(peer.right) || 0;
+  const bottom = Number(peer.bottom) || 0;
+  return { left, top, right, bottom, width: () => right - left, height: () => bottom - top };
+}
+
+function makeRectObject(vm, left, top, right, bottom) {
+  const object = vm.allocateRawObject('Landroid/graphics/Rect;');
+  const peer = object.$peer || (object.$peer = {});
+  peer.rect = new Rect(left | 0, top | 0, right | 0, bottom | 0);
+  if (!Object.prototype.hasOwnProperty.call(peer, 'left')) {
+    for (const name of ['left', 'top', 'right', 'bottom']) {
+      Object.defineProperty(peer, name, {
+        configurable: true,
+        enumerable: true,
+        get: () => peer.rect[name],
+        set: (value) => { peer.rect[name] = value | 0; },
+      });
+    }
+  }
+  return object;
+}
+
+/** Paint.breakText 的共用实现：按字符宽度累加，返回放得下的字符数并把宽度写入 measured。 */
+function breakTextImpl(self, data, index, count, maxWidth, measured, forwards) {
+  const limit = Number(maxWidth) || 0;
+  const start = toInt(index);
+  const total = toInt(count);
+  let used = 0;
+  let taken = 0;
+  for (let i = 0; i < total; i++) {
+    const offset = forwards ? start + i : start + total - 1 - i;
+    const char = String.fromCharCode((data[offset] | 0) & 0xffff);
+    const width = self.paint.measureText(char);
+    if (used + width > limit) break;
+    used += width;
+    taken++;
+  }
+  if (measured?.$data) {
+    if (measured.$data.length) measured.$data[0] = numberToFloatBits(used);
+  }
+  return taken;
+}
+
+function appendPathText(self, path, text, x, y) {
+  const peer = path?.$peer;
+  if (peer) {
+    if (!Array.isArray(peer.textRuns)) peer.textRuns = [];
+    peer.textRuns.push({ text: String(text || ''), x: Number(x) || 0, y: Number(y) || 0, textSize: Number(self.paint?.textSize) || 14 });
+  }
+}
+
+function writeTextBounds(self, text, rect) {
+  const peer = rect?.$peer;
+  if (!peer) return;
+  const metrics = self.paint.getFontMetricsInt();
+  peer.rect = new Rect(0, metrics.ascent | 0, Math.round(self.paint.measureText(String(text || ''))), metrics.descent | 0);
+}
+
+function offsetForAdvance(self, text, advance) {
+  const value = String(text || '');
+  const limit = Number(advance) || 0;
+  let used = 0;
+  for (let i = 0; i < value.length; i++) {
+    const width = self.paint.measureText(value[i]);
+    if (used + width / 2 >= limit) return i;
+    used += width;
+  }
+  return value.length;
+}
+
 const SHELL_LS_LINE = (name) => `lrwxrwxrwx 1 root root 16 2026-01-01 00:00 ${name} -> /dev/block/mmcblk0p1`;
 
 function runShellCommand(command) {
@@ -1747,6 +1890,236 @@ export function buildFrameworkDefinitions(vm) {
         'onPrepareOptionsMenu(Landroid/view/Menu;)Z': () => true,
         'onOptionsItemSelected(Landroid/view/MenuItem;)Z': () => false,
         'onContextItemSelected(Landroid/view/MenuItem;)Z': () => false,
+
+        // —— Window.Callback 与按键/触摸派发 ——
+        'showDialog(I)V': (self, [id], vm) => {
+          const activity = self.object || self.$object || vm.activity;
+          if (!vm.$activityDialogs) vm.$activityDialogs = new Map();
+          let dialog = vm.$activityDialogs.get(id | 0);
+          if (!dialog) {
+            try { dialog = vm.invokeByName('onCreateDialog', '(I)Landroid/app/Dialog;', activity, [id | 0]); } catch (_) { dialog = null; }
+            if (dialog) vm.$activityDialogs.set(id | 0, dialog);
+          }
+          if (dialog) {
+            try { vm.invokeByName('onPrepareDialog', '(ILandroid/app/Dialog;)V', activity, [id | 0, dialog]); } catch (_) { /* 应用未覆写 */ }
+            try { vm.invokeByName('show', '()V', dialog, []); } catch (_) { /* Dialog 未就绪 */ }
+          }
+        },
+        'showDialog(ILandroid/os/Bundle;)Z': (self, [id, state], vm) => {
+          const activity = self.object || self.$object || vm.activity;
+          if (!vm.$activityDialogs) vm.$activityDialogs = new Map();
+          let dialog = vm.$activityDialogs.get(id | 0);
+          if (!dialog) {
+            try { dialog = vm.invokeByName('onCreateDialog', '(ILandroid/os/Bundle;)Landroid/app/Dialog;', activity, [id | 0, state ?? null]); } catch (_) { dialog = null; }
+            if (dialog) vm.$activityDialogs.set(id | 0, dialog);
+          }
+          if (!dialog) return false;
+          try { vm.invokeByName('onPrepareDialog', '(ILandroid/app/Dialog;Landroid/os/Bundle;)V', activity, [id | 0, dialog, state ?? null]); } catch (_) { /* 应用未覆写 */ }
+          try { vm.invokeByName('show', '()V', dialog, []); } catch (_) { /* Dialog 未就绪 */ }
+          return true;
+        },
+        'onCreateDialog(I)Landroid/app/Dialog;': () => null,
+        'onCreateDialog(ILandroid/os/Bundle;)Landroid/app/Dialog;': () => null,
+        'onPrepareDialog(ILandroid/app/Dialog;)V': () => undefined,
+        'onPrepareDialog(ILandroid/app/Dialog;Landroid/os/Bundle;)V': () => undefined,
+
+        'onKeyDown(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyLongPress(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyUp(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyMultiple(IILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyShortcut(ILandroid/view/KeyEvent;)Z': () => false,
+        'onTouchEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onUserInteraction()V': () => undefined,
+        'dispatchTouchEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => self.decorView?.dispatchTouchEvent?.(event) ?? false,
+        'dispatchTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchPopulateAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)Z': () => false,
+        'onWindowAttributesChanged(Landroid/view/WindowManager$LayoutParams;)V': () => undefined,
+        'onContentChanged()V': () => undefined,
+        'onWindowFocusChanged(Z)V': (self, [hasFocus]) => { self.$windowFocus = !!hasFocus; },
+        'hasWindowFocus()Z': (self) => self.$windowFocus !== false,
+        'onAttachedToWindow()V': () => undefined,
+        'onDetachedFromWindow()V': () => undefined,
+        'takeKeyEvents(Z)V': () => undefined,
+        'setDefaultKeyMode(I)V': (self, [mode]) => { self.$defaultKeyMode = mode | 0; },
+
+        // —— 菜单 / 上下文菜单 / 搜索 / ActionMode ——
+        'onOptionsMenuClosed(Landroid/view/Menu;)V': () => undefined,
+        'openOptionsMenu()V': () => undefined,
+        'closeOptionsMenu()V': () => undefined,
+        'onCreateContextMenu(Landroid/view/ContextMenu;Landroid/view/View;Landroid/view/ContextMenu$ContextMenuInfo;)V': () => undefined,
+        'registerForContextMenu(Landroid/view/View;)V': () => undefined,
+        'unregisterForContextMenu(Landroid/view/View;)V': () => undefined,
+        'openContextMenu(Landroid/view/View;)V': () => undefined,
+        'closeContextMenu()V': () => undefined,
+        'onContextMenuClosed(Landroid/view/Menu;)V': () => undefined,
+        'onSearchRequested(Landroid/view/SearchEvent;)Z': () => false,
+        'onSearchRequested()Z': () => false,
+        'getSearchEvent()Landroid/view/SearchEvent;': () => null,
+        'startSearch(Ljava/lang/String;ZLandroid/os/Bundle;Z)V': () => undefined,
+        'triggerSearch(Ljava/lang/String;Landroid/os/Bundle;)V': () => undefined,
+        'startActionMode(Landroid/view/ActionMode$Callback;)Landroid/view/ActionMode;': () => null,
+        'startActionMode(Landroid/view/ActionMode$Callback;I)Landroid/view/ActionMode;': () => null,
+        'onWindowStartingActionMode(Landroid/view/ActionMode$Callback;)Landroid/view/ActionMode;': () => null,
+        'onWindowStartingActionMode(Landroid/view/ActionMode$Callback;I)Landroid/view/ActionMode;': () => null,
+        'onActionModeStarted(Landroid/view/ActionMode;)V': () => undefined,
+        'onActionModeFinished(Landroid/view/ActionMode;)V': () => undefined,
+        'getMenuInflater()Landroid/view/MenuInflater;': (self, _args, vm) => {
+          const inflater = vm.allocateRawObject('Landroid/view/MenuInflater;');
+          inflater.$peer = { vm, context: vm.contextObject };
+          return inflater;
+        },
+        'getActionBar()Landroid/app/ActionBar;': () => null,
+        'setActionBar(Landroid/widget/Toolbar;)V': () => undefined,
+        'setFeatureDrawableResource(II)V': () => undefined,
+        'setFeatureDrawableUri(ILandroid/net/Uri;)V': () => undefined,
+        'setFeatureDrawable(ILandroid/graphics/drawable/Drawable;)V': () => undefined,
+        'setFeatureDrawableAlpha(II)V': () => undefined,
+        'onApplyThemeResource(Landroid/content/res/Resources$Theme;IZ)V': () => undefined,
+
+        // —— 视图与内容 ——
+        'requireViewById(I)Landroid/view/View;': (self, [id]) => {
+          const view = self.findViewById(id);
+          if (!view) throw new Error(`requireViewById: 找不到 id 0x${(id >>> 0).toString(16)}`);
+          return view;
+        },
+        'addContentView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view]) => {
+          self.setContentView(unwrapView(view) || view);
+        },
+        'getContentTransitionManager()Landroid/transition/TransitionManager;': () => null,
+        'setContentTransitionManager(Landroid/transition/TransitionManager;)V': () => undefined,
+        'getContentScene()Landroid/transition/Scene;': () => null,
+        'setFinishOnTouchOutside(Z)V': () => undefined,
+        'onAttachFragment(Landroid/app/Fragment;)V': () => undefined,
+        'managedQuery(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;': () => null,
+        'startManagingCursor(Landroid/database/Cursor;)V': () => undefined,
+        'stopManagingCursor(Landroid/database/Cursor;)V': () => undefined,
+        'onCreateView(Ljava/lang/String;Landroid/content/Context;Landroid/util/AttributeSet;)Landroid/view/View;': () => null,
+        'onCreateView(Landroid/view/View;Ljava/lang/String;Landroid/content/Context;Landroid/util/AttributeSet;)Landroid/view/View;': () => null,
+
+        // —— 启动 Activity / 结果 ——
+        'startActivityForResult(Landroid/content/Intent;ILandroid/os/Bundle;)V': (self, [intent], vm) => {
+          vm.startActivity(intent, self);
+        },
+        'startActivityIfNeeded(Landroid/content/Intent;ILandroid/os/Bundle;)Z': (self, [intent], vm) => {
+          vm.startActivity(intent, self);
+          return true;
+        },
+        'startNextMatchingActivity(Landroid/content/Intent;)Z': () => false,
+        'startNextMatchingActivity(Landroid/content/Intent;Landroid/os/Bundle;)Z': () => false,
+        'startActivityFromChild(Landroid/app/Activity;Landroid/content/Intent;I)V': (self, [child, intent], vm) => {
+          vm.startActivity(intent, self);
+        },
+        'startActivityFromChild(Landroid/app/Activity;Landroid/content/Intent;ILandroid/os/Bundle;)V': (self, [child, intent], vm) => {
+          vm.startActivity(intent, self);
+        },
+        'startActivityFromFragment(Landroid/app/Fragment;Landroid/content/Intent;I)V': (self, [fragment, intent], vm) => {
+          vm.startActivity(intent, self);
+        },
+        'startActivityFromFragment(Landroid/app/Fragment;Landroid/content/Intent;ILandroid/os/Bundle;)V': (self, [fragment, intent], vm) => {
+          vm.startActivity(intent, self);
+        },
+        'startIntentSenderForResult(Landroid/content/IntentSender;ILandroid/content/Intent;III)V': () => undefined,
+        'startIntentSenderForResult(Landroid/content/IntentSender;ILandroid/content/Intent;IIILandroid/os/Bundle;)V': () => undefined,
+        'startIntentSenderFromChild(Landroid/app/Activity;Landroid/content/IntentSender;ILandroid/content/Intent;III)V': () => undefined,
+        'startIntentSenderFromChild(Landroid/app/Activity;Landroid/content/IntentSender;ILandroid/content/Intent;IIILandroid/os/Bundle;)V': () => undefined,
+        'overridePendingTransition(II)V': () => undefined,
+        'setResult(I)V': (self, [resultCode]) => { self.$resultCode = resultCode | 0; },
+        'setResult(ILandroid/content/Intent;)V': (self, [resultCode, data]) => {
+          self.$resultCode = resultCode | 0;
+          self.$resultData = data ?? null;
+        },
+        'onActivityResult(IILandroid/content/Intent;)V': () => undefined,
+        'onActivityReenter(ILandroid/content/Intent;)V': () => undefined,
+        'createPendingResult(ILandroid/content/Intent;I)Landroid/app/PendingIntent;': () => null,
+        'finishActivity(I)V': () => undefined,
+        'finishActivityFromChild(Landroid/app/Activity;I)V': () => undefined,
+        'finishFromChild(Landroid/app/Activity;)V': () => undefined,
+        'onRequestPermissionsResult(I[Ljava/lang/String;[I)V': () => undefined,
+        'shouldShowRequestPermissionRationale(Ljava/lang/String;)Z': () => false,
+
+        // —— 导航 / 任务 / 生命周期 ——
+        'onNavigateUp()Z': (self) => { self.finish?.(); return true; },
+        'onNavigateUpFromChild(Landroid/app/Activity;)Z': () => false,
+        'navigateUpTo(Landroid/content/Intent;)Z': () => false,
+        'navigateUpToFromChild(Landroid/app/Activity;Landroid/content/Intent;)Z': () => false,
+        'shouldUpRecreateTask(Landroid/content/Intent;)Z': () => false,
+        'getParentActivityIntent()Landroid/content/Intent;': () => null,
+        'onCreateNavigateUpTaskStack(Landroid/app/TaskStackBuilder;)V': () => undefined,
+        'onPrepareNavigateUpTaskStack(Landroid/app/TaskStackBuilder;)V': () => undefined,
+        'isActivityTransitionRunning()Z': () => false,
+        'setEnterSharedElementCallback(Landroid/app/SharedElementCallback;)V': () => undefined,
+        'setExitSharedElementCallback(Landroid/app/SharedElementCallback;)V': () => undefined,
+        'postponeEnterTransition()V': () => undefined,
+        'startPostponedEnterTransition()V': () => undefined,
+        'requestDragAndDropPermissions(Landroid/view/DragEvent;)Landroid/view/DragAndDropPermissions;': () => null,
+        'getReferrer()Landroid/net/Uri;': () => null,
+        'onProvideReferrer()Landroid/net/Uri;': () => null,
+        'setVisible(Z)V': () => undefined,
+        'isDestroyed()Z': (self) => !!self.destroyed,
+        'isChangingConfigurations()Z': () => false,
+        'recreate()V': () => undefined,
+        'finishAffinity()V': (self) => self.finish?.(),
+        'finishAfterTransition()V': (self) => self.finish?.(),
+        'finishAndRemoveTask()V': (self) => self.finish?.(),
+        'releaseInstance()Z': () => false,
+        'getRequestedOrientation()I': (self) => self.$requestedOrientation ?? -1,
+        'getTaskId()I': () => 1,
+        'isTaskRoot()Z': () => true,
+        'moveTaskToBack(Z)Z': () => false,
+        'isLaunchedFromBubble()Z': () => false,
+        'getLocalClassName()Ljava/lang/String;': (self, _args, vm) => {
+          const descriptor = vm.registry.classNameOf(self.object);
+          const name = descriptor?.startsWith('L') ? descriptor.slice(1, -1).replace(/\//g, '.') : '';
+          const prefix = `${vm.packageName || ''}.`;
+          return name.startsWith(prefix) ? name.slice(prefix.length) : name;
+        },
+        'getPreferences(I)Landroid/content/SharedPreferences;': (self, _args, vm) => {
+          const descriptor = vm.registry.classNameOf(self.object);
+          const name = descriptor?.startsWith('L') ? descriptor.slice(1, -1).replace(/\//g, '.') : 'activity';
+          const prefs = vm.allocateRawObject('Landroid/content/SharedPreferences;');
+          prefs.$peer = { name };
+          return prefs;
+        },
+        'startLockTask()V': () => undefined,
+        'stopLockTask()V': () => undefined,
+        'showLockTaskEscapeMessage()V': () => undefined,
+        'setShowWhenLocked(Z)V': () => undefined,
+        'setInheritShowWhenLocked(Z)V': () => undefined,
+        'setTurnScreenOn(Z)V': () => undefined,
+        'setImmersive(Z)V': (self, [value]) => { self.$immersive = !!value; },
+        'isImmersive()Z': (self) => !!self.$immersive,
+        'setTranslucent(Z)Z': () => true,
+        'requestVisibleBehind(Z)Z': () => false,
+        'onVisibleBehindCanceled()V': () => undefined,
+        'onEnterAnimationComplete()V': () => undefined,
+        'setVrModeEnabled(ZLandroid/content/ComponentName;)V': () => undefined,
+
+        // —— 标题 / 进度 / 音量 ——
+        'setTitleColor(I)V': (self, [color]) => {
+          self.$titleColor = color | 0;
+          self.screen?.invalidate();
+        },
+        'getTitleColor()I': (self) => self.$titleColor ?? 0,
+        'onTitleChanged(Ljava/lang/CharSequence;I)V': (self, [title, color]) => {
+          self.title = jsString(title);
+          self.$titleColor = color | 0;
+          self.screen?.invalidate();
+        },
+        'onChildTitleChanged(Landroid/app/Activity;Ljava/lang/CharSequence;)V': () => undefined,
+        'setTaskDescription(Landroid/app/ActivityManager$TaskDescription;)V': () => undefined,
+        'setProgressBarVisibility(Z)V': () => undefined,
+        'setProgressBarIndeterminateVisibility(Z)V': () => undefined,
+        'setProgressBarIndeterminate(Z)V': () => undefined,
+        'setProgress(I)V': () => undefined,
+        'setSecondaryProgress(I)V': () => undefined,
+        'setVolumeControlStream(I)V': (self, [stream]) => { self.$volumeControlStream = stream | 0; },
+        'getVolumeControlStream()I': (self) => self.$volumeControlStream ?? 3,
+        'setMediaController(Landroid/media/session/MediaController;)V': (self, [controller]) => { self.$mediaController = controller ?? null; },
+        'getMediaController()Landroid/media/session/MediaController;': (self) => self.$mediaController ?? null,
+        'dump(Ljava/lang/String;Ljava/io/FileDescriptor;Ljava/io/PrintWriter;[Ljava/lang/String;)V': () => undefined,
       },
     })
   );
@@ -2381,6 +2754,76 @@ export function buildFrameworkDefinitions(vm) {
           const source = other?.$peer?.map;
           if (source) for (const [key, value] of source) self.map.set(key, value);
         },
+        '<init>(Ljava/lang/ClassLoader;)V': (self, [loader]) => {
+          self.map = new Map();
+          self.classLoader = loader ?? null;
+        },
+        '<init>(Landroid/os/PersistableBundle;)V': (self, [other]) => {
+          const source = other?.$peer?.map;
+          self.map = new Map(source || []);
+        },
+        'setClassLoader(Ljava/lang/ClassLoader;)V': (self, [loader]) => { self.classLoader = loader ?? null; },
+        'getClassLoader()Ljava/lang/ClassLoader;': (self, _args, vm) => {
+          if (!self.classLoader && vm?.allocateRawObject) {
+            const loader = vm.allocateRawObject('Ljava/lang/ClassLoader;');
+            loader.$peer = { vm };
+            self.classLoader = loader;
+          }
+          return self.classLoader ?? null;
+        },
+        'clone()Ljava/lang/Object;': (self, _args, vm) => {
+          const copy = vm.allocateRawObject('Landroid/os/Bundle;');
+          copy.$peer = { map: new Map(self.map), classLoader: self.classLoader ?? null };
+          return copy;
+        },
+        'deepCopy()Landroid/os/Bundle;': (self, _args, vm) => {
+          const copy = vm.allocateRawObject('Landroid/os/Bundle;');
+          copy.$peer = { map: new Map(self.map), classLoader: self.classLoader ?? null };
+          return copy;
+        },
+        'hasFileDescriptors()Z': () => false,
+        'putByte(Ljava/lang/String;B)V': (self, [key, value]) => { self.map.set(jsString(key), value); },
+        'putShort(Ljava/lang/String;S)V': (self, [key, value]) => { self.map.set(jsString(key), value); },
+        'putCharSequence(Ljava/lang/String;Ljava/lang/CharSequence;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putSize(Ljava/lang/String;Landroid/util/Size;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putSizeF(Ljava/lang/String;Landroid/util/SizeF;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putParcelableArray(Ljava/lang/String;[Landroid/os/Parcelable;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putSparseParcelableArray(Ljava/lang/String;Landroid/util/SparseArray;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putCharSequenceArrayList(Ljava/lang/String;Ljava/util/ArrayList;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putByteArray(Ljava/lang/String;[B)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putShortArray(Ljava/lang/String;[S)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putCharArray(Ljava/lang/String;[C)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putFloatArray(Ljava/lang/String;[F)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putCharSequenceArray(Ljava/lang/String;[Ljava/lang/CharSequence;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'putBinder(Ljava/lang/String;Landroid/os/IBinder;)V': (self, [key, value]) => { self.map.set(jsString(key), value ?? null); },
+        'getByte(Ljava/lang/String;)B': (self, [key]) => Number(self.map.get(jsString(key)) ?? 0),
+        'getByte(Ljava/lang/String;B)Ljava/lang/Byte;': (self, [key, fallback]) => self.map.has(jsString(key)) ? Number(self.map.get(jsString(key))) : fallback,
+        'getChar(Ljava/lang/String;)C': (self, [key]) => Number(self.map.get(jsString(key)) ?? 0),
+        'getShort(Ljava/lang/String;)S': (self, [key]) => Number(self.map.get(jsString(key)) ?? 0),
+        'getShort(Ljava/lang/String;S)S': (self, [key, fallback]) => Number(self.map.get(jsString(key)) ?? fallback),
+        'getFloat(Ljava/lang/String;F)F': (self, [key, fallback]) => Number(self.map.get(jsString(key)) ?? fallback),
+        'getCharSequence(Ljava/lang/String;)Ljava/lang/CharSequence;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getCharSequence(Ljava/lang/String;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;': (self, [key, fallback]) => self.map.get(jsString(key)) ?? fallback,
+        'getSize(Ljava/lang/String;)Landroid/util/Size;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getSizeF(Ljava/lang/String;)Landroid/util/SizeF;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getParcelableArray(Ljava/lang/String;)[Landroid/os/Parcelable;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getParcelableArrayList(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getSparseParcelableArray(Ljava/lang/String;)Landroid/util/SparseArray;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getIntegerArrayList(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getCharSequenceArrayList(Ljava/lang/String;)Ljava/util/ArrayList;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getByteArray(Ljava/lang/String;)[B': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getShortArray(Ljava/lang/String;)[S': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getCharArray(Ljava/lang/String;)[C': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getFloatArray(Ljava/lang/String;)[F': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getCharSequenceArray(Ljava/lang/String;)[Ljava/lang/CharSequence;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'getBinder(Ljava/lang/String;)Landroid/os/IBinder;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'readFromParcel(Landroid/os/Parcel;)V': () => undefined,
+        'toString()Ljava/lang/String;': (self) => {
+          const entries = [...self.map.entries()].map(([key, value]) => `${key}=${String(value)}`);
+          return `Bundle[{${entries.join(', ')}}]`;
+        },
       },
     })
   );
@@ -2698,6 +3141,118 @@ export function buildFrameworkDefinitions(vm) {
         'geteuid()I': () => 2000,
         'getgid()I': () => 2000,
         'getegid()I': () => 2000,
+
+        // —— 进程 / 环境 ——
+        'gettid()I': () => 1,
+        'getppid()I': () => 1,
+        'setsid()I': () => 1,
+        'getenv(Ljava/lang/String;)Ljava/lang/String;': (_self, [name]) => {
+          const key = jsString(name);
+          const env = { PATH: '/sbin:/system/sbin:/system/bin:/system/xbin', ANDROID_ROOT: '/system', ANDROID_DATA: '/data' };
+          return Object.prototype.hasOwnProperty.call(env, key) ? env[key] : null;
+        },
+        'setenv(Ljava/lang/String;Ljava/lang/String;Z)V': () => undefined,
+        'unsetenv(Ljava/lang/String;)V': () => undefined,
+        'environ()[Ljava/lang/String;': (_self, _args, vm) => vm.newArray('Ljava/lang/String;', 0, []),
+        'execv(Ljava/lang/String;[Ljava/lang/String;)V': () => undefined,
+        'execve(Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V': () => undefined,
+        'kill(II)V': () => undefined,
+        'setuid(I)V': () => undefined,
+        'seteuid(I)V': () => undefined,
+        'setgid(I)V': () => undefined,
+        'setegid(I)V': () => undefined,
+        'umask(I)I': () => 0o022,
+        'sysconf(I)J': () => BigInt(1),
+        'prctl(IJJJJ)I': () => 0,
+        'strerror(I)Ljava/lang/String;': (_self, [errno]) => `errno ${toInt(errno)}`,
+        'strsignal(I)Ljava/lang/String;': (_self, [signal]) => `signal ${toInt(signal)}`,
+        'gai_strerror(I)Ljava/lang/String;': (_self, [code]) => `gai ${toInt(code)}`,
+
+        // —— 文件系统 ——
+        'access(Ljava/lang/String;I)Z': () => false,
+        'chmod(Ljava/lang/String;I)V': () => undefined,
+        'fchmod(Ljava/io/FileDescriptor;I)V': () => undefined,
+        'chown(Ljava/lang/String;II)V': () => undefined,
+        'fchown(Ljava/io/FileDescriptor;II)V': () => undefined,
+        'lchown(Ljava/lang/String;II)V': () => undefined,
+        'close(Ljava/io/FileDescriptor;)V': () => undefined,
+        'dup(Ljava/io/FileDescriptor;)Ljava/io/FileDescriptor;': () => null,
+        'dup2(Ljava/io/FileDescriptor;I)Ljava/io/FileDescriptor;': () => null,
+        'fcntlInt(Ljava/io/FileDescriptor;II)I': () => 0,
+        'fdatasync(Ljava/io/FileDescriptor;)V': () => undefined,
+        'fsync(Ljava/io/FileDescriptor;)V': () => undefined,
+        'ftruncate(Ljava/io/FileDescriptor;J)V': () => undefined,
+        'posix_fallocate(Ljava/io/FileDescriptor;JJ)V': () => undefined,
+        'fstat(Ljava/io/FileDescriptor;)Landroid/system/StructStat;': () => null,
+        'fstatvfs(Ljava/io/FileDescriptor;)Landroid/system/StructStatVfs;': () => null,
+        'stat(Ljava/lang/String;)Landroid/system/StructStat;': () => null,
+        'lstat(Ljava/lang/String;)Landroid/system/StructStat;': () => null,
+        'statvfs(Ljava/lang/String;)Landroid/system/StructStatVfs;': () => null,
+        'isatty(Ljava/io/FileDescriptor;)Z': () => false,
+        'link(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'symlink(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'readlink(Ljava/lang/String;)Ljava/lang/String;': () => null,
+        'listxattr(Ljava/lang/String;)[Ljava/lang/String;': (_self, _args, vm) => vm.newArray('Ljava/lang/String;', 0, []),
+        'getxattr(Ljava/lang/String;Ljava/lang/String;)[B': () => null,
+        'setxattr(Ljava/lang/String;Ljava/lang/String;[BI)V': () => undefined,
+        'removexattr(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'lseek(Ljava/io/FileDescriptor;JI)J': (_self, [fd, offset]) => BigInt(Math.trunc(Number(offset) || 0)),
+        'memfd_create(Ljava/lang/String;I)Ljava/io/FileDescriptor;': () => null,
+        'mincore(JJ[B)V': () => undefined,
+        'mkdir(Ljava/lang/String;I)V': () => undefined,
+        'mkfifo(Ljava/lang/String;I)V': () => undefined,
+        'mlock(JJ)V': () => undefined,
+        'munlock(JJ)V': () => undefined,
+        'mmap(JJIILjava/io/FileDescriptor;J)J': () => BigInt(0),
+        'msync(JJI)V': () => undefined,
+        'munmap(JJ)V': () => undefined,
+        'open(Ljava/lang/String;II)Ljava/io/FileDescriptor;': () => null,
+        'pipe()[Ljava/io/FileDescriptor;': (_self, _args, vm) => vm.newArray('Ljava/io/FileDescriptor;', 2, [null, null]),
+        'poll([Landroid/system/StructPollfd;I)I': () => 0,
+        'pread(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;J)I': () => -1,
+        'pread(Ljava/io/FileDescriptor;[BIIJ)I': () => -1,
+        'pwrite(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;J)I': () => -1,
+        'pwrite(Ljava/io/FileDescriptor;[BIIJ)I': () => -1,
+        'read(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;)I': () => -1,
+        'read(Ljava/io/FileDescriptor;[BII)I': () => -1,
+        'write(Ljava/io/FileDescriptor;[BII)I': (_self, [fd, buffer, offset, count]) => {
+          const length = Array.isArray(buffer?.$data) ? buffer.$data.length : 0;
+          return Math.max(0, Math.min(toInt(count), length - toInt(offset)));
+        },
+        'write(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;)I': () => 0,
+        'readv(Ljava/io/FileDescriptor;[Ljava/lang/Object;[I[I)I': () => -1,
+        'writev(Ljava/io/FileDescriptor;[Ljava/lang/Object;[I[I)I': () => 0,
+        'remove(Ljava/lang/String;)V': () => undefined,
+        'rename(Ljava/lang/String;Ljava/lang/String;)V': () => undefined,
+        'sendfile(Ljava/io/FileDescriptor;Ljava/io/FileDescriptor;Landroid/system/Int64Ref;J)J': () => BigInt(0),
+
+        // —— socket / 网络 ——
+        'accept(Ljava/io/FileDescriptor;Ljava/net/InetSocketAddress;)Ljava/io/FileDescriptor;': () => null,
+        'bind(Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V': () => undefined,
+        'bind(Ljava/io/FileDescriptor;Ljava/net/SocketAddress;)V': () => undefined,
+        'connect(Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V': () => undefined,
+        'connect(Ljava/io/FileDescriptor;Ljava/net/SocketAddress;)V': () => undefined,
+        'getpeername(Ljava/io/FileDescriptor;)Ljava/net/SocketAddress;': () => null,
+        'getsockname(Ljava/io/FileDescriptor;)Ljava/net/SocketAddress;': () => null,
+        'getsockoptTimeval(Ljava/io/FileDescriptor;II)Landroid/system/StructTimeval;': () => null,
+        'if_indextoname(I)Ljava/lang/String;': () => null,
+        'if_nametoindex(Ljava/lang/String;)I': () => 0,
+        'inet_pton(ILjava/lang/String;)Ljava/net/InetAddress;': () => null,
+        'listen(Ljava/io/FileDescriptor;I)V': () => undefined,
+        'recvfrom(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;ILjava/net/InetSocketAddress;)I': () => -1,
+        'recvfrom(Ljava/io/FileDescriptor;[BIIILjava/net/InetSocketAddress;)I': () => -1,
+        'recvmsg(Ljava/io/FileDescriptor;Landroid/system/StructMsghdr;I)I': () => -1,
+        'sendmsg(Ljava/io/FileDescriptor;Landroid/system/StructMsghdr;I)I': () => -1,
+        'sendto(Ljava/io/FileDescriptor;Ljava/nio/ByteBuffer;ILjava/net/InetAddress;I)I': () => -1,
+        'sendto(Ljava/io/FileDescriptor;[BIIILjava/net/InetAddress;I)I': () => -1,
+        'sendto(Ljava/io/FileDescriptor;[BIIILjava/net/SocketAddress;)I': () => -1,
+        'setsockoptInt(Ljava/io/FileDescriptor;III)V': () => undefined,
+        'setsockoptTimeval(Ljava/io/FileDescriptor;IILandroid/system/StructTimeval;)V': () => undefined,
+        'shutdown(Ljava/io/FileDescriptor;I)V': () => undefined,
+        'socket(III)Ljava/io/FileDescriptor;': () => null,
+        'socketpair(IIILjava/io/FileDescriptor;Ljava/io/FileDescriptor;)V': () => undefined,
+        'tcdrain(Ljava/io/FileDescriptor;)V': () => undefined,
+        'tcsendbreak(Ljava/io/FileDescriptor;I)V': () => undefined,
       },
     })
   );
@@ -6010,6 +6565,123 @@ function vmShowChild(self, index) {
         'setOnShowListener(Landroid/content/DialogInterface$OnShowListener;)V': (self, [listener]) => { self.showListener = listener; },
         'setOnCancelListener(Landroid/content/DialogInterface$OnCancelListener;)V': (self, [listener]) => { self.cancelListener = listener; },
         'setOnKeyListener(Landroid/content/DialogInterface$OnKeyListener;)V': (self, [listener]) => { self.keyListener = listener; },
+
+        '<init>(Landroid/content/Context;ZLandroid/content/DialogInterface$OnCancelListener;)V': (self, [context, cancelable, listener]) => {
+          self.context = context ?? null;
+          self.showing = false;
+          self.cancelable = cancelable !== false;
+          self.cancelListener = listener ?? null;
+        },
+        'getContext()Landroid/content/Context;': (self, _args, vm) => self.context ?? vm.contextObject ?? null,
+        'getActionBar()Landroid/app/ActionBar;': () => null,
+        'setOwnerActivity(Landroid/app/Activity;)V': (self, [activity]) => { self.ownerActivity = activity ?? null; },
+        'getOwnerActivity()Landroid/app/Activity;': (self) => self.ownerActivity ?? null,
+        'create()V': (self, _args, vm) => {
+          self.vm = vm;
+          self.dialogObject = self.$object ?? self;
+          dialogEnsureWindow(self, vm);
+        },
+        'hide()V': (self) => {
+          if (!self.showing) return;
+          self.showing = false;
+          const screen = self.vm?.screen;
+          if (screen && self.overlay) screen.removeOverlay?.(self.overlay);
+        },
+        'onCreate(Landroid/os/Bundle;)V': () => undefined,
+        'onStart()V': () => undefined,
+        'onStop()V': () => undefined,
+        'onSaveInstanceState()Landroid/os/Bundle;': () => null,
+        'onRestoreInstanceState(Landroid/os/Bundle;)V': () => undefined,
+        'getCurrentFocus()Landroid/view/View;': (self) => {
+          const root = unwrapView(self.contentView);
+          const focused = findFocusedDescendant(root);
+          return focused ? viewObject(self.vm, focused) : null;
+        },
+        'requireViewById(I)Landroid/view/View;': (self, [id]) => {
+          const view = self.contentView?.findViewById?.(id) ?? null;
+          if (!view) throw new Error(`requireViewById: 找不到 id 0x${(id >>> 0).toString(16)}`);
+          return view;
+        },
+        'setContentView(I)V': (self, [resId], vm) => {
+          self.vm = vm;
+          const inflater = new LayoutInflater(vm.contextObject);
+          inflater.vm = vm;
+          self.contentView = inflater.inflate(resId);
+        },
+        'setContentView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view]) => { self.contentView = view ?? null; },
+        'addContentView(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V': (self, [view]) => { self.contentView = view ?? null; },
+        'setTitle(I)V': (self, [resId], vm) => { self.vm = vm; self.title = vm.resources.getString(resId >>> 0); },
+        'onKeyDown(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyLongPress(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyUp(ILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyMultiple(IILandroid/view/KeyEvent;)Z': () => false,
+        'onKeyShortcut(ILandroid/view/KeyEvent;)Z': () => false,
+        'onBackPressed()V': (self) => dialogDismiss(self),
+        'onTouchEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'onWindowAttributesChanged(Landroid/view/WindowManager$LayoutParams;)V': () => undefined,
+        'onContentChanged()V': () => undefined,
+        'onWindowFocusChanged(Z)V': (self, [hasFocus]) => { self.$windowFocus = !!hasFocus; },
+        'onAttachedToWindow()V': () => undefined,
+        'onDetachedFromWindow()V': () => undefined,
+        'dispatchKeyEvent(Landroid/view/KeyEvent;)Z': (self, [event], vm) => {
+          const keyCode = event?.keyCode ?? event?.$peer?.keyCode ?? 0;
+          if ((keyCode | 0) === 4) { dialogDismiss(self); return true; }
+          return false;
+        },
+        'dispatchKeyShortcutEvent(Landroid/view/KeyEvent;)Z': () => false,
+        'dispatchTouchEvent(Landroid/view/MotionEvent;)Z': (self, [event]) => unwrapView(self.contentView)?.dispatchTouchEvent?.(event) ?? false,
+        'dispatchTrackballEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchGenericMotionEvent(Landroid/view/MotionEvent;)Z': () => false,
+        'dispatchPopulateAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)Z': () => false,
+        'onCreatePanelView(I)Landroid/view/View;': () => null,
+        'onCreatePanelMenu(ILandroid/view/Menu;)Z': () => false,
+        'onPreparePanel(ILandroid/view/View;Landroid/view/Menu;)Z': () => false,
+        'onMenuOpened(ILandroid/view/Menu;)Z': () => true,
+        'onMenuItemSelected(ILandroid/view/MenuItem;)Z': (self, [featureId, item], vm) => {
+          try {
+            if ((featureId | 0) === 0) return !!vm.invokeByName('onOptionsItemSelected', '(Landroid/view/MenuItem;)Z', self.$object ?? self, [item]);
+            if ((featureId | 0) === 6) return !!vm.invokeByName('onContextItemSelected', '(Landroid/view/MenuItem;)Z', self.$object ?? self, [item]);
+          } catch (_) { /* 应用未覆写 */ }
+          return false;
+        },
+        'onPanelClosed(ILandroid/view/Menu;)V': () => undefined,
+        'onCreateOptionsMenu(Landroid/view/Menu;)Z': () => false,
+        'onPrepareOptionsMenu(Landroid/view/Menu;)Z': () => false,
+        'onOptionsItemSelected(Landroid/view/MenuItem;)Z': () => false,
+        'onOptionsMenuClosed(Landroid/view/Menu;)V': () => undefined,
+        'openOptionsMenu()V': () => undefined,
+        'closeOptionsMenu()V': () => undefined,
+        'invalidateOptionsMenu()V': () => undefined,
+        'onCreateContextMenu(Landroid/view/ContextMenu;Landroid/view/View;Landroid/view/ContextMenu$ContextMenuInfo;)V': () => undefined,
+        'registerForContextMenu(Landroid/view/View;)V': () => undefined,
+        'unregisterForContextMenu(Landroid/view/View;)V': () => undefined,
+        'openContextMenu(Landroid/view/View;)V': () => undefined,
+        'onContextItemSelected(Landroid/view/MenuItem;)Z': () => false,
+        'onContextMenuClosed(Landroid/view/Menu;)V': () => undefined,
+        'onSearchRequested(Landroid/view/SearchEvent;)Z': () => false,
+        'onSearchRequested()Z': () => false,
+        'getSearchEvent()Landroid/view/SearchEvent;': () => null,
+        'onWindowStartingActionMode(Landroid/view/ActionMode$Callback;)Landroid/view/ActionMode;': () => null,
+        'onWindowStartingActionMode(Landroid/view/ActionMode$Callback;I)Landroid/view/ActionMode;': () => null,
+        'onActionModeStarted(Landroid/view/ActionMode;)V': () => undefined,
+        'onActionModeFinished(Landroid/view/ActionMode;)V': () => undefined,
+        'takeKeyEvents(Z)V': () => undefined,
+        'requestWindowFeature(I)Z': () => true,
+        'setFeatureDrawableResource(II)V': () => undefined,
+        'setFeatureDrawableUri(ILandroid/net/Uri;)V': () => undefined,
+        'setFeatureDrawable(ILandroid/graphics/drawable/Drawable;)V': () => undefined,
+        'setFeatureDrawableAlpha(II)V': () => undefined,
+        'getLayoutInflater()Landroid/view/LayoutInflater;': (self, _args, vm) => {
+          const inflater = new LayoutInflater(self.context ?? vm.contextObject);
+          inflater.vm = vm;
+          return inflater;
+        },
+        'setCancelMessage(Landroid/os/Message;)V': (self, [message]) => { self.cancelMessage = message ?? null; },
+        'setDismissMessage(Landroid/os/Message;)V': (self, [message]) => { self.dismissMessage = message ?? null; },
+        'setVolumeControlStream(I)V': (self, [stream]) => { self.$volumeControlStream = stream | 0; },
+        'getVolumeControlStream()I': (self) => self.$volumeControlStream ?? 3,
       },
     })
   );
@@ -7072,6 +7744,88 @@ function vmShowChild(self, index) {
         },
         'transform(Landroid/graphics/Matrix;)V': () => undefined,
         'recycle()V': () => undefined,
+
+        // —— 设备 / 精度 / 按键状态 ——
+        'getDeviceId()I': () => 0,
+        'getPressure()F': (self) => Number(self.pressure ?? 1) || 0,
+        'getPressure(I)F': (self) => Number(self.pressure ?? 1) || 0,
+        'getSize()F': (self) => Number(self.size ?? 1) || 0,
+        'getSize(I)F': (self) => Number(self.size ?? 1) || 0,
+        'getTouchMajor()F': (self) => Number(self.touchMajor ?? 0) || 0,
+        'getTouchMajor(I)F': (self) => Number(self.touchMajor ?? 0) || 0,
+        'getTouchMinor()F': (self) => Number(self.touchMinor ?? 0) || 0,
+        'getTouchMinor(I)F': (self) => Number(self.touchMinor ?? 0) || 0,
+        'getToolMajor()F': (self) => Number(self.toolMajor ?? 0) || 0,
+        'getToolMajor(I)F': (self) => Number(self.toolMajor ?? 0) || 0,
+        'getToolMinor()F': (self) => Number(self.toolMinor ?? 0) || 0,
+        'getToolMinor(I)F': (self) => Number(self.toolMinor ?? 0) || 0,
+        'getOrientation()F': () => 0,
+        'getOrientation(I)F': () => 0,
+        'getMetaState()I': (self) => toInt(self.metaState ?? 0),
+        'getButtonState()I': (self) => toInt(self.buttonState ?? 0),
+        'getActionButton()I': () => 0,
+        'getClassification()I': () => 0,
+        'getFlags()I': (self) => toInt(self.flags ?? 0),
+        'getRawY(I)F': (self, [index]) => Number(self.pointerYs?.[toInt(index)] ?? self.rawY ?? self.y) || 0,
+        'getRawX(I)F': (self, [index]) => Number(self.pointerXs?.[toInt(index)] ?? self.rawX ?? self.x) || 0,
+        'getXPrecision()F': () => 1,
+        'getYPrecision()F': () => 1,
+        'getPointerCoords(ILandroid/view/MotionEvent$PointerCoords;)V': (self, [index, out]) => {
+          if (!out) return;
+          const i = toInt(index);
+          const peer = out.$peer ?? out;
+          peer.x = i === 0 ? Number(self.x) || 0 : Number(self.pointerXs?.[i]) || 0;
+          peer.y = i === 0 ? Number(self.y) || 0 : Number(self.pointerYs?.[i]) || 0;
+          peer.pressure = 1;
+          peer.size = 1;
+          peer.touchMajor = 0;
+          peer.touchMinor = 0;
+          peer.toolMajor = 0;
+          peer.toolMinor = 0;
+          peer.orientation = 0;
+        },
+        'getPointerProperties(ILandroid/view/MotionEvent$PointerProperties;)V': (self, [index, out]) => {
+          if (!out) return;
+          const i = toInt(index);
+          const peer = out.$peer ?? out;
+          peer.id = toInt(self.pointerIds?.[i] ?? i);
+          peer.toolType = toInt(self.toolType ?? 1);
+        },
+        'isButtonPressed(I)Z': () => false,
+        'setEdgeFlags(I)V': (self, [flags]) => { self.edgeFlags = toInt(flags); },
+
+        // —— 历史采样（模拟器不累积历史，返回空序列） ——
+        'getHistorySize()I': (self) => (Array.isArray(self.history) ? self.history.length : 0),
+        'getHistoricalX(II)F': () => 0,
+        'getHistoricalY(II)F': () => 0,
+        'getHistoricalPressure(I)F': () => 0,
+        'getHistoricalPressure(II)F': () => 0,
+        'getHistoricalTouchMajor(I)F': () => 0,
+        'getHistoricalSize(I)F': () => 0,
+        'getHistoricalSize(II)F': () => 0,
+        'getHistoricalTouchMajor(II)F': () => 0,
+        'getHistoricalTouchMinor(I)F': () => 0,
+        'getHistoricalTouchMinor(II)F': () => 0,
+        'getHistoricalToolMajor(I)F': () => 0,
+        'getHistoricalToolMajor(II)F': () => 0,
+        'getHistoricalToolMinor(I)F': () => 0,
+        'getHistoricalToolMinor(II)F': () => 0,
+        'getHistoricalOrientation(I)F': () => 0,
+        'getHistoricalOrientation(II)F': () => 0,
+        'getHistoricalAxisValue(II)F': () => 0,
+        'getHistoricalAxisValue(III)F': () => 0,
+        'getHistoricalRawX(II)F': () => 0,
+        'getHistoricalRawY(II)F': () => 0,
+        'getHistoricalPointerCoords(IILandroid/view/MotionEvent$PointerCoords;)V': () => undefined,
+        'addBatch(JFFIJ)V': () => undefined,
+        'addBatch(JFFIJI)V': () => undefined,
+        'addBatch(JFFFFI)V': () => undefined,
+        'addBatch(J[Landroid/view/MotionEvent$PointerCoords;I)V': () => undefined,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+
+        // —— 描述 ——
+        'toString()Ljava/lang/String;': (self) => `MotionEvent { action=${toInt(self.action)} x=${Number(self.x) || 0} y=${Number(self.y) || 0} }`,
+        'finalize()V': () => undefined,
       },
       staticMethods: {
         'obtain(JJIFFI)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, x, y, edgeFlags], vm) =>
@@ -7087,6 +7841,105 @@ function vmShowChild(self, index) {
           createMotionEventObject(vm, source?.$peer || source || {}),
         'obtainNoHistory(Landroid/view/MotionEvent;)Landroid/view/MotionEvent;': (_self, [source], vm) =>
           createMotionEventObject(vm, source?.$peer || source || {}),
+        'obtain(JJIFFIIIIIIIIIIIIII)V': (_self, [downTime, eventTime, action, x, y, metaState, buttonState], vm) =>
+          createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            x: Number(x),
+            y: Number(y),
+            metaState: Number(metaState),
+            buttonState: Number(buttonState),
+          }),
+        'obtain(JJIIIIIIIIIIIIII)V': (_self, [downTime, eventTime, action, pointerCount], vm) =>
+          createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            pointerCount: Number(pointerCount),
+          }),
+        'obtain(JJIFFFFIFFII)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, x, y, pressure, size, metaState, xPrecision, yPrecision, deviceId, edgeFlags], vm) =>
+          createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            x: Number(x),
+            y: Number(y),
+            pressure: Number(pressure),
+            size: Number(size),
+            metaState: Number(metaState),
+            xPrecision: Number(xPrecision),
+            yPrecision: Number(yPrecision),
+            deviceId: Number(deviceId),
+            edgeFlags: Number(edgeFlags),
+          }),
+        'obtain(JJII[Landroid/view/MotionEvent$PointerProperties;[Landroid/view/MotionEvent$PointerCoords;IIFFIIII)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, pointerCount, properties, coords], vm) => {
+          const event = createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            pointerCount: Number(pointerCount),
+          });
+          const peer = event?.$peer;
+          if (peer) {
+            const items = coords?.$data || [];
+            const first = items[0]?.$peer ?? items[0];
+            if (first) {
+              peer.x = Number(first.x) || 0;
+              peer.y = Number(first.y) || 0;
+              peer.pointerXs = items.map((item) => Number((item?.$peer ?? item)?.x) || 0);
+              peer.pointerYs = items.map((item) => Number((item?.$peer ?? item)?.y) || 0);
+            }
+            const props = properties?.$data || [];
+            if (props.length) peer.pointerIds = props.map((item) => toInt((item?.$peer ?? item)?.id));
+          }
+          return event;
+        },
+        'obtain(JJIIFFFFIFFII)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, pointerCount, x, y, pressure, size, metaState, xPrecision, yPrecision, deviceId, edgeFlags], vm) =>
+          createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            pointerCount: Number(pointerCount),
+            x: Number(x),
+            y: Number(y),
+            pressure: Number(pressure),
+            size: Number(size),
+            metaState: Number(metaState),
+            xPrecision: Number(xPrecision),
+            yPrecision: Number(yPrecision),
+            deviceId: Number(deviceId),
+            edgeFlags: Number(edgeFlags),
+          }),
+        'obtain(JJII[I[Landroid/view/MotionEvent$PointerCoords;IFFIIII)Landroid/view/MotionEvent;': (_self, [downTime, eventTime, action, pointerCount, pointerIds, coords], vm) => {
+          const event = createMotionEventObject(vm, {
+            downTime: Number(downTime),
+            eventTime: Number(eventTime),
+            action: Number(action),
+            pointerCount: Number(pointerCount),
+          });
+          const peer = event?.$peer;
+          if (peer) {
+            const ids = pointerIds?.$data || [];
+            if (ids.length) peer.pointerIds = ids.map((value) => toInt(value));
+            const items = coords?.$data || [];
+            if (items.length) {
+              const first = items[0]?.$peer ?? items[0];
+              peer.x = Number(first?.x) || 0;
+              peer.y = Number(first?.y) || 0;
+              peer.pointerXs = items.map((item) => Number((item?.$peer ?? item)?.x) || 0);
+              peer.pointerYs = items.map((item) => Number((item?.$peer ?? item)?.y) || 0);
+            }
+          }
+          return event;
+        },
+        'actionToString(I)Ljava/lang/String;': (_self, [action]) => {
+          const names = ['ACTION_DOWN', 'ACTION_UP', 'ACTION_MOVE', 'ACTION_CANCEL', 'ACTION_OUTSIDE', 'ACTION_POINTER_DOWN', 'ACTION_POINTER_UP', 'ACTION_HOVER_MOVE', 'ACTION_SCROLL'];
+          const masked = toInt(action) & 0xff;
+          return names[masked] ?? `ACTION_${masked}`;
+        },
+        'axisToString(I)Ljava/lang/String;': (_self, [axis]) => `AXIS_${toInt(axis)}`,
+        'axisFromString(Ljava/lang/String;)I': () => -1,
       },
       staticFields: new Map([
         ['ACTION_DOWN:I', 0],
@@ -7865,6 +8718,78 @@ function vmShowChild(self, index) {
         'green(I)I': (_self, [color]) => (toInt(color) >>> 8) & 0xff,
         'blue(I)I': (_self, [color]) => toInt(color) & 0xff,
         'alpha(I)I': (_self, [color]) => (toInt(color) >>> 24) & 0xff,
+        'luminance(I)F': (_self, [color]) => colorLuminance(toInt(color)),
+        'luminance(J)F': (_self, [color]) => colorLuminance(colorArgb(color)),
+        'rgb(FFF)I': (_self, [r, g, b]) => packArgb(1, r, g, b),
+        'argb(FFFF)I': (_self, [a, r, g, b]) => packArgb(a, r, g, b),
+        'RGBToHSV(III[F)V': (_self, [r, g, b, out]) => writeHsv(out, rgbToHsv(Number(r) / 255, Number(g) / 255, Number(b) / 255)),
+        'colorToHSV(I[F)V': (_self, [color, out]) => {
+          const argb = toInt(color);
+          writeHsv(out, rgbToHsv(((argb >>> 16) & 0xff) / 255, ((argb >>> 8) & 0xff) / 255, (argb & 0xff) / 255));
+        },
+        'HSVToColor([F)I': (_self, [hsv]) => hsvToArgb(255, hsv),
+        'HSVToColor(I[F)I': (_self, [alpha, hsv]) => hsvToArgb(alpha, hsv),
+        'valueOf(I)Landroid/graphics/Color;': (_self, [color], vm) => colorObject(vm, toInt(color)),
+        'valueOf(J)Landroid/graphics/Color;': (_self, [color], vm) => colorObject(vm, colorArgb(color)),
+        'valueOf(FFF)Landroid/graphics/Color;': (_self, [r, g, b], vm) => colorObject(vm, packArgb(1, r, g, b)),
+        'valueOf(FFFF)Landroid/graphics/Color;': (_self, [r, g, b, a], vm) => colorObject(vm, packArgb(a, r, g, b)),
+        'valueOf(FFFFLandroid/graphics/ColorSpace;)Landroid/graphics/Color;': (_self, [r, g, b, a], vm) => colorObject(vm, packArgb(a, r, g, b)),
+        'valueOf([FLandroid/graphics/ColorSpace;)Landroid/graphics/Color;': (_self, [components], vm) => {
+          const values = components?.$data || [];
+          return colorObject(vm, packArgb(values[3] ?? 1, values[0] ?? 0, values[1] ?? 0, values[2] ?? 0));
+        },
+        'pack(I)J': (_self, [color]) => colorLongFromArgb(toInt(color)),
+        'pack(FFF)J': (_self, [r, g, b]) => colorLongFromArgb(packArgb(1, r, g, b)),
+        'pack(FFFF)J': (_self, [r, g, b, a]) => colorLongFromArgb(packArgb(a, r, g, b)),
+        'pack(FFFFLandroid/graphics/ColorSpace;)J': (_self, [r, g, b, a]) => colorLongFromArgb(packArgb(a, r, g, b)),
+        'red(J)F': (_self, [color]) => ((colorArgb(color) >>> 16) & 0xff) / 255,
+        'green(J)F': (_self, [color]) => ((colorArgb(color) >>> 8) & 0xff) / 255,
+        'blue(J)F': (_self, [color]) => (colorArgb(color) & 0xff) / 255,
+        'alpha(J)F': (_self, [color]) => ((colorArgb(color) >>> 24) & 0xff) / 255,
+        'isSrgb(J)Z': () => true,
+        'isWideGamut(J)Z': () => false,
+        'isInColorSpace(JLandroid/graphics/ColorSpace;)Z': () => true,
+        'toArgb(J)I': (_self, [color]) => colorArgb(color),
+        'colorSpace(J)Landroid/graphics/ColorSpace;': () => null,
+        'convert(ILandroid/graphics/ColorSpace;)J': (_self, [color]) => colorLongFromArgb(toInt(color)),
+        'convert(JLandroid/graphics/ColorSpace;)J': (_self, [color]) => colorLongFromArgb(colorArgb(color)),
+        'convert(FFFFLandroid/graphics/ColorSpace;Landroid/graphics/ColorSpace;)J': (_self, [r, g, b, a]) => colorLongFromArgb(packArgb(a, r, g, b)),
+        'convert(JLandroid/graphics/ColorSpace$Connector;)J': (_self, [color]) => colorLongFromArgb(colorArgb(color)),
+        'convert(FFFFLandroid/graphics/ColorSpace$Connector;)J': (_self, [r, g, b, a]) => colorLongFromArgb(packArgb(a, r, g, b)),
+      },
+      methods: {
+        '<init>()V': (self) => { self.argb = 0xff000000; },
+        'getColorSpace()Landroid/graphics/ColorSpace;': () => null,
+        'getModel()Landroid/graphics/ColorSpace$Model;': () => null,
+        'isWideGamut()Z': () => false,
+        'isSrgb()Z': () => true,
+        'getComponentCount()I': () => 4,
+        'pack()J': (self) => colorLongFromArgb(self.argb),
+        'toArgb()I': (self) => self.argb >>> 0,
+        'red()F': (self) => ((self.argb >>> 16) & 0xff) / 255,
+        'green()F': (self) => ((self.argb >>> 8) & 0xff) / 255,
+        'blue()F': (self) => (self.argb & 0xff) / 255,
+        'alpha()F': (self) => ((self.argb >>> 24) & 0xff) / 255,
+        'getComponents()[F': (self, _args, vm) => vm.newArray('F', 4, [
+          ((self.argb >>> 16) & 0xff) / 255, ((self.argb >>> 8) & 0xff) / 255, (self.argb & 0xff) / 255, ((self.argb >>> 24) & 0xff) / 255,
+        ]),
+        'getComponents([F)[F': (self, [out]) => {
+          const values = [((self.argb >>> 16) & 0xff) / 255, ((self.argb >>> 8) & 0xff) / 255, (self.argb & 0xff) / 255, ((self.argb >>> 24) & 0xff) / 255];
+          if (out?.$data) { for (let i = 0; i < 4; i++) out.$data[i] = values[i]; }
+          return out;
+        },
+        'getComponent(I)F': (self, [index]) => {
+          const channels = [((self.argb >>> 16) & 0xff) / 255, ((self.argb >>> 8) & 0xff) / 255, (self.argb & 0xff) / 255, ((self.argb >>> 24) & 0xff) / 255];
+          return channels[toInt(index)] ?? 0;
+        },
+        'luminance()F': (self) => colorLuminance(self.argb),
+        'convert(Landroid/graphics/ColorSpace;)Landroid/graphics/Color;': (self) => self.$object ?? self,
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          const peer = other?.$peer ?? other;
+          return !!peer && toInt(peer.argb) === toInt(self.argb);
+        },
+        'hashCode()I': (self) => toInt(self.argb),
+        'toString()Ljava/lang/String;': (self) => `Color(0x${(self.argb >>> 0).toString(16).padStart(8, '0')})`,
       },
       staticFields: new Map([
         ['BLACK:I', 0xff000000],
@@ -7946,6 +8871,172 @@ function vmShowChild(self, index) {
         'setXfermode(Landroid/graphics/Xfermode;)Landroid/graphics/Xfermode;': (self, [xfermode]) => { self.paint.xfermode = xfermode ?? null; return xfermode ?? null; },
         'getXfermode()Landroid/graphics/Xfermode;': (self) => self.paint?.xfermode ?? null,
         'getTextScaleX()F': (self) => Number(self.paint?.textScaleX) || 1,
+
+        // —— 标志 / 度量 ——
+        'getFlags()I': (self) => toInt(self.$flags ?? 0),
+        'setFlags(I)V': (self, [flags]) => { self.$flags = toInt(flags); },
+        'getHinting()I': (self) => toInt(self.$hinting ?? 0),
+        'setHinting(I)V': (self, [hinting]) => { self.$hinting = toInt(hinting); },
+        'isAntiAlias()Z': (self) => !!self.paint?.antiAlias,
+        'isLinearText()Z': (self) => !!self.$linearText,
+        'getUnderlinePosition()F': (self) => self.$underlinePosition ?? -(Number(self.paint?.textSize) || 14) * 0.1,
+        'getUnderlineThickness()F': (self) => self.$underlineThickness ?? Math.max(1, (Number(self.paint?.textSize) || 14) / 16),
+        'getStrikeThruPosition()F': (self) => self.$strikePosition ?? -(Number(self.paint?.textSize) || 14) * 0.3,
+        'getStrikeThruThickness()F': (self) => self.$strikeThickness ?? Math.max(1, (Number(self.paint?.textSize) || 14) / 16),
+        'getStyle()Landroid/graphics/Paint$Style;': (self, _args, vm) => {
+          const ordinal = ['fill', 'stroke', 'fill_and_stroke'].indexOf(String(self.paint?.style || 'fill'));
+          return paintStyleSingleton(vm, PAINT_STYLES[ordinal >= 0 ? ordinal : 0][0], ordinal >= 0 ? ordinal : 0);
+        },
+        'getColorLong()J': (self) => colorLongFromArgb(self.paint?.getColor?.() ?? 0xff000000),
+        'setColor(J)V': (self, [color]) => self.paint?.setColor?.(colorArgb(color)),
+        'setARGB(IIII)V': (self, [a, r, g, b]) => self.paint?.setColor?.(packArgb((toInt(a) & 0xff) / 255, (toInt(r) & 0xff) / 255, (toInt(g) & 0xff) / 255, (toInt(b) & 0xff) / 255)),
+        'getStrokeCap()Landroid/graphics/Paint$Cap;': (self, _args, vm) => {
+          const ordinal = ['butt', 'round', 'square'].indexOf(String(self.paint?.strokeCap || 'butt'));
+          return paintCapSingleton(vm, PAINT_CAPS[ordinal >= 0 ? ordinal : 0][0], ordinal >= 0 ? ordinal : 0);
+        },
+        'getStrokeJoin()Landroid/graphics/Paint$Join;': (self, _args, vm) => {
+          const ordinal = ['miter', 'round', 'bevel'].indexOf(String(self.paint?.strokeJoin || 'miter'));
+          return paintJoinSingleton(vm, PAINT_JOINS[ordinal >= 0 ? ordinal : 0][0], ordinal >= 0 ? ordinal : 0);
+        },
+        'setShader(Landroid/graphics/Shader;)Landroid/graphics/Shader;': (self, [shader]) => {
+          self.paint.shader = shader ?? null;
+          return shader ?? null;
+        },
+        'getBlendMode()Landroid/graphics/BlendMode;': (self) => self.paint?.blendMode ?? null,
+        'setBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.paint.blendMode = mode ?? null; },
+        'setPathEffect(Landroid/graphics/PathEffect;)Landroid/graphics/PathEffect;': (self, [effect]) => {
+          self.paint.pathEffect = effect ?? null;
+          return effect ?? null;
+        },
+        'getMaskFilter()Landroid/graphics/MaskFilter;': (self) => self.paint?.maskFilter ?? null,
+        'setMaskFilter(Landroid/graphics/MaskFilter;)Landroid/graphics/MaskFilter;': (self, [filter]) => {
+          self.paint.maskFilter = filter ?? null;
+          return filter ?? null;
+        },
+        'setShadowLayer(FFFJ)V': (self, [radius, dx, dy, color]) => {
+          self.paint.shadowLayer = { radius: Number(radius) || 0, dx: Number(dx) || 0, dy: Number(dy) || 0, color: colorArgb(color) };
+        },
+        'getShadowLayerRadius()F': (self) => Number(self.paint?.shadowLayer?.radius) || 0,
+        'getShadowLayerDx()F': (self) => Number(self.paint?.shadowLayer?.dx) || 0,
+        'getShadowLayerDy()F': (self) => Number(self.paint?.shadowLayer?.dy) || 0,
+        'getShadowLayerColor()I': (self) => toInt(self.paint?.shadowLayer?.color ?? 0),
+        'getShadowLayerColorLong()J': (self) => colorLongFromArgb(toInt(self.paint?.shadowLayer?.color ?? 0)),
+
+        // —— 文本属性 ——
+        'getTextAlign()Landroid/graphics/Paint$Align;': (self, _args, vm) => {
+          const name = String(self.paint?.textAlign || 'left').toUpperCase();
+          if (!vm.__paintAligns) vm.__paintAligns = new Map();
+          const cached = vm.__paintAligns.get(name);
+          if (cached) return cached;
+          const object = vm.allocateRawObject('Landroid/graphics/Paint$Align;');
+          object.$peer = { name, ordinal: ['LEFT', 'CENTER', 'RIGHT'].indexOf(name) };
+          vm.__paintAligns.set(name, object);
+          return object;
+        },
+        'getTextLocale()Ljava/util/Locale;': (self, _args, vm) => {
+          if (!vm.__textLocale) {
+            const object = vm.allocateRawObject('Ljava/util/Locale;');
+            object.$peer = { language: 'zh', country: 'CN' };
+            vm.__textLocale = object;
+          }
+          return vm.__textLocale;
+        },
+        'getTextLocales()Landroid/os/LocaleList;': (self, _args, vm) => {
+          if (!vm.__textLocales) {
+            const object = vm.allocateRawObject('Landroid/os/LocaleList;');
+            object.$peer = { locales: [self.paint?.textLocale ?? null] };
+            vm.__textLocales = object;
+          }
+          return vm.__textLocales;
+        },
+        'setTextLocale(Ljava/util/Locale;)V': (self, [locale]) => { self.paint.textLocale = locale ?? null; },
+        'setTextLocales(Landroid/os/LocaleList;)V': (self, [locales]) => { self.paint.textLocales = locales ?? null; },
+        'isElegantTextHeight()Z': (self) => !!self.paint?.elegantTextHeight,
+        'setElegantTextHeight(Z)V': (self, [value]) => { self.paint.elegantTextHeight = !!value; },
+        'getWordSpacing()F': (self) => Number(self.paint?.wordSpacing) || 0,
+        'setWordSpacing(F)V': (self, [spacing]) => { self.paint.wordSpacing = Number(spacing) || 0; },
+        'getFontFeatureSettings()Ljava/lang/String;': (self) => self.paint?.fontFeatureSettings ?? null,
+        'setFontFeatureSettings(Ljava/lang/String;)V': (self, [settings]) => { self.paint.fontFeatureSettings = settings == null ? null : jsString(settings); },
+        'getFontVariationSettings()Ljava/lang/String;': (self) => self.paint?.fontVariationSettings ?? null,
+        'setFontVariationSettings(Ljava/lang/String;)Z': (self, [settings]) => {
+          self.paint.fontVariationSettings = settings == null ? null : jsString(settings);
+          return true;
+        },
+        'getStartHyphenEdit()I': (self) => toInt(self.paint?.startHyphenEdit ?? 0),
+        'getEndHyphenEdit()I': (self) => toInt(self.paint?.endHyphenEdit ?? 0),
+        'setStartHyphenEdit(I)V': (self, [value]) => { self.paint.startHyphenEdit = toInt(value); },
+        'setEndHyphenEdit(I)V': (self, [value]) => { self.paint.endHyphenEdit = toInt(value); },
+        'measureText(Ljava/lang/String;II)F': (self, [text, start, end]) => self.paint.measureText(jsString(text).slice(start | 0, end | 0)),
+        'breakText([CIIF[F)I': (self, [chars, index, count, maxWidth, measured]) => {
+          const data = chars?.$data || [];
+          return breakTextImpl(self, data, index, count, maxWidth, measured, true);
+        },
+        'breakText(Ljava/lang/CharSequence;IIZF[F)I': (self, [text, start, end, measureForwards, maxWidth, measured]) => {
+          const value = jsString(text);
+          const chars = Array.from(value.slice(start | 0, end | 0)).map((char) => char.charCodeAt(0));
+          return breakTextImpl(self, chars, 0, chars.length, maxWidth, measured, measureForwards !== false);
+        },
+        'getTextWidths([CII[F)I': (self, [chars, index, count, widths]) => {
+          const data = chars?.$data || [];
+          if (!widths?.$data) return 0;
+          let total = 0;
+          for (let i = 0; i < (count | 0) && i < widths.$data.length; i++) {
+            const char = String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+            widths.$data[i] = numberToFloatBits(self.paint.measureText(char));
+            total++;
+          }
+          return total;
+        },
+        'getTextRunAdvances([CIIIIZ[FI)F': (self, [chars, index, count, _contextIndex, _contextCount, _rtl, advances, _advancesIndex]) => {
+          const data = chars?.$data || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          if (advances?.$data) {
+            let offset = index | 0;
+            for (let i = 0; i < text.length && i < advances.$data.length; i++) {
+              advances.$data[i] = numberToFloatBits(self.paint.measureText(text[i]));
+            }
+          }
+          return self.paint.measureText(text);
+        },
+        'getTextRunCursor([CIIZII)I': (_self, [chars, _contextStart, _contextCount, _rtl, offset]) => toInt(offset),
+        'getTextRunCursor(Ljava/lang/CharSequence;IIZII)I': (_self, [text, _contextStart, _contextCount, _rtl, offset]) => toInt(offset),
+        'getTextPath([CIIFFLandroid/graphics/Path;)V': (self, [chars, index, count, x, y, path]) => {
+          const data = chars?.$data || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          appendPathText(self, path, text, x, y);
+        },
+        'getTextPath(Ljava/lang/String;IIFFLandroid/graphics/Path;)V': (self, [text, start, end, x, y, path]) => {
+          appendPathText(self, path, jsString(text).slice(start | 0, end | 0), x, y);
+        },
+        'getTextBounds([CIILandroid/graphics/Rect;)V': (self, [chars, index, count, rect]) => {
+          const data = chars?.$data || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          writeTextBounds(self, text, rect);
+        },
+        'hasGlyph(Ljava/lang/String;)Z': () => true,
+        'getRunAdvance([CIIIIZI)F': (self, [chars, index, count, _contextIndex, _contextCount, _rtl, offset]) => {
+          const data = chars?.$data || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          return self.paint.measureText(text.slice(0, toInt(offset)));
+        },
+        'getRunAdvance(Ljava/lang/CharSequence;IIIIZI)F': (self, [text, start, end, _contextStart, _contextEnd, _rtl, offset]) => {
+          const value = jsString(text).slice(start | 0, end | 0);
+          return self.paint.measureText(value.slice(0, toInt(offset)));
+        },
+        'getOffsetForAdvance([CIIIIZF)I': (self, [chars, index, count, _contextIndex, _contextCount, _rtl, advance]) => {
+          const data = chars?.$data || [];
+          let text = '';
+          for (let i = 0; i < (count | 0); i++) text += String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff);
+          return offsetForAdvance(self, text, advance);
+        },
+        'getOffsetForAdvance(Ljava/lang/CharSequence;IIIIZF)I': (self, [text, start, end, _contextStart, _contextEnd, _rtl, advance]) =>
+          offsetForAdvance(self, jsString(text).slice(start | 0, end | 0), advance),
+        'equalsForTextMeasurement(Landroid/graphics/Paint;)Z': (self, [other]) =>
+          Number(other?.$peer?.paint?.textSize ?? other?.paint?.textSize ?? 0) === Number(self.paint?.textSize ?? 0),
         'ascent()F': (self) => self.paint.getFontMetricsInt().ascent,
         'descent()F': (self) => self.paint.getFontMetricsInt().descent,
         'reset()V': (self) => { self.paint = new Paint(); },
@@ -8206,6 +9297,178 @@ function vmShowChild(self, index) {
           const [l, t, r, b] = readRectF(vm, rect);
           self.canvas?.drawRect(l, t, r, b, paint?.paint ?? paint?.$peer?.paint ?? paint);
         },
+
+        // —— 构造 / 硬件能力 ——
+        '<init>()V': (self) => { self.canvas = null; self.$saveDepth = 0; },
+        '<init>(Landroid/graphics/Bitmap;)V': (self, [bitmap]) => {
+          self.bitmap = bitmap ?? null;
+          self.canvas = bitmap?.$peer?.canvas ?? null;
+          self.$saveDepth = 0;
+        },
+        'isHardwareAccelerated()Z': () => false,
+        'setBitmap(Landroid/graphics/Bitmap;)V': (self, [bitmap]) => {
+          self.bitmap = bitmap ?? null;
+          self.canvas = bitmap?.$peer?.canvas ?? null;
+        },
+        'enableZ()V': () => undefined,
+        'disableZ()V': () => undefined,
+        'isOpaque()Z': () => false,
+        'setDensity(I)V': (self, [density]) => { self.$density = toInt(density); },
+        'getMaximumBitmapWidth()I': () => 32766,
+        'getMaximumBitmapHeight()I': () => 32766,
+
+        // —— 图层 ——
+        'saveLayer(Landroid/graphics/RectF;Landroid/graphics/Paint;I)I': (self, [bounds, paint], vm) => {
+          const rect = bounds ? readRectF(vm, bounds) : null;
+          self.canvas?.saveLayer?.(rect, paint?.paint);
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayer(FFFFLandroid/graphics/Paint;I)I': (self, [l, t, r, b, paint]) => {
+          self.canvas?.saveLayer?.([l, t, r, b], paint?.paint);
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayer(FFFFLandroid/graphics/Paint;)I': (self, [l, t, r, b, paint]) => {
+          self.canvas?.saveLayer?.([l, t, r, b], paint?.paint);
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayerAlpha(Landroid/graphics/RectF;II)I': (self, [bounds, alpha], vm) => {
+          const rect = bounds ? readRectF(vm, bounds) : null;
+          self.canvas?.saveLayer?.(rect, { alpha: (toInt(alpha) & 0xff) / 255 });
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayerAlpha(FFFFII)I': (self, [l, t, r, b, alpha]) => {
+          self.canvas?.saveLayer?.([l, t, r, b], { alpha: (toInt(alpha) & 0xff) / 255 });
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'saveLayerAlpha(FFFFI)I': (self, [l, t, r, b, alpha]) => {
+          self.canvas?.saveLayer?.([l, t, r, b], { alpha: (toInt(alpha) & 0xff) / 255 });
+          return (self.$saveDepth = (self.$saveDepth || 0) + 1);
+        },
+        'getSaveCount()I': (self) => (self.$saveDepth || 0) + 1,
+
+        // —— 变换 ——
+        'scale(FFFF)V': (self, [sx, sy, px, py]) => {
+          self.canvas?.translate?.(px, py);
+          self.canvas?.scale?.(sx, sy);
+          self.canvas?.translate?.(-px, -py);
+        },
+        'setMatrix(Landroid/graphics/Matrix;)V': (self, [matrix]) => {
+          const values = matrix?.$peer?.matrix || [1, 0, 0, 1, 0, 0];
+          if (self.canvas?.setMatrix) self.canvas.setMatrix(values);
+          else self.canvas?.concat?.(values);
+        },
+        'getMatrix(Landroid/graphics/Matrix;)V': (self, [target]) => {
+          if (!target) return;
+          const peer = target.$peer || (target.$peer = {});
+          peer.matrix = [...(self.canvas?.matrix || [1, 0, 0, 1, 0, 0])];
+        },
+        'getMatrix()Landroid/graphics/Matrix;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Landroid/graphics/Matrix;');
+          const peer = object.$peer || (object.$peer = {});
+          peer.matrix = [...(self.canvas?.matrix || [1, 0, 0, 1, 0, 0])];
+          return object;
+        },
+
+        // —— 裁剪 ——
+        'clipRect(Landroid/graphics/RectF;Landroid/graphics/Region$Op;)Z': (self, [rect], vm) => {
+          if (!rect) return false;
+          const [l, t, r, b] = readRectF(vm, rect);
+          self.canvas?.clipRect?.(l, t, r, b);
+          return true;
+        },
+        'clipRect(Landroid/graphics/Rect;Landroid/graphics/Region$Op;)Z': (self, [rect]) => {
+          const bounds = rectPeerBounds(rect);
+          if (!bounds) return false;
+          self.canvas?.clipRect?.(bounds.left, bounds.top, bounds.right, bounds.bottom);
+          return true;
+        },
+        'clipRect(FFFFLandroid/graphics/Region$Op;)Z': (self, [l, t, r, b]) => {
+          self.canvas?.clipRect?.(l, t, r, b);
+          return true;
+        },
+        'clipRect(IIII)Z': (self, [l, t, r, b]) => {
+          self.canvas?.clipRect?.(l, t, r, b);
+          return true;
+        },
+        'clipOutRect(Landroid/graphics/RectF;)Z': () => false,
+        'clipOutRect(Landroid/graphics/Rect;)Z': () => false,
+        'clipOutRect(FFFF)Z': () => false,
+        'clipOutRect(IIII)Z': () => false,
+        'clipOutPath(Landroid/graphics/Path;)Z': () => false,
+        'clipPath(Landroid/graphics/Path;Landroid/graphics/Region$Op;)Z': (self, [path]) => {
+          const peer = path?.$peer || path;
+          self.canvas?.clipPath?.(peer?.commands || []);
+          return true;
+        },
+        'getDrawFilter()Landroid/graphics/DrawFilter;': (self) => self.$drawFilter ?? null,
+        'setDrawFilter(Landroid/graphics/DrawFilter;)V': (self, [filter]) => { self.$drawFilter = filter ?? null; },
+        'quickReject(Landroid/graphics/RectF;Landroid/graphics/Canvas$EdgeType;)Z': () => false,
+        'quickReject(Landroid/graphics/RectF;)Z': () => false,
+        'quickReject(Landroid/graphics/Path;Landroid/graphics/Canvas$EdgeType;)Z': () => false,
+        'quickReject(Landroid/graphics/Path;)Z': () => false,
+        'quickReject(FFFFLandroid/graphics/Canvas$EdgeType;)Z': () => false,
+        'quickReject(FFFF)Z': () => false,
+        'getClipBounds(Landroid/graphics/Rect;)Z': (self, [target]) => {
+          const peer = target?.$peer || target;
+          if (!peer) return false;
+          const width = Math.round(self.canvas?.width || 0);
+          const height = Math.round(self.canvas?.height || 0);
+          peer.rect = new Rect(0, 0, width, height);
+          return false;
+        },
+        'getClipBounds()Landroid/graphics/Rect;': (self, _args, vm) =>
+          makeRectObject(vm, 0, 0, Math.round(self.canvas?.width || 0), Math.round(self.canvas?.height || 0)),
+
+        // —— 绘制补全 ——
+        'drawPicture(Landroid/graphics/Picture;Landroid/graphics/RectF;)V': () => undefined,
+        'drawPicture(Landroid/graphics/Picture;Landroid/graphics/Rect;)V': () => undefined,
+        'drawBitmap(Landroid/graphics/Bitmap;Landroid/graphics/Rect;Landroid/graphics/Rect;Landroid/graphics/Paint;)V': (self, [bitmap, src, dst], vm) => {
+          const peer = resolveBitmapPeer(vm, bitmap);
+          if (!peer) return;
+          self.canvas?.drawBitmapRect?.(peer, rectPeerBounds(src), rectPeerBounds(dst));
+        },
+        'drawBitmap([IIIFFIIZLandroid/graphics/Paint;)V': () => undefined,
+        'drawBitmap([IIIIIIIZLandroid/graphics/Paint;)V': () => undefined,
+        'drawBitmapMesh(Landroid/graphics/Bitmap;II[FI[IILandroid/graphics/Paint;)V': () => undefined,
+        'drawColor(J)V': (self, [color]) => self.canvas?.drawColor?.(colorArgb(color)),
+        'drawColor(ILandroid/graphics/PorterDuff$Mode;)V': (self, [color]) => self.canvas?.drawColor?.(toInt(color)),
+        'drawColor(ILandroid/graphics/BlendMode;)V': (self, [color]) => self.canvas?.drawColor?.(toInt(color)),
+        'drawColor(JLandroid/graphics/BlendMode;)V': (self, [color]) => self.canvas?.drawColor?.(colorArgb(color)),
+        'drawRGB(III)V': (self, [r, g, b]) => self.canvas?.drawColor?.(packArgb(1, (toInt(r) & 0xff) / 255, (toInt(g) & 0xff) / 255, (toInt(b) & 0xff) / 255)),
+        'drawPatch(Landroid/graphics/NinePatch;Landroid/graphics/Rect;Landroid/graphics/Paint;)V': () => undefined,
+        'drawPatch(Landroid/graphics/NinePatch;Landroid/graphics/RectF;Landroid/graphics/Paint;)V': () => undefined,
+        'drawPosText([CII[FLandroid/graphics/Paint;)V': (self, [chars, index, count, positions, paint]) => {
+          const data = chars?.$data || [];
+          const coords = positions?.$data || [];
+          const text = Array.from({ length: count | 0 }, (_, i) => String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff)).join('');
+          if (text) self.canvas?.drawText?.(text, Number(coords[0]) || 0, Number(coords[1]) || 0, paint?.paint);
+        },
+        'drawPosText(Ljava/lang/String;[FLandroid/graphics/Paint;)V': (self, [text, positions, paint]) => {
+          const coords = positions?.$data || [];
+          self.canvas?.drawText?.(jsString(text), Number(coords[0]) || 0, Number(coords[1]) || 0, paint?.paint);
+        },
+        'drawRect(Landroid/graphics/Rect;Landroid/graphics/Paint;)V': (self, [rect, paint]) => {
+          const bounds = rectPeerBounds(rect);
+          if (!bounds) return;
+          self.canvas?.drawRect?.(bounds.left, bounds.top, bounds.right, bounds.bottom, paint?.paint);
+        },
+        'drawRoundRect(FFFFFFLandroid/graphics/Paint;)V': (self, [l, t, r, b, rx, ry, paint]) =>
+          self.canvas?.drawRoundRect?.(l, t, r, b, rx, ry, paint?.paint),
+        'drawDoubleRoundRect(Landroid/graphics/RectF;FFLandroid/graphics/RectF;FFLandroid/graphics/Paint;)V': () => undefined,
+        'drawDoubleRoundRect(Landroid/graphics/RectF;[FLandroid/graphics/RectF;[FLandroid/graphics/Paint;)V': () => undefined,
+        'drawGlyphs([II[FIILandroid/graphics/fonts/Font;Landroid/graphics/Paint;)V': () => undefined,
+        'drawText(Ljava/lang/String;IIFFLandroid/graphics/Paint;)V': (self, [text, start, end, x, y, paint]) =>
+          self.canvas?.drawText?.(jsString(text).slice(start | 0, end | 0), x, y, paint?.paint),
+        'drawTextOnPath([CIILandroid/graphics/Path;FFLandroid/graphics/Paint;)V': (self, [chars, index, count, _path, x, y, paint]) => {
+          const data = chars?.$data || [];
+          const text = Array.from({ length: count | 0 }, (_, i) => String.fromCharCode((data[(index | 0) + i] | 0) & 0xffff)).join('');
+          if (text) self.canvas?.drawText?.(text, x, y, paint?.paint);
+        },
+        'drawTextOnPath(Ljava/lang/String;Landroid/graphics/Path;FFLandroid/graphics/Paint;)V': (self, [text, _path, x, y, paint]) =>
+          self.canvas?.drawText?.(jsString(text), x, y, paint?.paint),
+        'drawTextRun(Landroid/graphics/text/MeasuredText;IIIIFFZLandroid/graphics/Paint;)V': () => undefined,
+        'drawVertices(Landroid/graphics/Canvas$VertexMode;I[FI[FI[II[SIILandroid/graphics/Paint;)V': () => undefined,
+        'drawRenderNode(Landroid/graphics/RenderNode;)V': () => undefined,
       },
     })
   );
