@@ -612,7 +612,7 @@ export class DexInterpreter {
         if (signal instanceof VMRuntimeSignal) {
           if (DBG.exc) {
             const _ex = signal.exception;
-            console.error('JAVA_EXC pc=', pc, 'cls=', this.vm?.registry?.classNameOf(_ex), 'handlers=', handlers.length, 'msg=', _ex?.$exceptionMessage, 'cause=', this.vm?.registry?.classNameOf(_ex?.cause), 'keys=', _ex && typeof _ex === 'object' ? Object.keys(_ex).slice(0,6).join('|') : typeof _ex, (this.vm?.methodStack || []).slice(-18).join(' <- '));
+            console.error('JAVA_EXC pc=', pc, 'cls=', this.vm?.registry?.classNameOf(_ex), 'handlers=', handlers.length, 'msg=', _ex?.$exceptionMessage, 'detail=', _ex?.$fields?.get?.('Ljava/lang/Throwable;->detailMessage'), 'peerMsg=', _ex?.$peer?.message, 'cause=', this.vm?.registry?.classNameOf(_ex?.cause), 'keys=', _ex && typeof _ex === 'object' ? Object.keys(_ex).slice(0,6).join('|') : typeof _ex, (this.vm?.methodStack || []).slice(-18).join(' <- '));
           }
           throw new VMRuntimeError(signal.exception, signal.exception?.$exceptionMessage || '未捕获的 Java 异常');
         }

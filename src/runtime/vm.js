@@ -140,6 +140,7 @@ export class JavaVM {
       'Landroid/hardware/camera2/CameraManager;': 'camera',
       'Landroid/bluetooth/BluetoothManager;': 'bluetooth',
       'Landroid/os/storage/StorageManager;': 'storage',
+      'Landroid/os/UserManager;': 'user',
     };
     const name = map[descriptor];
     return name ? this.getSystemService(name) : null;
@@ -173,6 +174,7 @@ export class JavaVM {
       'camera': 'Landroid/hardware/camera2/CameraManager;',
       'bluetooth': 'Landroid/bluetooth/BluetoothManager;',
       'storage': 'Landroid/os/storage/StorageManager;',
+      'user': 'Landroid/os/UserManager;',
       'battery': 'Landroid/os/BatteryManager;',
       'batterymanager': 'Landroid/os/BatteryManager;',
       'usb': 'Landroid/hardware/usb/UsbManager;',
@@ -585,6 +587,7 @@ export class JavaVM {
   }
 
   throwException(descriptor, message) {
+    if (DBG.npe) console.error('HOST_THROW', descriptor, message);
     const exception = this.allocateRawObject(descriptor);
     exception.$exceptionMessage = message;
     const rc = this.registry.resolve(descriptor);
@@ -684,6 +687,14 @@ export class JavaVM {
    * 因此 dex 方法、native 方法、构造方法都能被 hook。
    */
   _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
+    if (globalThis.__DBG_B0 && ref.name === 'iterator') {
+      const rp = receiver?.$peer;
+      console.error('ITER', ref.classDesc, 'recv=', this.registry.classNameOf(receiver), 'items=', rp?.items?.length ?? rp?.setItems?.length, 'data=', receiver?.$data?.length);
+    }
+    if (globalThis.__DBG_B0 && ref.classDesc === 'Ln2/q;') {
+      const a0 = args?.[0];
+      console.error('QINVOKE', ref.name, ref.proto.descriptor, 'arg0=', a0 && typeof a0 === 'object' ? JSON.stringify({ cls: this.registry.classNameOf(a0), keys: Object.keys(a0).slice(0, 8), peer: a0.$peer ? Object.keys(a0.$peer).slice(0, 8) : null, items: a0.$peer?.items?.length, data: a0.$data?.length, str: a0.$string }) : String(a0));
+    }
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
     this.invocationCount++;
     // 调用计数只用于调试剖析（DBG_INVSTATS=1）；生产构建里这段会被摇掉。

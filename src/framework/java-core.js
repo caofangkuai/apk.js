@@ -375,15 +375,69 @@ function describeV(v) {
 }
 describeV.c = 0;
 
-function mapKey(value) {
+function classOverridesMethod(vm, value, name, proto) {
+  const descriptor = vm?.registry?.classNameOf?.(value);
+  if (!descriptor || descriptor.length === 1) return false;
+  const visited = new Set();
+  let current = descriptor;
+  while (current && current !== 'Ljava/lang/Object;' && !visited.has(current)) {
+    visited.add(current);
+    const rc = vm.registry.resolve(current);
+    if (!rc) return false;
+    if (rc.dexClass) {
+      const methods = [...(rc.dexClass.virtualMethods || []), ...(rc.dexClass.directMethods || [])];
+      if (methods.some((method) => method.name === name && method.proto?.descriptor === proto)) return true;
+    }
+    if (rc.nativeDef?.methods?.has(name + proto)) return true;
+    current = rc.superDescriptor;
+  }
+  return false;
+}
+
+function mapKey(value, vm) {
   if (value === null || value === undefined) return 'null:';
   if (typeof value === 'number') return Number.isInteger(value) ? 'int:' + (value | 0) : 'num:' + value;
   if (typeof value === 'string') return 'str:' + value;
   if (typeof value === 'boolean') return 'bool:' + value;
   if (isJavaObject(value)) {
+    if (globalThis.__DBG_B0) {
+      const desc = vm?.registry?.classNameOf?.(value);
+      globalThis.__DBG_KEYS ??= new Set();
+      if (desc && !globalThis.__DBG_KEYS.has(desc)) {
+        globalThis.__DBG_KEYS.add(desc);
+        console.error('MAPKEY_DESC', desc);
+      }
+    }
     const peer = value.$peer;
     if (peer && peer.value !== undefined && typeof peer.value !== 'object') return 'num:' + peer.value;
     if (value.$string !== undefined) return 'str:' + value.$string;
+    // 覆写了 hashCode 的类按 Java 值语义做键，否则回落到对象身份。
+    // Firebase 的 Qualified 等值对象都依赖这条规则，漏掉会出现「明明同一个
+    // 依赖却查不到提供方」，最终被误判成循环依赖。
+    if (vm && classOverridesMethod(vm, value, 'hashCode', '()I')) {
+      if (globalThis.__DBG_B0 && String(vm.registry.classNameOf(value)).includes('n2/b0;')) {
+        console.error('B0OVERRIDE', vm.registry.classNameOf(value), value.$valueKey);
+      }
+      if (value.$valueKey === undefined) {
+        let hash = 0;
+        let text = '';
+        try {
+          hash = toInt(vm.invokeByName('hashCode', '()I', value, []));
+        } catch (error) {
+          hash = hashCode(value);
+        }
+        try {
+          text = jsString(vm.invokeByName('toString', '()Ljava/lang/String;', value, []));
+        } catch (error) {
+          text = '';
+        }
+        value.$valueKey = `val:${hash | 0}:${text}`;
+        if (globalThis.__DBG_B0 && String(vm.registry.classNameOf(value)).includes('n2/b0;')) {
+          console.error('B0KEY', vm.registry.classNameOf(value), value.$valueKey);
+        }
+      }
+      return value.$valueKey;
+    }
     if (peer && typeof peer.toString === 'function') {
       const text = peer.toString();
       if (typeof text === 'string' && text !== '[object Object]') return 'str:' + text;
@@ -399,6 +453,22 @@ function mapKey(value) {
   return 'str:' + String(value);
 }
 let mapKeyCounter = 0;
+
+/**
+ * Class.forName：缺失的应用/库类必须抛 ClassNotFoundException，
+ * 否则依赖「反射探测可选类」的库（如 RxJava/AutoDispose 的反射适配器）
+ * 会把不存在的类当成空壳类继续用，随后在调用处 NPE。
+ * 未建模的 android/java/javax/org 类仍按框架类返回空壳。
+ */
+function forNameClass(vm, name) {
+  const text = typeof name === 'string' ? name : name?.$value ?? String(name ?? '');
+  const descriptor = text.startsWith('L') || text.startsWith('[') ? text : `L${text.replace(/\./g, '/')};`;
+  const known = vm.registry.findDexClass(descriptor) || vm.registry.nativeDefs.get(descriptor);
+  if (!known && !/^L(android|java|javax|org|dalvik|sun|libcore)\//.test(descriptor)) {
+    vm.throwException('Ljava/lang/ClassNotFoundException;', descriptorToName(descriptor));
+  }
+  return vm.getClassObject(descriptor);
+}
 
 export const JAVA_CORE_CLASSES = {
   'Ljava/lang/Object;': nativeDef('Ljava/lang/Object;', {
@@ -566,16 +636,8 @@ export const JAVA_CORE_CLASSES = {
   'Ljava/lang/Class;': nativeDef('Ljava/lang/Class;', {
     super: 'Ljava/lang/Object;',
     staticMethods: {
-      'forName(Ljava/lang/String;)Ljava/lang/Class;': (self, [name], vm) => {
-        const text = typeof name === 'string' ? name : name?.$value ?? String(name ?? '');
-        const descriptor = text.startsWith('L') || text.startsWith('[') ? text : `L${text.replace(/\./g, '/')};`;
-        return vm.getClassObject(descriptor);
-      },
-      'forName(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;': (self, [name], vm) => {
-        const text = typeof name === 'string' ? name : name?.$value ?? String(name ?? '');
-        const descriptor = text.startsWith('L') || text.startsWith('[') ? text : `L${text.replace(/\./g, '/')};`;
-        return vm.getClassObject(descriptor);
-      },
+      'forName(Ljava/lang/String;)Ljava/lang/Class;': (self, [name], vm) => forNameClass(vm, name),
+      'forName(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;': (self, [name], vm) => forNameClass(vm, name),
     },
     methods: {
       'getName()Ljava/lang/String;': (self) => self.$name || descriptorToName(self.$descriptor || ''),
@@ -665,10 +727,20 @@ export const JAVA_CORE_CLASSES = {
       },
       'getConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;': (self, [paramTypes], vm) => {
         const result = findConstructor(vm, self.$descriptor, paramTypes, { declaredOnly: true });
+        if (!result) {
+          vm.throwException('Ljava/lang/NoSuchMethodException;',
+            `${descriptorToName(self.$descriptor || '')}${protoDescriptorOf('<init>', paramTypes)}`);
+        }
         return result;
       },
-      'getDeclaredConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;': (self, [paramTypes], vm) =>
-        findConstructor(vm, self.$descriptor, paramTypes, { declaredOnly: true }),
+      'getDeclaredConstructor([Ljava/lang/Class;)Ljava/lang/reflect/Constructor;': (self, [paramTypes], vm) => {
+        const result = findConstructor(vm, self.$descriptor, paramTypes, { declaredOnly: true });
+        if (!result) {
+          vm.throwException('Ljava/lang/NoSuchMethodException;',
+            `${descriptorToName(self.$descriptor || '')}${protoDescriptorOf('<init>', paramTypes)}`);
+        }
+        return result;
+      },
       'getMethod(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;': (self, [name, paramTypes], vm) => {
         const found = findMethod(vm, self.$descriptor, name, paramTypes, { declaredOnly: false, isStatic: false });
         if (!found) {
@@ -826,6 +898,19 @@ export const JAVA_CORE_CLASSES = {
   'Ljava/lang/NumberFormatException;': nativeDef('Ljava/lang/NumberFormatException;', { super: 'Ljava/lang/IllegalArgumentException;' }),
   'Ljava/lang/ArithmeticException;': nativeDef('Ljava/lang/ArithmeticException;', { super: 'Ljava/lang/RuntimeException;' }),
   'Ljava/lang/UnsupportedOperationException;': nativeDef('Ljava/lang/UnsupportedOperationException;', { super: 'Ljava/lang/RuntimeException;' }),
+
+  'Ljava/io/IOException;': nativeDef('Ljava/io/IOException;', { super: 'Ljava/lang/Exception;' }),
+  'Ljava/io/FileNotFoundException;': nativeDef('Ljava/io/FileNotFoundException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/io/EOFException;': nativeDef('Ljava/io/EOFException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/io/InterruptedIOException;': nativeDef('Ljava/io/InterruptedIOException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/io/UnsupportedEncodingException;': nativeDef('Ljava/io/UnsupportedEncodingException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/net/MalformedURLException;': nativeDef('Ljava/net/MalformedURLException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/net/UnknownHostException;': nativeDef('Ljava/net/UnknownHostException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/net/SocketException;': nativeDef('Ljava/net/SocketException;', { super: 'Ljava/io/IOException;' }),
+  'Ljava/net/ConnectException;': nativeDef('Ljava/net/ConnectException;', { super: 'Ljava/net/SocketException;' }),
+  'Ljava/net/SocketTimeoutException;': nativeDef('Ljava/net/SocketTimeoutException;', { super: 'Ljava/io/InterruptedIOException;' }),
+  'Ljava/net/URISyntaxException;': nativeDef('Ljava/net/URISyntaxException;', { super: 'Ljava/lang/Exception;' }),
+  'Ljavax/net/ssl/SSLException;': nativeDef('Ljavax/net/ssl/SSLException;', { super: 'Ljava/io/IOException;' }),
 
   'Ljava/lang/String;': nativeDef('Ljava/lang/String;', {
     super: 'Ljava/lang/Object;',
@@ -1415,6 +1500,26 @@ export const JAVA_CORE_CLASSES = {
   }),
   'Ljava/util/Map;': nativeDef('Ljava/util/Map;', { super: null }),
 };
+
+JAVA_CORE_CLASSES['Ljava/util/Map$Entry;'] = nativeDef('Ljava/util/Map$Entry;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'getKey()Ljava/lang/Object;': (self) => self.key ?? null,
+    'getValue()Ljava/lang/Object;': (self) => self.value ?? null,
+    'setValue(Ljava/lang/Object;)Ljava/lang/Object;': (self, [value]) => {
+      const previous = self.value;
+      self.value = value;
+      if (self.owner?.map && self.mapKey !== undefined) self.owner.map.set(self.mapKey, value);
+      return previous ?? null;
+    },
+    'toString()Ljava/lang/String;': (self) => `${jsString(self.key)}=${jsString(self.value)}`,
+    'hashCode()I': (self) => hashCode(self.key) ^ hashCode(self.value),
+    'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+      const peer = other?.$peer ?? other;
+      return !!peer && mapKey(peer.key, vm) === mapKey(self.key, vm) && mapKey(peer.value, vm) === mapKey(self.value, vm);
+    },
+  },
+});
 
 JAVA_CORE_CLASSES['Ljava/util/LinkedList;'] = nativeDef('Ljava/util/LinkedList;', {
   super: 'Ljava/lang/Object;',
@@ -3587,13 +3692,19 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     '<init>(I)V': (self) => {
       self.setItems = [];
     },
-    'add(Ljava/lang/Object;)Z': (self, [value]) => {
+    'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      if (globalThis.__DBG_B0 && String(vm?.registry?.classNameOf?.(value)).includes('n2/q$b;')) {
+        console.error('HS_ADD', 'size', self.setItems.length, 'idx', self.setItems.indexOf(value));
+      }
       if (self.setItems.includes(value)) return false;
       self.setItems.push(value);
       return true;
     },
-    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
+    'remove(Ljava/lang/Object;)Z': (self, [value], vm) => {
       const index = self.setItems.indexOf(value);
+      if (globalThis.__DBG_B0 && String(vm?.registry?.classNameOf?.(value)).includes('n2/q$b;')) {
+        console.error('HS_REMOVE', 'size', self.setItems.length, 'idx', index);
+      }
       if (index < 0) return false;
       self.setItems.splice(index, 1);
       return true;
@@ -4266,37 +4377,65 @@ function mapMethods() {
     '<init>(Ljava/util/Map;)V': (self, [other]) => {
       self.map = new Map(other?.map || []);
     },
-    'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
-      const k = mapKey(key);
+    'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
+      if (globalThis.__DBG_B0) {
+        const d = key && typeof key === 'object' ? (vm?.registry?.classNameOf?.(key) || String(key)) : typeof key + ':' + key;
+        globalThis.__PUTBUF ??= [];
+        globalThis.__PUTBUF.push(d + '#size' + self.map.size);
+        if (globalThis.__PUTBUF.length > 80) globalThis.__PUTBUF.shift();
+        if (!globalThis.__PUTEXIT && typeof process !== 'undefined') {
+          globalThis.__PUTEXIT = true;
+          process.on('exit', () => console.error('PUTTAIL', JSON.stringify(globalThis.__PUTBUF)));
+        }
+      }
+      const k = mapKey(key, vm);
       if (!self.rawKeys) self.rawKeys = new Map();
       const previous = self.map.get(k);
       self.map.set(k, value);
       self.rawKeys.set(k, key);
       return previous ?? null;
     },
-    'putAll(Ljava/util/Map;)V': (self, [other]) => {
+    'putAll(Ljava/util/Map;)V': (self, [other], vm) => {
       if (!other || !other.map) return;
       if (!self.rawKeys) self.rawKeys = new Map();
+      if (other.rawKeys) {
+        for (const [k, v] of other.map) {
+          self.map.set(k, v);
+          self.rawKeys.set(k, other.rawKeys.get(k) ?? k);
+        }
+        return;
+      }
       for (const [k, v] of other.map) {
-        self.map.set(k, v);
-        self.rawKeys.set(k, other.rawKeys?.get(k) ?? k);
+        const canonical = mapKey(k, vm);
+        self.map.set(canonical, v);
+        self.rawKeys.set(canonical, k);
       }
     },
-    'putIfAbsent(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
-      const k = mapKey(key);
+    'putIfAbsent(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
+      const k = mapKey(key, vm);
       if (self.map.has(k) && self.map.get(k) != null) return self.map.get(k);
+      if (!self.rawKeys) self.rawKeys = new Map();
       self.map.set(k, value);
+      self.rawKeys.set(k, key);
       return null;
     },
-    'getOrDefault(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, fallback]) => {
-      const value = self.map.get(mapKey(key));
+    'getOrDefault(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, fallback], vm) => {
+      const value = self.map.get(mapKey(key, vm));
       return value == null ? fallback : value;
     },
-    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => self.map.get(mapKey(key)) ?? null,
-    'containsKey(Ljava/lang/Object;)Z': (self, [key]) => self.map.has(mapKey(key)),
-    'containsValue(Ljava/lang/Object;)Z': (self, [value]) => {
-      const target = mapKey(value);
-      for (const v of self.map.values()) if (mapKey(v) === target) return true;
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => self.map.get(mapKey(key, vm)) ?? null,
+    'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) => {
+      if (globalThis.__DBG_B0) {
+        const d = key && typeof key === 'object' ? (vm?.registry?.classNameOf?.(key) || String(key)) : typeof key + ':' + key;
+        if (String(d).includes('n2/') || String(d).includes('q$')) {
+          console.error('CK', d, 'mapSize', self.map.size, 'vkey', mapKey(key, vm));
+        }
+      }
+      return self.map.has(mapKey(key, vm));
+    },
+    'containsValue(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      const target = mapKey(value, vm);
+      for (const v of self.map.values()) if (mapKey(v, vm) === target) return true;
       return false;
     },
     'keySet()Ljava/util/Set;': (self, _args, vm) => {
@@ -4319,16 +4458,37 @@ function mapMethods() {
         toArray: () => values.slice(),
       });
     },
-    'remove(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => {
-      const k = mapKey(key);
+    'entrySet()Ljava/util/Set;': (self, _args, vm) => {
+      const entries = [...self.map.entries()].map(([key, value]) => {
+        const entry = vm.allocateRawObject('Ljava/util/Map$Entry;');
+        entry.$peer = {
+          key: self.rawKeys && self.rawKeys.has(key) ? self.rawKeys.get(key) : key,
+          value,
+          owner: self,
+          mapKey: key,
+        };
+        return entry;
+      });
+      return vm.wrapPeer({
+        items: entries,
+        constructor: { $descriptor: 'Ljava/util/Set;' },
+        size: () => entries.length,
+        iterator: () => ({ hasNext: () => entries.length > 0, next: () => entries.shift() }),
+        toArray: () => entries.slice(),
+      });
+    },
+    'remove(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => {
+      const k = mapKey(key, vm);
       const previous = self.map.get(k);
       self.map.delete(k);
+      self.rawKeys?.delete(k);
       return previous ?? null;
     },
     'size()I': (self) => self.map.size,
     'isEmpty()Z': (self) => self.map.size === 0,
     'clear()V': (self) => {
       self.map = new Map();
+      self.rawKeys = new Map();
     },
   };
 }
@@ -5032,6 +5192,241 @@ JAVA_CORE_CLASSES['Ljava/io/File;'] = nativeDef('Ljava/io/File;', {
     ['separator:Ljava/lang/String;', '/'],
     ['pathSeparator:Ljava/lang/String;', ':'],
   ]),
+});
+
+function parseUrlParts(text) {
+  const raw = String(text ?? '');
+  const match = /^([a-zA-Z][a-zA-Z0-9+.\-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/.exec(raw);
+  if (!match) {
+    return { protocol: '', authority: '', host: '', port: -1, path: raw, file: raw, query: null, fragment: null };
+  }
+  const protocol = match[1].toLowerCase();
+  const authority = match[2] || '';
+  const path = match[3] || '';
+  const query = match[4] === undefined ? null : match[4];
+  const fragment = match[5] === undefined ? null : match[5];
+  let host = authority;
+  let port = -1;
+  const at = authority.lastIndexOf('@');
+  const hostPort = at >= 0 ? authority.slice(at + 1) : authority;
+  const colon = hostPort.lastIndexOf(':');
+  if (colon > 0 && /^\d+$/.test(hostPort.slice(colon + 1))) {
+    host = hostPort.slice(0, colon);
+    port = parseInt(hostPort.slice(colon + 1), 10);
+  } else {
+    host = hostPort;
+  }
+  const file = query === null ? path : `${path}?${query}`;
+  return { protocol, authority, host, port, path, file, query, fragment };
+}
+
+function urlTextOf(url) {
+  if (url === null || url === undefined) return '';
+  if (typeof url === 'string') return url;
+  if (typeof url.text === 'string') return url.text;
+  return jsString(url);
+}
+
+function makeUrlConnection(vm, url) {
+  const text = urlTextOf(url);
+  const parts = parseUrlParts(text);
+  const secure = parts.protocol === 'https';
+  const object = vm.allocateRawObject(secure ? 'Ljavax/net/ssl/HttpsURLConnection;' : 'Ljava/net/HttpURLConnection;');
+  object.$peer = {
+    vm,
+    url: text,
+    parts,
+    method: 'GET',
+    headers: new Map(),
+    connected: false,
+  };
+  return object;
+}
+
+JAVA_CORE_CLASSES['Ljava/net/URL;'] = nativeDef('Ljava/net/URL;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/io/Serializable;'],
+  ctor: class URLPeer {
+    constructor(vm) {
+      this.vm = vm;
+      this.text = '';
+      this.parts = parseUrlParts('');
+    }
+  },
+  methods: {
+    '<init>(Ljava/lang/String;)V': (self, [text]) => {
+      self.text = jsString(text);
+      self.parts = parseUrlParts(self.text);
+    },
+    '<init>(Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V': (self, [protocol, host, port, file]) => {
+      const suffix = Number(port) > 0 ? `:${port | 0}` : '';
+      self.text = `${jsString(protocol)}://${jsString(host)}${suffix}/${String(jsString(file)).replace(/^\/+/, '')}`;
+      self.parts = parseUrlParts(self.text);
+    },
+    '<init>(Ljava/net/URL;Ljava/lang/String;)V': (self, [base, file]) => {
+      const text = urlTextOf(base);
+      self.text = jsString(file).startsWith('/')
+        ? `${text.replace(/^(https?:\/\/[^/]+).*$/, '$1')}${jsString(file)}`
+        : `${text.replace(/\/[^/]*$/, '/')}${jsString(file)}`;
+      self.parts = parseUrlParts(self.text);
+    },
+    'openConnection()Ljava/net/URLConnection;': (self, _args, vm) => makeUrlConnection(vm, self),
+    'openStream()Ljava/io/InputStream;': (self, _args, vm) => {
+      vm.throwException('Ljava/io/IOException;', `Unable to open stream: ${self.text}`);
+      return null;
+    },
+    'getProtocol()Ljava/lang/String;': (self) => self.parts.protocol,
+    'getHost()Ljava/lang/String;': (self) => self.parts.host,
+    'getAuthority()Ljava/lang/String;': (self) => self.parts.authority,
+    'getPort()I': (self) => self.parts.port,
+    'getDefaultPort()I': (self) => (self.parts.protocol === 'https' ? 443 : self.parts.protocol === 'http' ? 80 : -1),
+    'getPath()Ljava/lang/String;': (self) => self.parts.path,
+    'getFile()Ljava/lang/String;': (self) => self.parts.file,
+    'getQuery()Ljava/lang/String;': (self) => self.parts.query,
+    'getRef()Ljava/lang/String;': (self) => self.parts.fragment,
+    'getUserInfo()Ljava/lang/String;': (self) => {
+      const at = String(self.parts.authority).lastIndexOf('@');
+      return at >= 0 ? self.parts.authority.slice(0, at) : null;
+    },
+    'toURI()Ljava/net/URI;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/net/URI;');
+      object.$peer = { vm, text: self.text, parts: self.parts };
+      return object;
+    },
+    'toString()Ljava/lang/String;': (self) => self.text,
+    'toExternalForm()Ljava/lang/String;': (self) => self.text,
+    'hashCode()I': (self) => hashString(self.text),
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => jsString(other?.text ?? other) === self.text,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/net/URI;'] = nativeDef('Ljava/net/URI;', {
+  super: 'Ljava/lang/Object;',
+  ctor: class URIPeer {
+    constructor(vm) {
+      this.vm = vm;
+      this.text = '';
+      this.parts = parseUrlParts('');
+    }
+  },
+  methods: {
+    '<init>(Ljava/lang/String;)V': (self, [text]) => {
+      self.text = jsString(text);
+      self.parts = parseUrlParts(self.text);
+    },
+    'toString()Ljava/lang/String;': (self) => self.text,
+    'toASCIIString()Ljava/lang/String;': (self) => self.text,
+    'toURL()Ljava/net/URL;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/net/URL;');
+      object.$peer = { vm, text: self.text, parts: self.parts };
+      return object;
+    },
+    'getScheme()Ljava/lang/String;': (self) => self.parts.protocol || null,
+    'getHost()Ljava/lang/String;': (self) => self.parts.host || null,
+    'getPort()I': (self) => self.parts.port,
+    'getPath()Ljava/lang/String;': (self) => self.parts.path,
+    'getRawPath()Ljava/lang/String;': (self) => self.parts.path,
+    'getQuery()Ljava/lang/String;': (self) => self.parts.query,
+    'getFragment()Ljava/lang/String;': (self) => self.parts.fragment,
+    'isAbsolute()Z': (self) => !!self.parts.protocol,
+    'hashCode()I': (self) => hashString(self.text),
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => jsString(other?.text ?? other) === self.text,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/net/URLConnection;'] = nativeDef('Ljava/net/URLConnection;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'setDoInput(Z)V': (self, [value]) => { self.doInput = !!value; },
+    'setDoOutput(Z)V': (self, [value]) => { self.doOutput = !!value; },
+    'getDoInput()Z': (self) => self.doInput !== false,
+    'getDoOutput()Z': (self) => !!self.doOutput,
+    'setUseCaches(Z)V': (self, [value]) => { self.useCaches = !!value; },
+    'getUseCaches()Z': (self) => !!self.useCaches,
+    'setConnectTimeout(I)V': (self, [value]) => { self.connectTimeout = value | 0; },
+    'getConnectTimeout()I': (self) => self.connectTimeout | 0,
+    'setReadTimeout(I)V': (self, [value]) => { self.readTimeout = value | 0; },
+    'getReadTimeout()I': (self) => self.readTimeout | 0,
+    'setRequestProperty(Ljava/lang/String;Ljava/lang/String;)V': (self, [key, value]) => {
+      self.headers?.set(jsString(key), jsString(value));
+    },
+    'addRequestProperty(Ljava/lang/String;Ljava/lang/String;)V': (self, [key, value]) => {
+      self.headers?.set(jsString(key), jsString(value));
+    },
+    'getRequestProperty(Ljava/lang/String;)Ljava/lang/String;': (self, [key]) => self.headers?.get(jsString(key)) ?? null,
+    'connect()V': (_self, _args, vm) => {
+      vm.throwException('Ljava/io/IOException;', 'Unable to resolve host: no network in simulator');
+    },
+    'disconnect()V': () => undefined,
+    'getOutputStream()Ljava/io/OutputStream;': (_self, _args, vm) => {
+      vm.throwException('Ljava/io/IOException;', 'Unable to resolve host: no network in simulator');
+      return null;
+    },
+    'getInputStream()Ljava/io/InputStream;': (_self, _args, vm) => {
+      vm.throwException('Ljava/io/IOException;', 'Unable to resolve host: no network in simulator');
+      return null;
+    },
+    'getErrorStream()Ljava/io/InputStream;': () => null,
+    'getHeaderField(Ljava/lang/String;)Ljava/lang/String;': (self, [key]) => self.headers?.get(jsString(key)) ?? null,
+    'getHeaderFields()Ljava/util/Map;': (_self, _args, vm) => makeMap(vm),
+    'getContentLength()I': () => -1,
+    'getContentLengthLong()J': () => BigInt(-1),
+    'getContentType()Ljava/lang/String;': () => null,
+    'getContentEncoding()Ljava/lang/String;': () => null,
+    'getURL()Ljava/net/URL;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/net/URL;');
+      object.$peer = { vm, text: self.url || '', parts: self.parts || parseUrlParts(self.url || '') };
+      return object;
+    },
+    'usingProxy()Z': () => false,
+    'getPermission()Ljava/security/Permission;': () => null,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/net/HttpURLConnection;'] = nativeDef('Ljava/net/HttpURLConnection;', {
+  super: 'Ljava/net/URLConnection;',
+  methods: {
+    'setRequestMethod(Ljava/lang/String;)V': (self, [method]) => { self.method = jsString(method).toUpperCase(); },
+    'getRequestMethod()Ljava/lang/String;': (self) => self.method || 'GET',
+    'getResponseCode()I': (_self, _args, vm) => {
+      vm.throwException('Ljava/io/IOException;', 'Unable to resolve host: no network in simulator');
+      return -1;
+    },
+    'getResponseMessage()Ljava/lang/String;': () => null,
+    'getInstanceFollowRedirects()Z': (self) => self.followRedirects !== false,
+    'setInstanceFollowRedirects(Z)V': (self, [value]) => { self.followRedirects = !!value; },
+    'setFixedLengthStreamingMode(I)V': (self, [value]) => { self.fixedLength = value | 0; },
+    'setFixedLengthStreamingMode(J)V': (self, [value]) => { self.fixedLength = Number(value) || 0; },
+    'setChunkedStreamingMode(I)V': (self, [value]) => { self.chunkedLength = value | 0; },
+  },
+  staticFields: new Map([
+    ['HTTP_OK:I', 200],
+    ['HTTP_CREATED:I', 201],
+    ['HTTP_NO_CONTENT:I', 204],
+    ['HTTP_MOVED_PERM:I', 301],
+    ['HTTP_MOVED_TEMP:I', 302],
+    ['HTTP_NOT_MODIFIED:I', 304],
+    ['HTTP_BAD_REQUEST:I', 400],
+    ['HTTP_UNAUTHORIZED:I', 401],
+    ['HTTP_FORBIDDEN:I', 403],
+    ['HTTP_NOT_FOUND:I', 404],
+    ['HTTP_INTERNAL_ERROR:I', 500],
+  ]),
+});
+
+JAVA_CORE_CLASSES['Ljavax/net/ssl/HttpsURLConnection;'] = nativeDef('Ljavax/net/ssl/HttpsURLConnection;', {
+  super: 'Ljava/net/HttpURLConnection;',
+  methods: {
+    'getCipherSuite()Ljava/lang/String;': () => 'TLS_AES_256_GCM_SHA384',
+    'getServerCertificates()[Ljava/security/cert/Certificate;': (_self, _args, vm) =>
+      vm.newArray('[Ljava/security/cert/Certificate;', 0, null),
+    'getSSLSocketFactory()Ljavax/net/ssl/SSLSocketFactory;': () => null,
+    'setSSLSocketFactory(Ljavax/net/ssl/SSLSocketFactory;)V': () => undefined,
+    'setHostnameVerifier(Ljavax/net/ssl/HostnameVerifier;)V': () => undefined,
+    'getHostnameVerifier()Ljavax/net/ssl/HostnameVerifier;': () => null,
+    'setDefaultHostnameVerifier(Ljavax/net/ssl/HostnameVerifier;)V': () => undefined,
+    'getDefaultHostnameVerifier()Ljavax/net/ssl/HostnameVerifier;': () => null,
+  },
 });
 
 JAVA_CORE_CLASSES['Landroid/os/storage/StorageManager;'] = nativeDef('Landroid/os/storage/StorageManager;', {

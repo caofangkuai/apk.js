@@ -1,5 +1,6 @@
 import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime/vm.js';
 import { floatBitsToNumber, numberToFloatBits, toInt } from '../runtime/values.js';
+import { applyCompatMethods } from './compat.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
 import { JAVA_CORE_CLASSES, deviceCapabilities, hardwareIdentity, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
 import {
@@ -54,6 +55,7 @@ import {
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
 import { DRAWABLE_CLASSES, OUTLINE_CLASSES, SHADER_CLASSES, drawableObject } from './drawables.js';
+import { WEBKIT_CLASSES } from './webkit.js';
 import { OPENGL_CLASSES } from './opengl.js';
 
 export const FRAMEWORK_CLASSES = {};
@@ -227,6 +229,15 @@ function runShellCommand(command) {
     return text.slice(5).trim().replace(/["']/g, '') + '\n';
   }
   return '';
+}
+
+class MessagePeer {
+  constructor(vm) {
+    this.vm = vm;
+    this.what = 0;
+    this.obj = null;
+    this.callback = null;
+  }
 }
 
 const RUNTIME_SINGLETON = { current: null };
@@ -1186,7 +1197,7 @@ function syncDexViewField(self, vm, name, type, value) {
   } catch {}
 }
 
-function buildFrameworkDefinitions(vm) {
+export function buildFrameworkDefinitions(vm) {
   const defs = [];
   defs.push(
     nativeDef('Landroid/app/Activity;', {
@@ -1559,7 +1570,10 @@ function buildFrameworkDefinitions(vm) {
         if (typeof styleId === 'number' && styleId) loadThemeFromStyleId(vm, styleId >>> 0);
       },
       '<init>(Landroid/content/Context;Landroid/content/res/Resources$Theme;)V': (self, [context, theme]) => { self.base = context ?? null; self.theme = theme ?? null; },
-      'getTheme()Landroid/content/res/Resources$Theme;': (self) => self.theme,
+      'getTheme()Landroid/content/res/Resources$Theme;': (self, _args, vm) => {
+        if (!self.theme) self.theme = getThemeObject(vm);
+        return self.theme;
+      },
       'setTheme(I)V': () => undefined,
     },
   }));
@@ -2065,6 +2079,25 @@ function buildFrameworkDefinitions(vm) {
           return true;
         },
         'obtainMessage()Landroid/os/Message;': (self, _args, vm) => new MessagePeer(vm),
+        'obtainMessage(I)Landroid/os/Message;': (self, [what], vm) => {
+          const message = new MessagePeer(vm);
+          message.what = what | 0;
+          return message;
+        },
+        'obtainMessage(ILjava/lang/Object;)Landroid/os/Message;': (self, [what, obj], vm) => {
+          const message = new MessagePeer(vm);
+          message.what = what | 0;
+          message.obj = obj ?? null;
+          return message;
+        },
+        'obtainMessage(IIILjava/lang/Object;)Landroid/os/Message;': (self, [what, arg1, arg2, obj], vm) => {
+          const message = new MessagePeer(vm);
+          message.what = what | 0;
+          message.arg1 = arg1 | 0;
+          message.arg2 = arg2 | 0;
+          message.obj = obj ?? null;
+          return message;
+        },
         'handleMessage(Landroid/os/Message;)V': () => undefined,
         'getLooper()Landroid/os/Looper;': (self) => self.vm.mainLooper,
       },
@@ -2074,20 +2107,49 @@ function buildFrameworkDefinitions(vm) {
   defs.push(
     nativeDef('Landroid/os/Message;', {
       super: 'Ljava/lang/Object;',
-      ctor: class MessagePeer {
-        constructor(vm) {
-          this.vm = vm;
-          this.what = 0;
-          this.obj = null;
-          this.callback = null;
-        }
-      },
+      ctor: MessagePeer,
       methods: {
         'toString()Ljava/lang/String;': (self) => `Message{what=${self.what}}`,
+        'setAsynchronous(Z)V': (self, [value]) => { self.asynchronous = !!value; },
+        'isAsynchronous()Z': (self) => !!self.asynchronous,
+        'getTarget()Landroid/os/Handler;': (self) => self.target ?? null,
+        'setTarget(Landroid/os/Handler;)V': (self, [handler]) => { self.target = handler ?? null; },
+        'getWhen()J': (self) => BigInt(Number(self.when) || 0),
+        'sendToTarget()V': (self) => { self.target?.sendMessage?.(self); },
+        'recycle()V': () => undefined,
+        'copyFrom(Landroid/os/Message;)V': (self, [other]) => Object.assign(self, other || {}),
       },
       staticMethods: {
         'obtain()Landroid/os/Message;': (_self, _args, vm) => new MessagePeer(vm),
-        'obtain(Landroid/os/Handler;)Landroid/os/Message;': (_self, [handler], vm) => new MessagePeer(vm),
+        'obtain(Landroid/os/Handler;)Landroid/os/Message;': (_self, [handler], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          return message;
+        },
+        'obtain(Landroid/os/Handler;Ljava/lang/Runnable;)Landroid/os/Message;': (_self, [handler, callback], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          message.callback = callback ?? null;
+          return message;
+        },
+        'obtain(Landroid/os/Message;)Landroid/os/Message;': (_self, [source], vm) => {
+          const message = new MessagePeer(vm);
+          if (source) Object.assign(message, source);
+          return message;
+        },
+        'obtain(Landroid/os/Handler;I)Landroid/os/Message;': (_self, [handler, what], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          message.what = what | 0;
+          return message;
+        },
+        'obtain(Landroid/os/Handler;ILjava/lang/Object;)Landroid/os/Message;': (_self, [handler, what, obj], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          message.what = what | 0;
+          message.obj = obj ?? null;
+          return message;
+        },
       },
     })
   );
@@ -7520,6 +7582,81 @@ function vmShowChild(self, index) {
         'openDevice(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;': () => null,
       },
     }),
+    nativeDef('Landroid/os/UserHandle;', {
+      super: 'Ljava/lang/Object;',
+      interfaces: ['Landroid/os/Parcelable;'],
+      ctor: class UserHandlePeer {
+        constructor(vm, id) {
+          this.vm = vm;
+          this.id = Number(id) || 0;
+        }
+      },
+      methods: {
+        '<init>(I)V': (self, [id]) => { self.id = id | 0; },
+        'getIdentifier()I': (self) => self.id | 0,
+        'hashCode()I': (self) => self.id | 0,
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => (other?.id | 0) === (self.id | 0),
+        'toString()Ljava/lang/String;': (self) => `UserHandle{${self.id | 0}}`,
+        'describeContents()I': () => 0,
+      },
+      staticMethods: {
+        'myUserId()I': () => 0,
+        'getUserHandleForUid(I)Landroid/os/UserHandle;': (_self, _args, vm) => {
+          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
+          handle.$peer = { vm, id: 0 };
+          return handle;
+        },
+      },
+      staticFields: new Map([
+        ['USER_OWNER:Landroid/os/UserHandle;', 0],
+        ['USER_CURRENT:Landroid/os/UserHandle;', 0],
+        ['USER_ALL:Landroid/os/UserHandle;', -1],
+      ]),
+    }),
+    nativeDef('Landroid/os/UserManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'isUserUnlocked()Z': () => true,
+        'isUserUnlocked(Landroid/os/UserHandle;)Z': () => true,
+        'isUserUnlocked(I)Z': () => true,
+        'isManagedProfile()Z': () => false,
+        'isManagedProfile(Landroid/os/UserHandle;)Z': () => false,
+        'isSystemUser()Z': () => true,
+        'isPrimaryUser()Z': () => true,
+        'isAdminUser()Z': () => true,
+        'isDemoUser()Z': () => false,
+        'isUserAGoat()Z': () => false,
+        'isLinkedUser()Z': () => false,
+        'isGuestUser()Z': () => false,
+        'getUserCount()I': () => 1,
+        'getUserName()Ljava/lang/String;': () => 'apk.js',
+        'getSerialNumberForUser(Landroid/os/UserHandle;)J': () => BigInt(0),
+        'getUserForSerialNumber(J)Landroid/os/UserHandle;': (_self, _args, vm) => {
+          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
+          handle.$peer = { vm, id: 0 };
+          return handle;
+        },
+        'getProfileParent(Landroid/os/UserHandle;)Landroid/os/UserHandle;': () => null,
+        'getUserHandle()Landroid/os/UserHandle;': (_self, _args, vm) => {
+          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
+          handle.$peer = { vm, id: 0 };
+          return handle;
+        },
+        'getUsers()Ljava/util/List;': (_self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/ArrayList;');
+          const peer = { items: [] };
+          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
+          handle.$peer = { vm, id: 0 };
+          peer.items.push(handle);
+          object.$peer = Object.assign({ constructor: { $descriptor: 'Ljava/util/ArrayList;' } }, peer);
+          return object;
+        },
+        'getApplicationRestrictions(Ljava/lang/String;)Landroid/os/Bundle;': () => null,
+      },
+      staticMethods: {
+        'get(Landroid/content/Context;)Landroid/os/UserManager;': (_self, _args, vm) => vm.getSystemService?.('user') ?? null,
+      },
+    }),
     );
 
   defs.push(
@@ -7723,6 +7860,10 @@ function vmShowChild(self, index) {
         'getDimensionPixelSize(I)I': (self, [resId], vm) => vm.resources.getDimensionPixelSize(resId >>> 0),
         'getDimensionPixelOffset(I)I': (self, [resId], vm) => Math.round(vm.resources.getDimensionPixelSize(resId >>> 0)),
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [resId], vm) => drawableObject(vm, vm.resources.getDrawable(resId >>> 0)),
+        'newTheme()Landroid/content/res/Resources$Theme;': (self, _args, vm) => {
+          vm.resources?.newTheme?.();
+          return getThemeObject(vm);
+        },
         'getLayout(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getXml(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getValue(ILandroid/util/TypedValue;Z)V': (self, [resId, out], vm) => {
@@ -7869,10 +8010,12 @@ function vmShowChild(self, index) {
   defs.push(...Object.values(OUTLINE_CLASSES));
   defs.push(...Object.values(SHADER_CLASSES));
   defs.push(...Object.values(DRAWABLE_CLASSES));
+  defs.push(...Object.values(WEBKIT_CLASSES));
   defs.push(...coreGraphicDefs());
   defs.push(...cryptoDefs());
   defs.push(...settingsDefs());
   defs.push(...audioDefs());
+  applyCompatMethods(defs);
   return defs;
 }
 
