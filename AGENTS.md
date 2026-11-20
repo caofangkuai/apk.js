@@ -165,7 +165,9 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，最新 HEAD 以 `git log -1` 为准。
+- 分支 `main`，已与 `origin/main` 同步（本轮结束时 HEAD = `4b82e2c`），无需再补推。
+- TextInputLayout 浮动标签这条线**已闭环**：样例 APK 能画出输入框，底色是正确的主题色（详见下方「洋红底色已修复」）。
+- 推送认证注意：GitHub 不接受 `用户名:token` 形式（会返回 401），要用 `x-access-token:token` 作为凭据，或写进 `~/.git-credentials` 的 `https://x-access-token:<token>@github.com` 行配合 `git config credential.helper store`。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
 - 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
