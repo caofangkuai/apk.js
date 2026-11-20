@@ -334,7 +334,7 @@ npm run site
    - **再更正**（2026-11-20 末次复核）：去掉 `--no-static-lib-packages` 重新 link，**并没有**出现 `SearchView` styleable 冲突（此前的推断是错的），但 `abc_vector_test` 在主包 R 与 `androidx.appcompat.resources` R 里**仍为 0**。已确认该资源确实编译进了 `dep-3.zip`（`drawable_abc_vector_test.xml.flat`），主包 R 也含这个符号（共 7172 个常量）——只是值为 0。
    - 也就是说：`--extra-packages` 生成的是主包 R 的**副本**（换包名），并不是各库自己的符号表；库资源的 id 在这一链路里拿不到有效值。要正确产出，需要真正的库级资源发布（Gradle 的 `processResources`/`generateRClass`）。
    - **最终更正（务必读）**（2026-11-20）：前面几条关于「R 里 id 为 0」的判断**全部是误报**。原因是我用 `grep -o "符号=[0-9]*"` 统计，遇到 `=0x7f070076` 时会在 `0` 处截断，于是看起来像 0。重新用 `=0x[0-9a-f]*` 匹配后确认：`abc_vector_test=0x7f070076`，**主包 R 与 `androidx.appcompat.resources` 的 R 都是正确值**，`--extra-packages` 完全能用。
-   - 因此构建脚本的正确配置就是： 一次（不加 `--static-lib`），`--extra-packages` 里列出 `androidx.appcompat:androidx.appcompat.resources:com.google.android.material`，再把这些 R 类一起编译进 dex。已验证 `R$drawable` 能拿到 dexClass。
+   - 因此构建脚本的正确配置就是：`aapt2 link` 一次（不加 `--static-lib`），`--extra-packages` 里列出 `androidx.appcompat:androidx.appcompat.resources:com.google.android.material`，再把这些 R 类一起编译进 dex。已验证 `R$drawable` 能拿到 dexClass。
    - 但即使如此，`TextInputLayout` 的 `endLayout` 仍为 null，`addView` 派发仍报「调用 getEndIconMode 时对象为空」。说明卡点**不在资源、也不在 R 类**，而在 `EndCompoundLayout` 构造内部——这需要继续按 DEX 侧逻辑排查，与构建管线无关。
    - 教训：统计型 grep 必须用完整模式（`0x[0-9a-f]*`），否则会把十六进制值误读成 0。本文件此前三条基于该误读的结论已作废。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
