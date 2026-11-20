@@ -1,4 +1,4 @@
-import { STATE, colorStateListColor, drawDrawable, drawablePadding, outlineRadius, setDrawableBounds, stateSetFor } from './drawables.js';
+import { STATE, colorOf, colorStateListColor, drawDrawable, drawablePadding, outlineRadius, setDrawableBounds, stateSetFor } from './drawables.js';
 
 function viewObjectForOutline(vm, view) {
   const object = vm.allocateRawObject('Landroid/view/View;');
@@ -36,6 +36,39 @@ export const GONE_VALUES = new Set([2, 8]);
 
 export function isGone(view) {
   return GONE_VALUES.has(view?.visibility);
+}
+
+// Material 的 elevation overlay 曲线：叠层透明度按 elevation 取 8 档。
+const ELEVATION_OVERLAY_ALPHAS = [0, 0.05, 0.07, 0.08, 0.09, 0.11, 0.12, 0.14, 0.15];
+
+export function elevationOverlayAlpha(elevation) {
+  const z = Number(elevation) || 0;
+  if (z <= 0) return 0;
+  const step = Math.min(ELEVATION_OVERLAY_ALPHAS.length - 1, Math.max(1, Math.round(z / 1.5)));
+  return ELEVATION_OVERLAY_ALPHAS[step];
+}
+
+/**
+ * 主题叠层色可能是颜色整数、颜色字符串，或资源引用 id（主题里的 `?attr/xxx`
+ * 会以 id 形式存进 `$attrReferences`）。引用要先查资源表，查不到不能当颜色用。
+ */
+function resolveThemeOverlayColor(vm, value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number') return colorOf(vm, value, null);
+  const id = value >>> 0;
+  let resolved;
+  try {
+    resolved = vm?.resources?.resolve?.(id);
+  } catch (_error) {
+    resolved = null;
+  }
+  if (typeof resolved === 'number') return resolved >>> 0;
+  if (resolved && typeof resolved === 'object' && typeof resolved.color === 'number') {
+    return resolved.color >>> 0;
+  }
+  const pkg = id >>> 24;
+  if (pkg === 0x7f || pkg === 0x01 || pkg === 0x02) return null;
+  return id;
 }
 
 function effectiveLayoutParams(child) {
@@ -765,25 +798,52 @@ export class View {
   }
 
   /**
-   * Material 的 elevation overlay：暗色主题下，视图像素颜色会随 elevation 提高而
-   * 叠加一层白色 alpha，用 8 档曲线（Material 3 的 overlay 值）表现层级。
-   * 浅色主题不叠加，保持背景原色。
+   * Material 的 ElevationOverlayProvider 从主题读两个属性决定叠层：
+   * - `elevationOverlayEnabled`：是否启用。未配置时退回旧行为（暗色启用、浅色不启用）。
+   * - `elevationOverlayColor`：叠层颜色。未配置时暗色主题用白色近似，浅色不叠层。
+   * 返回 null 表示当前视图不应叠层。
+   */
+  elevationOverlayTint() {
+    const theme = this.$vm?.themeAttributes || this.vm?.themeAttributes || null;
+    if (!theme) return null;
+    const enabled = theme.elevationOverlayEnabled;
+    if (enabled === false || enabled === 'false') return null;
+    if (enabled === undefined && theme.isLightTheme !== false) return null;
+    const refs = theme.$attrReferences || null;
+    const configured =
+      Object.prototype.hasOwnProperty.call(theme, 'elevationOverlayColor') ||
+      (refs !== null && Object.prototype.hasOwnProperty.call(refs, 'elevationOverlayColor'));
+    if (!configured) {
+      return theme.isLightTheme === false ? { color: 0xffffffff } : null;
+    }
+    const vm = this.vm || this.$vm || null;
+    const source = Object.prototype.hasOwnProperty.call(theme, 'elevationOverlayColor')
+      ? theme.elevationOverlayColor
+      : refs.elevationOverlayColor;
+    const resolved = resolveThemeOverlayColor(vm, source);
+    // 配了属性但解析不到颜色时仍按暗色白叠层兜底，避免整体失去层级感。
+    if (resolved === null) return theme.isLightTheme === false ? { color: 0xffffffff } : null;
+    // 显式透明色在 Material 里等同于「不叠加」。
+    if ((resolved >>> 24) === 0) return null;
+    return { color: resolved >>> 0 };
+  }
+
+  /**
+   * Material 的 elevation overlay：视图像素颜色随 elevation 提高叠加一层主题叠层色，
+   * 默认暗色主题叠白、浅色主题不叠；应用可通过主题属性自定义叠层色。
    */
   elevationOverlayColor(baseColor, elevation = this.elevation) {
     const color = baseColor >>> 0;
-    const z = Number(elevation) || 0;
-    if (z <= 0) return color;
-    const theme = this.$vm?.themeAttributes || this.vm?.themeAttributes || null;
-    if (!theme || theme.isLightTheme !== false) return color;
-    const levels = [0, 0.05, 0.07, 0.08, 0.09, 0.11, 0.12, 0.14, 0.15];
-    const step = Math.min(levels.length - 1, Math.max(1, Math.round(z / 1.5)));
-    const alpha = levels[step];
-    const blend = (channel) => Math.round(channel + (255 - channel) * alpha) & 0xff;
+    const alpha = elevationOverlayAlpha(elevation);
+    if (alpha <= 0) return color;
+    const tint = this.elevationOverlayTint();
+    if (!tint) return color;
+    const blend = (base, top) => Math.round(base + (top - base) * alpha) & 0xff;
     return (
-      ((blend((color >>> 24) & 0xff) << 24) |
-        (blend((color >>> 16) & 0xff) << 16) |
-        (blend((color >>> 8) & 0xff) << 8) |
-        blend(color & 0xff)) >>>
+      ((blend((color >>> 24) & 0xff, (tint.color >>> 24) & 0xff) << 24) |
+        (blend((color >>> 16) & 0xff, (tint.color >>> 16) & 0xff) << 16) |
+        (blend((color >>> 8) & 0xff, (tint.color >>> 8) & 0xff) << 8) |
+        blend(color & 0xff, tint.color & 0xff)) >>>
       0
     );
   }
@@ -1621,22 +1681,22 @@ export class View {
   }
 
   /**
-   * 暗色主题下把 elevation 的白色叠层画到背景之上，让高层视图更亮。
-   * 只在有背景、且主题确实是暗色时生效；浅色主题与无背景视图直接跳过。
+   * 暗色主题下把 elevation 的叠层画到背景之上，让高层视图更亮。
+   * 叠层色取自主题（默认白）；没有背景、浅色主题或叠层被禁用时直接跳过。
    */
   drawElevationOverlay(canvas, width, height) {
-    const elevation = Number(this.elevation) || 0;
-    if (elevation <= 0) return;
-    const theme = this.$vm?.themeAttributes || this.vm?.themeAttributes || null;
-    if (!theme || theme.isLightTheme !== false) return;
-    const overlay = this.elevationOverlayColor(0x00000000, elevation);
-    const alpha = (overlay >>> 24) / 255;
+    const alpha = elevationOverlayAlpha(this.elevation);
     if (alpha <= 0) return;
+    const tint = this.elevationOverlayTint();
+    if (!tint) return;
     const ctx = canvas.context;
     const radius = this.outlineRadius?.() || 0;
+    const red = (tint.color >>> 16) & 0xff;
+    const green = (tint.color >>> 8) & 0xff;
+    const blue = tint.color & 0xff;
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
     if (radius > 0) {
       ctx.beginPath();
       ctx.roundRect?.(0, 0, width, height, radius);

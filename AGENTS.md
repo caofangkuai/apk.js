@@ -165,7 +165,7 @@ npm run site
 
 ### 当前状态
 
-- 分支 `main`，已与 `origin/main` 同步（本轮结束时 HEAD = `4b82e2c`），无需再补推。
+- 分支 `main`，已与 `origin/main` 同步（`4b82e2c` 之后又有本轮记录），提交后无需再补推。
 - TextInputLayout 浮动标签这条线**已闭环**：样例 APK 能画出输入框，底色是正确的主题色（详见下方「洋红底色已修复」）。
 - 推送认证注意：GitHub 不接受 `用户名:token` 形式（会返回 401），要用 `x-access-token:token` 作为凭据，或写进 `~/.git-credentials` 的 `https://x-access-token:<token>@github.com` 行配合 `git config credential.helper store`。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
@@ -173,6 +173,12 @@ npm run site
 - 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
+
+### 本轮已完成（2026-11-20 第十轮：elevation overlay 主题自定义）
+
+1. `View.elevationOverlayTint()` 读取主题 `elevationOverlayColor` / `elevationOverlayEnabled`：支持颜色整数、颜色字符串与 `$attrReferences` 资源引用；显式透明等同不叠加；属性未配置时保留「暗色叠白、浅色不叠」的旧行为。
+2. 叠层透明度曲线抽成 `elevationOverlayAlpha(z)`，颜色计算与绘制共用；`drawElevationOverlay` 不再写死白色，改用主题叠层色做逐通道混色。
+3. `tests/elevation-overlay.mjs` 增加自定义色（暗色/浅色启用）、禁用、显式透明、资源引用解析与像素级断言。
 
 ### 本轮已完成（2026-11-09 第九轮：性能定位）
 
@@ -323,7 +329,7 @@ npm run site
 
 ### 仍待修复的系统性 UI 差异
 
-1. **elevation overlay**：暗色主题下已按 8 档 alpha 曲线叠加白色（`View.elevationOverlayColor` / `drawElevationOverlay`），用应用实际配置的 surface 色为基底；浅色主题不叠加。仍有差距：Material 允许应用自定义 overlay 颜色（`elevationOverlayColor` 属性），目前只支持主题自带的暗色分支。
+1. **elevation overlay**：暗色主题下按 8 档 alpha 曲线叠加，叠层色取自主题 `elevationOverlayColor`（缺省暗色白/浅色不叠），`elevationOverlayEnabled` 可显式开关；支持颜色整数、颜色字符串与 `$attrReferences` 资源引用，显式透明等同不叠加（`View.elevationOverlayTint` / `elevationOverlayAlpha` / `drawElevationOverlay`）。剩余差距：Material 仅在背景色等于 `colorSurface` 时叠加，当前对所有背景生效。
 2. **RecyclerView 真机验证**：host 基建已补，但缺少使用 RecyclerView 的独立回归 APK。
 3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**。
    - 自建 Material 样例 APK 已跑通（`samples/textinput-src/` + `tools/build-textinput-apk.sh`）：工具链与依赖齐备，APK 能产出并**正常启动**（从「createSubDecor 抛异常」到 Activity 正常 onCreate）。关键经验：`R$styleable` 必须与最终 APK 用**同一次** `aapt2 link` 生成并加 `--extra-packages androidx.appcompat:com.google.android.material`；用 `--static-lib` 单独生成会把 id 全清成 0，分两次 link 则 id 段不同（0x7f02 vs 0x7f03），运行时对不上。

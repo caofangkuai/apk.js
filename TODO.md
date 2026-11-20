@@ -21,7 +21,7 @@
 - [x] MaterialShapeDrawable 三段渐变阴影
 - [x] `AnimatedVectorDrawable` 属性动画
 - [x] `ListView` 回收与局部布局
-- [x] elevation overlay 与深色主题（暗色 8 档 alpha 曲线，`tests/elevation-overlay.mjs`）
+- [x] elevation overlay 与深色主题（暗色 8 档 alpha 曲线；支持主题 `elevationOverlayColor` / `elevationOverlayEnabled` 自定义与引用解析，`tests/elevation-overlay.mjs`）
 - [x] `PopupWindow`、`AlertDialog` 的布局与绘制（配色取自主题，`tests/dialog-theme.mjs`）
 - [ ] `TextInputLayout` 的浮动标签动画（该控件依赖 DEX 执行，缺少可回归的样例 APK）
 - [x] AppBarLayout collapse 依赖的嵌套滚动契约与子项平移（`tests/appbar-collapse.mjs`；真实 APK 无可滚区，仍缺像素对照）
