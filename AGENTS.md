@@ -168,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -322,6 +322,14 @@ npm run site
 3. **TextInputLayout / AppBarLayout**：依赖 DEX 执行；嵌套滚动契约与子项平移已补齐，并用 `tests/appbar-collapse.mjs` 覆盖。但 DeviceInfoHW 里没有超过一屏的滚动区（各容器 getScrollRange 为 0），collapse 无法在真实场景触发，**仍缺像素级对照**。
    - 自建 Material 样例 APK 已跑通（`samples/textinput-src/` + `tools/build-textinput-apk.sh`）：工具链与依赖齐备，APK 能产出并**正常启动**（从「createSubDecor 抛异常」到 Activity 正常 onCreate）。关键经验：`R$styleable` 必须与最终 APK 用**同一次** `aapt2 link` 生成并加 `--extra-packages androidx.appcompat:com.google.android.material`；用 `--static-lib` 单独生成会把 id 全清成 0，分两次 link 则 id 段不同（0x7f02 vs 0x7f03），运行时对不上。
    - 因此浮动标签的像素基线**仍无法建立**。两条可行路径：用 Gradle 构建一个带 TextInputLayout 的 APK，或补齐资源静态库管线（工作量在构建层，不在框架层）。
+   - **排查已推进到的最后一环**（2026-11-20）：自建样例能启动后，控件 `TextInputLayout` 的 `endLayout` / `editText` 一直是 null。逐层定位如下：
+     1. `EndCompoundLayout` 构造期调用 `ResourceManagerInternal.checkVectorDrawableSetup`；
+     2. 该方法取 `R$drawable.abc_vector_test` 交给 `getDrawable`，实测 `resId=0x0` → 返回 null；
+     3. 拿到 null 后它把 `mHasCheckedVectorDrawableSetup` 重置回 false 并抛 `IllegalStateException`，构造中断；
+     4. 根因：`Landroidx/appcompat/resources/R$drawable;` 这个 R 类**没有进 dex**——构建脚本的 `--extra-packages` 只列了 `androidx.appcompat` 和 `com.google.android.material`。
+   - **尝试过但失败的修法**：把 `--extra-packages` 扩成十几个包后，R 类确实生成了、吞掉的异常也归零，但资源 id 整体偏移，画面变成全白。说明多包 `--extra-packages` 会让 id 分配与 dex 里的 R 常量对不上。已回退。
+   - 下一步要么让构建产出与 R 类严格同源（Gradle 的做法），要么查清 `--extra-packages` 导致 id 偏移的机制。**不建议**继续在构建脚本上盲试。
+   - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
 
 ### 建议接手顺序
