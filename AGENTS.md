@@ -331,7 +331,9 @@ npm run site
    - **更正**（2026-11-20 复核，推翻此前记录）：`--extra-packages` **确实会为库包生成 R 类**。实测把 `androidx.appcompat.resources` 写进 `--extra-packages` 后，`androidx/appcompat/resources/R.java` 正常产出、link 无报错。
    - 真正的问题在**包归属**：现有 link 用了 `--no-static-lib-packages`，它把所有资源并进应用包（id 前缀 `0x7f`），于是库 R 里的常量全是 0（实测 `abc_vector_test=0`，而资源表里该资源 id 是 `0x7f070076`，确实存在）。
    - 另外单独对单个 AAR 用 `--static-lib` 生成 R 也能成功（`appcompat-resources` 的 R.java 能产出），但 id 同样是 0——`--static-lib` 下库资源 id 本就不确定，运行时对不上。
-   - 结论：要拿到 id 正确的库级 R，需要让各库资源保持自己的包归属（去掉 `--no-static-lib-packages`），但那会重新引爆 appcompat 与 material 的 `SearchView` styleable 冲突。这是一条真实的取舍，不是靠调参能绕过的，需要 Gradle 式的完整资源管线。**建议**直接要一个 Gradle 构建的 APK，不要在构建脚本上继续试参数。
+   - **再更正**（2026-11-20 末次复核）：去掉 `--no-static-lib-packages` 重新 link，**并没有**出现 `SearchView` styleable 冲突（此前的推断是错的），但 `abc_vector_test` 在主包 R 与 `androidx.appcompat.resources` R 里**仍为 0**。已确认该资源确实编译进了 `dep-3.zip`（`drawable_abc_vector_test.xml.flat`），主包 R 也含这个符号（共 7172 个常量）——只是值为 0。
+   - 也就是说：`--extra-packages` 生成的是主包 R 的**副本**（换包名），并不是各库自己的符号表；库资源的 id 在这一链路里拿不到有效值。要正确产出，需要真正的库级资源发布（Gradle 的 `processResources`/`generateRClass`）。
+   - **建议**：不要再在 aapt2 参数上试。要么用 Gradle 构建的 APK，要么接受这一项作为已知限制。前三次在本文件里关于 `--extra-packages` 的推断都有一半是错的，说明这条链路的细节不能靠读 help 文本推断。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
 
