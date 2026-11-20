@@ -328,7 +328,7 @@ npm run site
      3. 拿到 null 后它把 `mHasCheckedVectorDrawableSetup` 重置回 false 并抛 `IllegalStateException`，构造中断；
      4. 根因：`Landroidx/appcompat/resources/R$drawable;` 这个 R 类**没有进 dex**——构建脚本的 `--extra-packages` 只列了 `androidx.appcompat` 和 `com.google.android.material`。
    - **尝试过但失败的修法**：把 `--extra-packages` 扩成十几个包后，R 类确实生成了、吞掉的异常也归零，但资源 id 整体偏移，画面变成全白。说明多包 `--extra-packages` 会让 id 分配与 dex 里的 R 常量对不上。已回退。
-   - 下一步要么让构建产出与 R 类严格同源（Gradle 的做法），要么查清 `--extra-packages` 导致 id 偏移的机制。**不建议**继续在构建脚本上盲试。
+   - 已查清 `--extra-packages` 的语义（2026-11-20 复核）：它只是「用不同包名额外生成同一份 R.java」，即主包 R 的副本，**不会**为其它库包生成独立的 R 类。所以 `androidx.appcompat.resources` 的 R 无论怎么列都不会出现——dex 里该类型只被引用、没有定义（实测该类定义数为 0，而它的资源 dep-3.zip 确实参与了 link）。要拿到库级 R，必须像 Gradle 那样对每个 AAR 单独 `aapt2 link --static-lib` 再按依赖拓扑引用。**不建议**继续在构建脚本上盲试。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
 
