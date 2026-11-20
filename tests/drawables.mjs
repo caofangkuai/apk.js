@@ -7,6 +7,7 @@ const { createCanvas } = require('canvas');
 
 import { loadApkFiles, EmulatorEngine } from '../src/framework/engine.js';
 import { drawDrawable, outlineRadius } from '../src/framework/drawables.js';
+import { parseNinePatchChunk } from '../src/framework/resources.js';
 import { MeasureSpec } from '../src/framework/view.js';
 import { parseParameterDescriptors } from '../src/runtime/vm.js';
 import { numberToFloatBits } from '../src/runtime/values.js';
@@ -451,4 +452,23 @@ console.log('drawables OK');
   drawVectorRaw(ctx, 0, 0, { xml }, 0, 0, 100, 100, { trim: { p: { start: 0.5, end: 1, offset: 0 } } });
   assert(pixel(canvas, 10, 50)[3] === 0, 'trimPath 起点前应透明');
   assert(pixel(canvas, 90, 50)[3] > 0, 'trimPath 终点区域应绘制');
+}
+
+// 18. NinePatch npTc 按 div 数量读取，拒绝截断的块
+{
+  const bytes = new Uint8Array(72);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 52);
+  bytes.set([0x6e, 0x70, 0x54, 0x63], 12);
+  bytes.set([0, 2, 2, 1], 16);
+  [1, 2, 3, 4].forEach((value, index) => view.setInt32(16 + 12 + index * 4, value));
+  [0, 1, 0, 1].forEach((value, index) => view.setInt32(16 + 32 + index * 4, value));
+  view.setInt32(16 + 48, -1);
+  const ninePatch = parseNinePatchChunk(bytes);
+  assert(JSON.stringify(ninePatch?.xDivs) === '[0,1]', 'npTc xDivs 数量或内容错误');
+  assert(JSON.stringify(ninePatch?.yDivs) === '[0,1]', 'npTc yDivs 数量或内容错误');
+  assert(JSON.stringify(ninePatch?.padding) === '[1,2,3,4]', 'npTc padding 解析错误');
+  bytes[17] = 20;
+  assert(parseNinePatchChunk(bytes) === null, '截断的 npTc 块应忽略而不是越界');
 }

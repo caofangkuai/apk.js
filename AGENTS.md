@@ -174,6 +174,12 @@ npm run site
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
+### 本轮已完成（2026-11-20 第十一轮：真实 NinePatch 块越界修复）
+
+1. 用 node-canvas 实际渲染 DeviceInfoHW，发现抽屉菜单初始化反复抛出 `getDrawable: Offset is outside the bounds of the DataView`，导致溢出菜单图标缺失、诊断直接失败。
+2. 根因是 `parseNinePatchChunk` 把 `numX` / `numY` 当成顶点数，按 `count + 1` 读取；真实 `npTc` 块每轴只有 `numX` / `numY` 个 div。现按实际 div 数读取，并在块长度不足时忽略该块。
+3. `tests/drawables.mjs` 增加真实布局的 52 字节 `npTc` fixture，断言 x/y div 与 padding，并覆盖截断块不越界。修复后 `npm run diagnose -- /tmp/devinfo.apk` 为 `interesting=0`，渲染无未捕获异常，溢出菜单图标恢复。
+
 ### 本轮已完成（2026-11-20 第十轮：elevation overlay 主题自定义）
 
 1. `View.elevationOverlayTint()` 读取主题 `elevationOverlayColor` / `elevationOverlayEnabled`：支持颜色整数、颜色字符串与 `$attrReferences` 资源引用；显式透明等同不叠加；属性未配置时保留「暗色叠白、浅色不叠」的旧行为。
@@ -213,7 +219,7 @@ npm run site
 4. **文本排版回归 AOSP**：TextView 统一行距模型（pitch=descent-ascent，首行 baseline=-top/-ascent，includeFontPadding 计入 top/bottom），测量与绘制共用；getBaseline 改 `paddingTop+firstBaseline`；字体度量 leading 改 0、bottom 0.27em；wrapText 增加整段快速路径和词边界折行。
 5. **LinearLayout**：权重只在 EXACTLY 下分配（AT_MOST 不再拉伸）；水平布局增加 baselineAligned 对齐（maxAscent/maxDescent）；水平测量增加 MATCH_PARENT 高度二趟测量。
 6. **FrameLayout**：增加 MATCH_PARENT 子项二趟测量。
-7. **NinePatch**：`npTc` 解析修正为 padding@12、xDivs@32、numX+1 顶点；绘制支持多段可拉伸区域按比例缩放。
+7. **NinePatch**：`npTc` 解析修正为 padding@12、xDivs@32；绘制支持多段可拉伸区域按比例缩放（div 数量问题在第十一轮修正）。
 8. **Drawable**：线性渐变按矩形在方向上的投影长度取端点（不再用 max(w,h)/2）；ring 改为描边圆环；矩形 stroke 内缩 strokeWidth/2；DEX GradientDrawable 支持 angle/radial/sweep 与多色 stop；Drawable 补 setCallback/getCallback。
 9. **elevation 阴影**：改为离屏画布绘制 ambient(0.039)/spot(0.19) 两遍阴影并挖掉本体，修复 Canvas 阴影被源 alpha(0.01) 衰减到不可见的问题。
 10. **杂项 host**：TextView getLineCount/getMaxLines/setSingleLine/setCompoundDrawables*、View getMinimumWidth/Height/getSuggestedMinimum*、hasTransientState、Drawable setCallback、Arrays.fill、Long.bitCount/rotateRight 等。

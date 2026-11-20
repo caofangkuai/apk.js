@@ -37,12 +37,14 @@ export function parseNinePatchChunk(bytes) {
       const view2 = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
       const numX = chunk[1];
       const numY = chunk[2];
+      const divsLength = 32 + (numX + numY) * 4;
+      if (chunk.length < divsLength) return null;
       const padding = [view2.getInt32(12), view2.getInt32(16), view2.getInt32(20), view2.getInt32(24)];
       let cursor = 32;
       const xDivs = [];
       const yDivs = [];
-      for (let i = 0; i <= numX; i++) { xDivs.push(view2.getInt32(cursor)); cursor += 4; }
-      for (let i = 0; i <= numY; i++) { yDivs.push(view2.getInt32(cursor)); cursor += 4; }
+      for (let i = 0; i < numX; i++) { xDivs.push(view2.getInt32(cursor)); cursor += 4; }
+      for (let i = 0; i < numY; i++) { yDivs.push(view2.getInt32(cursor)); cursor += 4; }
       return { xDivs, yDivs, padding };
     }
     if (type === 'IEND') break;
