@@ -438,10 +438,7 @@ function findValueSlot(self, key, vm) {
     try {
       // dex 里返回 Z 的方法给的是数字 1/0，不能只认布尔 true。
       if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw])) return slot;
-    } catch (error) {
-      if (globalThis.__DBG_FB && key.$dexClass?.descriptor === 'Ln2/b0;') {
-        console.error('[FB eq-err]', fbDescribeQualified(vm, key), error?.message);
-      }
+    } catch (_error) {
       // equals 抛错按不相等处理，避免把宿主异常带进 Map 语义。
     }
   }
@@ -973,8 +970,12 @@ export const JAVA_CORE_CLASSES = {
       'indexOf(I)I': (self, [ch]) => jsString(self).indexOf(String.fromCharCode(toInt(ch))),
       'indexOf(Ljava/lang/String;)I': (self, [text]) => jsString(self).indexOf(jsString(text)),
       'indexOf(Ljava/lang/String;I)I': (self, [text, from]) => jsString(self).indexOf(jsString(text), toInt(from)),
+      'indexOf(II)I': (self, [ch, from]) => jsString(self).indexOf(String.fromCharCode(toInt(ch)), toInt(from)),
       'lastIndexOf(I)I': (self, [ch]) => jsString(self).lastIndexOf(String.fromCharCode(toInt(ch))),
       'lastIndexOf(Ljava/lang/String;)I': (self, [text]) => jsString(self).lastIndexOf(jsString(text)),
+      'lastIndexOf(Ljava/lang/String;I)I': (self, [text, from]) => jsString(self).lastIndexOf(jsString(text), toInt(from)),
+      'lastIndexOf(II)I': (self, [ch, from]) => jsString(self).lastIndexOf(String.fromCharCode(toInt(ch)), toInt(from)),
+      'startsWith(Ljava/lang/String;I)Z': (self, [text, offset]) => jsString(self).startsWith(jsString(text), toInt(offset)),
       'contains(Ljava/lang/CharSequence;)Z': (self, [text]) => jsString(self).includes(jsString(text)),
       'startsWith(Ljava/lang/String;)Z': (self, [text]) => jsString(self).startsWith(jsString(text)),
       'endsWith(Ljava/lang/String;)Z': (self, [text]) => jsString(self).endsWith(jsString(text)),
@@ -2190,7 +2191,159 @@ JAVA_CORE_CLASSES['Ljava/util/concurrent/Executors;'] = nativeDef('Ljava/util/co
       object.$peer = { vm };
       return object;
     },
+    // 「不可配置」只是封装语义，模拟器不需要禁止 setter，原样返回即可。
+    'unconfigurableExecutorService(Ljava/util/concurrent/ExecutorService;)Ljava/util/concurrent/ExecutorService;': (_self, [executor]) => executor ?? null,
+    'unconfigurableScheduledExecutorService(Ljava/util/concurrent/ScheduledExecutorService;)Ljava/util/concurrent/ScheduledExecutorService;': (_self, [executor]) => executor ?? null,
   },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/ThreadFactory;'] = nativeDef('Ljava/util/concurrent/ThreadFactory;', {
+  super: 'Ljava/lang/Object;',
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/BlockingQueue;'] = nativeDef('Ljava/util/concurrent/BlockingQueue;', {
+  super: 'Ljava/util/Collection;',
+});
+JAVA_CORE_CLASSES['Ljava/util/concurrent/LinkedBlockingQueue;'] = nativeDef('Ljava/util/concurrent/LinkedBlockingQueue;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/util/concurrent/BlockingQueue;'],
+  ctor: peerClass(function () {
+    this.items = [];
+    this.capacity = 0x7fffffff;
+  }, { items: [], capacity: 0x7fffffff }),
+  methods: {
+    '<init>()V': () => undefined,
+    '<init>(I)V': (self, [capacity]) => { self.capacity = toInt(capacity) || 0x7fffffff; },
+    '<init>(Ljava/util/Collection;)V': (self, [collection]) => { self.items = [...collectionItems(collection)]; },
+    'offer(Ljava/lang/Object;)Z': (self, [value]) => {
+      if (self.items.length >= self.capacity) return false;
+      self.items.push(value);
+      return true;
+    },
+    'offer(Ljava/lang/Object;JLjava/util/concurrent/TimeUnit;)Z': (self, [value]) => {
+      if (self.items.length >= self.capacity) return false;
+      self.items.push(value);
+      return true;
+    },
+    'put(Ljava/lang/Object;)V': (self, [value]) => { self.items.push(value); },
+    'take()Ljava/lang/Object;': (self) => (self.items.length ? self.items.shift() : null),
+    'poll()Ljava/lang/Object;': (self) => (self.items.length ? self.items.shift() : null),
+    'poll(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;': (self) => (self.items.length ? self.items.shift() : null),
+    'peek()Ljava/lang/Object;': (self) => (self.items.length ? self.items[0] : null),
+    'size()I': (self) => self.items.length,
+    'isEmpty()Z': (self) => (self.items.length ? 0 : 1),
+    'clear()V': (self) => { self.items.length = 0; },
+    'add(Ljava/lang/Object;)Z': (self, [value]) => { self.items.push(value); return true; },
+    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
+      const index = self.items.indexOf(value);
+      if (index < 0) return false;
+      self.items.splice(index, 1);
+      return true;
+    },
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.items.includes(value) ? 1 : 0),
+    'remainingCapacity()I': (self) => Math.max(0, self.capacity - self.items.length),
+    'drainTo(Ljava/util/Collection;)I': (self, [collection]) => drainQueueTo(self, collection),
+    'drainTo(Ljava/util/Collection;I)I': (self, [collection, max]) => drainQueueTo(self, collection, toInt(max)),
+    'toArray()[Ljava/lang/Object;': (self, _args, vm) => vm.newArray('[Ljava/lang/Object;', self.items.length, [...self.items]),
+  },
+});
+
+function drainQueueTo(self, collection, max = Infinity) {
+  const target = collection?.$peer ?? collection;
+  if (!Array.isArray(target?.items)) return 0;
+  const values = self.items.splice(0, Math.max(0, max));
+  target.items.push(...values);
+  return values.length;
+}
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/ThreadPoolExecutor;'] = nativeDef('Ljava/util/concurrent/ThreadPoolExecutor;', {
+  super: 'Ljava/util/concurrent/ExecutorService;',
+  ctor: peerClass(function () {
+    this.shutdown = false;
+    this.queue = null;
+  }, { shutdown: false, queue: null }),
+  methods: {
+    '<init>(IIJLjava/util/concurrent/TimeUnit;Ljava/util/concurrent/BlockingQueue;Ljava/util/concurrent/ThreadFactory;)V': (self, args) => {
+      self.queue = args?.[5] ?? null;
+    },
+    '<init>(IIJLjava/util/concurrent/TimeUnit;Ljava/util/concurrent/BlockingQueue;Ljava/util/concurrent/ThreadFactory;Ljava/util/concurrent/RejectedExecutionHandler;)V': (self, args) => {
+      self.queue = args?.[5] ?? null;
+    },
+    'allowCoreThreadTimeOut(Z)V': (self, [value]) => { self.allowCoreTimeOut = !!value; },
+    'prestartAllCoreThreads()I': () => 0,
+    'prestartCoreThread()Z': () => 0,
+    'getPoolSize()I': () => 0,
+    'getActiveCount()I': () => 0,
+    'getLargestPoolSize()I': () => 0,
+    'getCorePoolSize()I': () => 0,
+    'getMaximumPoolSize()I': () => 1,
+    'getTaskCount()J': () => 0n,
+    'getCompletedTaskCount()J': () => 0n,
+    'setCorePoolSize(I)V': () => undefined,
+    'setMaximumPoolSize(I)V': () => undefined,
+    'setKeepAliveTime(JLjava/util/concurrent/TimeUnit;)V': () => undefined,
+    'getQueue()Ljava/util/concurrent/BlockingQueue;': (self) => self.queue ?? null,
+    'purge()V': () => undefined,
+  },
+});
+
+function normalizeCharsetName(value, fallback = 'UTF-8') {
+  const name = String(jsString(value) || '').trim().toUpperCase();
+  if (!name) return fallback;
+  if (name === 'UTF8' || name === 'UTF-8') return 'UTF-8';
+  if (name === 'US-ASCII' || name === 'ASCII' || name === '646') return 'US-ASCII';
+  if (name === 'ISO-8859-1' || name === 'ISO8859-1' || name === 'LATIN1') return 'ISO-8859-1';
+  if (name === 'UTF-16') return 'UTF-16';
+  if (name === 'UTF-16BE') return 'UTF-16BE';
+  if (name === 'UTF-16LE') return 'UTF-16LE';
+  return String(jsString(value));
+}
+
+function makeCharset(vm, name) {
+  const object = vm.allocateRawObject('Ljava/nio/charset/Charset;');
+  object.$peer = { vm, name: normalizeCharsetName(name) };
+  return object;
+}
+
+JAVA_CORE_CLASSES['Ljava/nio/charset/Charset;'] = nativeDef('Ljava/nio/charset/Charset;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (_vm, _object, name) {
+    this.name = normalizeCharsetName(name);
+  }, { name: 'UTF-8' }),
+  methods: {
+    'name()Ljava/lang/String;': (self) => self.name ?? 'UTF-8',
+    'displayName()Ljava/lang/String;': (self) => self.name ?? 'UTF-8',
+    'displayName(Ljava/util/Locale;)Ljava/lang/String;': (self) => self.name ?? 'UTF-8',
+    'aliases()Ljava/util/Set;': (_self, _args, vm) => makeSet(vm, []),
+    'canEncode()Z': () => 1,
+    'isRegistered()Z': () => 1,
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => ((other?.$peer?.name ?? other?.name ?? '') === (self.name ?? '') ? 1 : 0),
+    'hashCode()I': (self) => hashCode(self.name ?? 'UTF-8'),
+    'compareTo(Ljava/nio/charset/Charset;)I': (self, [other]) =>
+      String(self.name ?? '').localeCompare(String(other?.$peer?.name ?? '')),
+    'toString()Ljava/lang/String;': (self) => self.name ?? 'UTF-8',
+  },
+  staticMethods: {
+    'forName(Ljava/lang/String;)Ljava/nio/charset/Charset;': (_self, [name], vm) => makeCharset(vm, name),
+    'isSupported(Ljava/lang/String;)Z': () => 1,
+    'defaultCharset()Ljava/nio/charset/Charset;': (_self, _args, vm) => makeCharset(vm, 'UTF-8'),
+    'availableCharsets()Ljava/util/SortedMap;': (_self, _args, vm) => makeMap(vm),
+  },
+  staticFields: new Map(
+    ['UTF-8', 'US-ASCII', 'ISO-8859-1', 'UTF-16', 'UTF-16BE', 'UTF-16LE'].map((name) => [
+      name.replace(/-/g, '_') + ':Ljava/nio/charset/Charset;',
+      { lazy: (vm) => makeCharset(vm, name) },
+    ])
+  ),
+});
+
+JAVA_CORE_CLASSES['Ljava/nio/charset/StandardCharsets;'] = nativeDef('Ljava/nio/charset/StandardCharsets;', {
+  super: 'Ljava/lang/Object;',
+  staticFields: new Map(
+    ['UTF-8', 'US-ASCII', 'ISO-8859-1', 'UTF-16', 'UTF-16BE', 'UTF-16LE'].map((name) => [
+      name.replace(/-/g, '_') + ':Ljava/nio/charset/Charset;',
+      { lazy: (vm) => makeCharset(vm, name) },
+    ])
+  ),
 });
 
 function animatorFinish(vm, self) {
@@ -3758,13 +3911,6 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     },
     'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
       if (!self.setItems) self.setItems = [];
-      if (globalThis.__DBG_FB) {
-        const info = fbDescribeQualified(vm, value);
-        if (info) {
-          if (!self.__fbsid) self.__fbsid = (globalThis.__FB_SET_SEQ = (globalThis.__FB_SET_SEQ || 0) + 1);
-          console.error('[FB setadd] sid=' + self.__fbsid + ' size=' + self.setItems.length + ' ' + info);
-        }
-      }
       if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems.push(value);
       return true;
@@ -4433,24 +4579,6 @@ function listMethods() {
   };
 }
 
-function fbDescribeQualified(vm, key) {
-  if (!globalThis.__DBG_FB || !isJavaObject(key)) return '';
-  try {
-    if (key.$dexClass?.descriptor !== 'Ln2/b0;') return '';
-    const parts = [];
-    for (const [name, value] of key.$fields || []) {
-      let text;
-      if (isJavaObject(value)) text = value.$descriptor || value.$name || value.$dexClass?.descriptor;
-      else if (value && typeof value === 'object') text = value.$descriptor || value.$name || String(value);
-      else text = String(value);
-      parts.push(`${name.replace(/^.*->/, '')}=${text}`);
-    }
-    return 'Q{' + parts.join(',') + '}';
-  } catch (_error) {
-    return 'Q{?}';
-  }
-}
-
 function mapMethods() {
   return {
     '<init>()V': (self) => {
@@ -4470,14 +4598,6 @@ function mapMethods() {
     },
     'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
       const k = findValueSlot(self, key, vm) ?? mapKey(key, vm);
-      if (globalThis.__DBG_FB) {
-        const info = fbDescribeQualified(vm, key);
-        if (info) {
-          if (!self.__fbid) self.__fbid = (globalThis.__FB_SEQ = (globalThis.__FB_SEQ || 0) + 1);
-          const vc = isJavaObject(value) ? (value.$descriptor || value.$dexClass?.descriptor || value.$nativeClass) : String(value);
-          console.error('[FB put] id=' + self.__fbid + ' map=' + self.map.size + ' raw=' + (self.rawKeys ? self.rawKeys.size : -1) + ' ' + info + ' value=' + vc);
-        }
-      }
       if (!self.rawKeys) self.rawKeys = new Map();
       const previous = self.map.get(k);
       self.map.set(k, value);
@@ -4516,23 +4636,11 @@ function mapMethods() {
     },
     'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key], vm) => {
       const slot = findValueSlot(self, key, vm) ?? mapKey(key, vm);
-      if (globalThis.__DBG_FB) {
-        const info = fbDescribeQualified(vm, key);
-        if (info) console.error('[FB get] size=' + self.map.size + ' ' + info + ' found=' + self.map.has(slot));
-      }
       return self.map.get(slot) ?? null;
     },
     'containsKey(Ljava/lang/Object;)Z': (self, [key], vm) => {
       const slot = findValueSlot(self, key, vm) ?? mapKey(key, vm);
-      const has = self.map.has(slot);
-      if (globalThis.__DBG_FB) {
-        const info = fbDescribeQualified(vm, key);
-        if (info) {
-          if (!self.__fbid) self.__fbid = (globalThis.__FB_SEQ = (globalThis.__FB_SEQ || 0) + 1);
-          console.error('[FB ck] id=' + self.__fbid + ' map=' + self.map.size + ' raw=' + (self.rawKeys ? self.rawKeys.size : -1) + ' ' + info + ' found=' + has);
-        }
-      }
-      return has;
+      return self.map.has(slot);
     },
     'containsValue(Ljava/lang/Object;)Z': (self, [value], vm) => {
       const target = mapKey(value, vm);

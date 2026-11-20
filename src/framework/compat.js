@@ -977,7 +977,20 @@ const WEBVIEW_STATIC_METHODS = {
   'setWebContentsDebuggingEnabled(Z)V': () => undefined,
   'setDataDirectorySuffix(Ljava/lang/String;)V': () => undefined,
   'disableWebView()V': () => undefined,
-  'getCurrentWebViewPackage()Landroid/content/pm/PackageInfo;': () => null,
+  // 应用常用它判断 WebView 是否安装；返回 null 会被当成「未安装」并弹框拒绝启动。
+  'getCurrentWebViewPackage()Landroid/content/pm/PackageInfo;': (_self, _args, vm) => {
+    const info = vm.allocateRawObject('Landroid/content/pm/PackageInfo;');
+    info.$peer = {
+      vm,
+      constructor: { $descriptor: 'Landroid/content/pm/PackageInfo;' },
+      packageName: 'com.android.webview',
+      versionName: '120.0.6099.230',
+      versionCode: 6099230,
+      firstInstallTime: 0,
+      lastUpdateTime: 0,
+    };
+    return info;
+  },
   'startSafeBrowsing(Landroid/content/Context;Landroid/webkit/ValueCallback;)V': () => undefined,
   'setSafeBrowsingWhitelist(Ljava/util/List;Landroid/webkit/ValueCallback;)V': () => undefined,
   'getSafeBrowsingPrivacyPolicyUrl()Landroid/net/Uri;': () => null,

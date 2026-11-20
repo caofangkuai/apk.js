@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：19
-- 注册的 native 类：410
-- 方法/构造函数键（静态统计）：4386
+- 注册的 native 类：421
+- 方法/构造函数键（静态统计）：4454
 
 ## Native 类清单
 
@@ -127,6 +127,11 @@
 | `Landroid/os/StatFs;` | java-core.js |
 | `Landroid/os/storage/StorageManager;` | java-core.js |
 | `Landroid/os/storage/StorageVolume;` | java-core.js |
+| `Landroid/os/StrictMode;` | registry.js |
+| `Landroid/os/StrictMode$ThreadPolicy;` | registry.js |
+| `Landroid/os/StrictMode$ThreadPolicy$Builder;` | registry.js |
+| `Landroid/os/StrictMode$VmPolicy;` | registry.js |
+| `Landroid/os/StrictMode$VmPolicy$Builder;` | registry.js |
 | `Landroid/os/SystemClock;` | registry.js |
 | `Landroid/os/SystemProperties;` | registry.js |
 | `Landroid/os/Trace;` | registry.js |
@@ -355,6 +360,8 @@
 | `Ljava/net/URISyntaxException;` | java-core.js |
 | `Ljava/net/URL;` | java-core.js |
 | `Ljava/net/URLConnection;` | java-core.js |
+| `Ljava/nio/charset/Charset;` | java-core.js |
+| `Ljava/nio/charset/StandardCharsets;` | java-core.js |
 | `Ljava/security/KeyFactory;` | registry.js |
 | `Ljava/security/PublicKey;` | registry.js |
 | `Ljava/security/spec/X509EncodedKeySpec;` | registry.js |
@@ -372,6 +379,7 @@
 | `Ljava/util/concurrent/atomic/AtomicInteger;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicReference;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicReferenceArray;` | java-core.js |
+| `Ljava/util/concurrent/BlockingQueue;` | java-core.js |
 | `Ljava/util/concurrent/ConcurrentLinkedQueue;` | java-core.js |
 | `Ljava/util/concurrent/CopyOnWriteArrayList;` | java-core.js |
 | `Ljava/util/concurrent/CopyOnWriteArraySet;` | java-core.js |
@@ -379,11 +387,14 @@
 | `Ljava/util/concurrent/Executor;` | java-core.js |
 | `Ljava/util/concurrent/Executors;` | java-core.js |
 | `Ljava/util/concurrent/Future;` | java-core.js |
+| `Ljava/util/concurrent/LinkedBlockingQueue;` | java-core.js |
 | `Ljava/util/concurrent/locks/Lock;` | java-core.js |
 | `Ljava/util/concurrent/locks/ReentrantReadWriteLock;` | java-core.js |
 | `Ljava/util/concurrent/ScheduledExecutorService;` | java-core.js |
 | `Ljava/util/concurrent/ScheduledFuture;` | java-core.js |
+| `Ljava/util/concurrent/ThreadFactory;` | java-core.js |
 | `Ljava/util/concurrent/ThreadLocalRandom;` | java-core.js |
+| `Ljava/util/concurrent/ThreadPoolExecutor;` | java-core.js |
 | `Ljava/util/concurrent/TimeUnit;` | java-core.js |
 | `Ljava/util/Date;` | java-core.js |
 | `Ljava/util/HashMap;` | java-core.js |

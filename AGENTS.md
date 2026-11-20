@@ -173,7 +173,17 @@ npm run site
 - 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables、scrollbars、compat。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
-- Via 浏览器（`/tmp/via.apk`）：能渲染隐私弹窗、完成 Firebase 组件图构建，止于 `MissingDependencyException`；下一步要在 `PackageManager` / manifest meta-data 层补 `ComponentRegistrar` 发现，才能继续推进。
+- Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染，冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
+
+### 本轮已完成（2026-11-21 第十四轮：Via 浏览器启动打通）
+
+1. **`Collections.addAll(Collection, Object[])`**：此前只认 List 的 `items`，目标是 Set 时静默丢弃全部元素。Firebase `Component.Builder` 用它保存附加接口，导致组件只登记主接口，依赖校验误报 `MissingDependencyException: android.content.Context`。现同时支持 List 与 Set（Set 走 `findSetIndex` 去重）。
+2. **`Executors.unconfigurableExecutorService`**：缺失时返回 null，GMS 的 `u2` 把 null 存进 `ExecutorService` 字段，后续 `execute` 直接 NPE。补 `ThreadPoolExecutor`（构造、池度量、`allowCoreThreadTimeOut`、`getQueue`）、`LinkedBlockingQueue`、`ThreadFactory` 与 `unconfigurable*`。
+3. **`java.nio.charset.Charset` / `StandardCharsets`**：整个命名空间缺失，`m8.a.<clinit>` 的 `Charset.name()` 空指针。补齐 `forName/defaultCharset/isSupported`、`name/displayName/aliases` 与六个标准编码静态字段。
+4. **`String.indexOf(II)` / `lastIndexOf(II)` / `lastIndexOf(String,I)` / `startsWith(String,I)`**：缺重载会被兜底成 0，Via 的按字符切分循环因此不再前进（实测各 160 万次调用后撞上 8M 调用上限）。补齐后切分立即收敛。
+5. **`android.os.StrictMode`**：整个类缺失，`new ThreadPolicy.Builder().detectResourceMismatches()...` 链式调用在空方法上 NPE。补 Thread/VmPolicy 与其 Builder（链式方法返回自身，`build` 产出空策略）。
+6. **`WebView.getCurrentWebViewPackage()`**：返回 null 会让应用判定 WebView 未安装并弹「关闭应用」。改为返回 `PackageInfo`（`com.android.webview`）。
+7. **验证**：`node tools/apk-smoke.mjs /tmp/via.apk --settle=1500` 冒烟通过（隐私弹窗 → 主页），无未捕获异常；`image-debug/via9-00-同意并继续.png`。剩余差距：宿主 WebView 不渲染真实网页内容，浏览/搜索功能不可用。
 
 ### 本轮已完成（2026-11-21 第十三轮：AOSP 滚动条绘制）
 

@@ -687,27 +687,6 @@ export class JavaVM {
    */
   _invoke(ref, receiver, args, mode = 'virtual', currentMethod = null) {
     args = normalizeReferenceArgs(args, ref?.proto?.parameters);
-    if (globalThis.__DBG_FB && ref?.name === '<init>' && ref?.classDesc === 'Ln2/c;') {
-      const describe = (x) => (x && typeof x === 'object' ? (x.$descriptor || (x.$fields ? 'Q{' + [...x.$fields.values()].map((v) => v?.$descriptor || String(v)).join(',') + '}' : String(x))) : String(x));
-      for (let i = 1; i < args.length; i++) {
-        const a = args[i];
-        if (a && (a.$peer?.setItems || a.setItems)) {
-          const items = a.$peer?.setItems || a.setItems;
-          console.error('[FB comp-set] arg' + i + ' size=' + items.length + ' :: ' + items.map(describe).join(' | '));
-        }
-      }
-    }
-    if (globalThis.__DBG_FB && ref?.name === '<init>' && ref?.classDesc === 'Ln2/c$b;') {
-      const arr = args[1];
-      const describe = (x) => {
-        if (!x || typeof x !== 'object') return String(x);
-        if (x.$descriptor) return 'C:' + x.$descriptor;
-        const fields = [];
-        for (const [name, value] of x.$fields || []) fields.push(name.replace(/^.*->/, '') + '=' + (value?.$descriptor || value?.$name || String(value)));
-        return (x.$dexClass?.descriptor || '?') + '{' + fields.join(',') + '}';
-      };
-      console.error('[FB ctor] args=' + args.length + ' arrType=' + (arr && arr.$type) + ' len=' + (arr && arr.$data && arr.$data.length) + ' items=' + (arr && arr.$data ? arr.$data.map(describe).join(' | ') : ''));
-    }
     this.invocationCount++;
     // 调用计数只用于调试剖析（DBG_INVSTATS=1）；生产构建里这段会被摇掉。
     if (DBG.invokeStats) {
@@ -716,7 +695,7 @@ export class JavaVM {
       this._invokeStats.set(statKey, (this._invokeStats.get(statKey) || 0) + 1);
     }
     if (this.invocationCount > 8_000_000) {
-      throw new Error('执行指令超限，疑似死循环');
+      throw new Error('执行指令超限，疑似死循环: ' + (this.methodStack || []).slice(-10).join(' <- '));
     }
     let resolution = null;
     switch (mode) {

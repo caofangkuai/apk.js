@@ -4394,6 +4394,36 @@ function vmShowChild(self, index) {
     })
   );
 
+  // StrictMode 的策略只用于开发期诊断，这里保持链式 Builder 的形态即可：
+  // 每次设置/清除检查项都返回 builder 自身，build() 产出一个空策略对象。
+  function strictModePolicyBuilderMethods(policyDescriptor, builderDescriptor) {
+    const methods = {
+      '<init>()V': () => undefined,
+      [`build()${policyDescriptor}`]: (_self, _args, vm) => vm.allocateObject(vm.registry.resolve(policyDescriptor)),
+    };
+    for (const params of ['()', `(${builderDescriptor})`, `(${policyDescriptor})`]) {
+      methods[`<init>${params}V`] = () => undefined;
+    }
+    const chainNames = [
+      'detectAll', 'detectDiskReads', 'detectDiskWrites', 'detectNetwork',
+      'detectCustomSlowCalls', 'detectResourceMismatches', 'detectUnbufferedIo',
+      'detectExplicitGc', 'detectIncorrectContextUse', 'detectUnsafeIntentLaunch',
+      'detectActivityLeaks', 'detectLeakedClosableObjects', 'detectLeakedRegistrationObjects',
+      'detectLeakedSqlLiteObjects', 'detectFileUriExposure', 'detectCleartextNetwork',
+      'detectCredentialProtectedWhileLocked', 'detectImplicitDirectBoot', 'detectUntaggedSockets',
+      'detectContentUriWithoutPermission', 'detectNonSdkApiUsage',
+      'penaltyLog', 'penaltyDeath', 'penaltyDeathOnNetwork', 'penaltyDialog',
+      'penaltyFlashScreen', 'penaltyDropBox', 'penaltyDeathOnFileUriExposure',
+      'permitAll', 'permitDiskReads', 'permitDiskWrites', 'permitCustomSlowCalls',
+      'permitNetwork', 'permitUnbufferedIo', 'permitNonSdkApi', 'permitFileUriExposure',
+      'permitContentUriWithoutPermission',
+    ];
+    for (const name of chainNames) {
+      methods[`${name}()${builderDescriptor}`] = (self) => self.$object ?? self;
+    }
+    return methods;
+  }
+
   defs.push(
     nativeDef('Landroid/os/Trace;', {
       super: 'Ljava/lang/Object;',
@@ -4404,6 +4434,31 @@ function vmShowChild(self, index) {
         'endAsyncSection(Ljava/lang/String;I)V': () => undefined,
         'setCounter(Ljava/lang/String;I)V': () => undefined,
       },
+    }),
+    nativeDef('Landroid/os/StrictMode;', {
+      super: 'Ljava/lang/Object;',
+      staticMethods: {
+        'setThreadPolicy(Landroid/os/StrictMode$ThreadPolicy;)V': () => undefined,
+        'getThreadPolicy()Landroid/os/StrictMode$ThreadPolicy;': (_self, _args, vm) => vm.allocateObject(vm.registry.resolve('Landroid/os/StrictMode$ThreadPolicy;')),
+        'setVmPolicy(Landroid/os/StrictMode$VmPolicy;)V': () => undefined,
+        'getVmPolicy()Landroid/os/StrictMode$VmPolicy;': (_self, _args, vm) => vm.allocateObject(vm.registry.resolve('Landroid/os/StrictMode$VmPolicy;')),
+        'allowThreadDiskReads()Landroid/os/StrictMode$ThreadPolicy;': (_self, _args, vm) => vm.allocateObject(vm.registry.resolve('Landroid/os/StrictMode$ThreadPolicy;')),
+        'allowThreadDiskWrites()Landroid/os/StrictMode$ThreadPolicy;': (_self, _args, vm) => vm.allocateObject(vm.registry.resolve('Landroid/os/StrictMode$ThreadPolicy;')),
+        'enableDefaults()V': () => undefined,
+        'noteSlowCall(Ljava/lang/String;)V': () => undefined,
+        'noteDiskWrite()V': () => undefined,
+        'noteDiskRead()V': () => undefined,
+      },
+    }),
+    nativeDef('Landroid/os/StrictMode$ThreadPolicy;', { super: 'Ljava/lang/Object;' }),
+    nativeDef('Landroid/os/StrictMode$VmPolicy;', { super: 'Ljava/lang/Object;' }),
+    nativeDef('Landroid/os/StrictMode$ThreadPolicy$Builder;', {
+      super: 'Ljava/lang/Object;',
+      methods: strictModePolicyBuilderMethods('Landroid/os/StrictMode$ThreadPolicy;', 'Landroid/os/StrictMode$ThreadPolicy$Builder;'),
+    }),
+    nativeDef('Landroid/os/StrictMode$VmPolicy$Builder;', {
+      super: 'Ljava/lang/Object;',
+      methods: strictModePolicyBuilderMethods('Landroid/os/StrictMode$VmPolicy;', 'Landroid/os/StrictMode$VmPolicy$Builder;'),
     }),
     nativeDef('Landroid/widget/EdgeEffect;', {
       super: 'Ljava/lang/Object;',
