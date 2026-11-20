@@ -173,7 +173,17 @@ npm run site
 - 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables、scrollbars、compat。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
-- Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染，冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
+- Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染（标题/底栏改为主题深色文字，此前误显示白字），冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
+
+### 本轮已完成（2026-11-21 第十七轮：主题属性引用与系统颜色解析）
+
+Via 主页此前标题与底部导航文字为白色、底栏呈半透明深灰。定位到三处互相独立的通用缺陷（都不是 Via 特判）：
+
+1. **ARSC 复杂尺寸的二次符号修正**（`src/res/axml.js` `decodeComplex`）：AOSP 的 `mantissa = (data & 0xffffff00) >> 8` 是**算术右移**，本身已带符号；旧代码又补了一次 `-= 0x1000000`，把 `0xFFFFB701`（-73dp）算成 -16777289，底部导航 ImageView 因此出现 `left=-33554578` 的越界矩形。删除二次修正后与 AOSP 一致。
+2. **`Theme.resolveAttribute` 不解引用**（`src/framework/registry.js`）：旧实现把主题属性值一律写成 `type=0x10`（INT_DEC）、`data=0x7f06000b`，调用方（Via 的 `com.tuyafeng.support.utils.e.a`）直接读 `tv.data` 当颜色用，于是渲染出完全不相关的深色。新增模块级 `themeTypedValue` / `themeTypedValueReference`：字符串先试颜色再作字符串、`dimension` 走 `type=0x05`、资源 id 在 `resolveRefs=true` 时解析成 `type=0x1c`（颜色）/ `0x05`（尺寸）/ `0x03`（字符串）/ `0x10`（整数），无法解引用时退回 `0x01`（REFERENCE）。同时 `resolveAttribute` 现在也读 `store.$attrReferences`，不再漏掉只存在于引用表的属性。
+3. **系统色引用链**（`src/framework/resources.js`）：新增 `resolveColorValue(resId)`，按「内置系统色映射 → 表项 reference 递归 → `resolve()` 结果 → 颜色字符串」取值。`getColor` 的 number 分支、最终兜底，`getColorStateList` 的 number / null 分支，以及 CSL XML selector 的 `color` 属性都改走它。此前 `0x7f06000b → 0x0106000b`（`android.R.color.white`）这类指向 framework-res 的引用会 `resolve` 失败并回退黑色。
+
+验证：`tests/format.mjs` 改为断言式并覆盖 `decodeComplex`（`0x00000801→8dp`、`0xffffb701→-73dp`、负指数浮点）；DeviceInfoHW 渲染与基线 `devinfo-00-常规.png` **像素完全一致（changed=0）**；Via 冒烟通过且主页文字恢复为深色；`test:all` / `build` / `site` 全绿。
 
 ### 本轮已完成（2026-11-21 第十六轮：Context 与 OpenGL 方法面补全）
 

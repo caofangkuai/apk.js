@@ -225,12 +225,45 @@ export class Resources {
     const value = typeof resId === 'number' && this.table?.getEntry?.(resId >>> 0)?.typeName === 'attr'
       ? this.resolveThemedAttr(resId)
       : this.resolve(resId);
-    if (typeof value === 'number') return value >>> 0;
+    if (typeof value === 'number') {
+      const id = value >>> 0;
+      if (this.table?.getEntry?.(id)?.typeName === 'color') {
+        const mapped = this.resolveColorValue(id);
+        if (mapped !== null) return mapped;
+      }
+      if (id >= 0x01000000 && id < 0x02000000) {
+        const mapped = resolveAndroidColor(id);
+        if (mapped !== null) return mapped;
+      }
+      return id;
+    }
     if (typeof value === 'string') {
       const parsed = parseColorString(value);
       if (parsed !== null) return parsed;
     }
-    return 0xff000000;
+    const mapped = this.resolveColorValue(resId);
+    return mapped === null ? 0xff000000 : mapped;
+  }
+
+  /** 解析颜色资源，含指向系统色（0x01xxxxxx）或其它颜色的引用链。 */
+  resolveColorValue(resId) {
+    const id = resId >>> 0;
+    const direct = resolveAndroidColor(id);
+    if (direct !== null) return direct;
+    const entry = this.table?.getEntry?.(id);
+    if (entry?.value && typeof entry.value === 'object' && entry.value.reference !== undefined) {
+      return this.resolveColorValue(entry.value.reference >>> 0);
+    }
+    const resolved = this.resolve(id);
+    if (typeof resolved === 'number') {
+      const mapped = resolveAndroidColor(resolved);
+      return mapped === null ? (resolved >>> 0) : mapped;
+    }
+    if (typeof resolved === 'string') {
+      const parsed = parseColorString(resolved);
+      if (parsed !== null) return parsed;
+    }
+    return null;
   }
 
   getDimension(resId) {
@@ -349,7 +382,14 @@ export class Resources {
       : this.resolve(resId >>> 0);
     if (typeof value === 'number') {
       const color = value >>> 0;
-      return { states: [[]], colors: [color], color };
+      const mapped = this.table?.getEntry?.(color)?.typeName === 'color' ? this.resolveColorValue(color) : null;
+      const finalColor = mapped === null ? color : mapped;
+      return { states: [[]], colors: [finalColor], color: finalColor };
+    }
+    if (value === null || value === undefined) {
+      const mapped = this.resolveColorValue(resId >>> 0);
+      if (mapped === null) return null;
+      return { states: [[]], colors: [mapped], color: mapped };
     }
     if (typeof value !== 'string' || !value.endsWith('.xml')) return null;
     const xml = this.apk.xmlCache.get(value) || parseBinaryXml(this.apk.zipEntry(value));
@@ -367,11 +407,15 @@ export class Resources {
         const name = attr.name;
         if (name === 'color') {
           const raw = attr.value;
-          if (typeof raw === 'number') color = raw >>> 0;
-          else if (raw && typeof raw === 'object' && raw.reference !== undefined) {
+          if (typeof raw === 'number') {
+            color = this.table?.getEntry?.(raw >>> 0)?.typeName === 'color'
+              ? (this.resolveColorValue(raw >>> 0) ?? raw >>> 0)
+              : raw >>> 0;
+          } else if (raw && typeof raw === 'object' && raw.reference !== undefined) {
             const resolved = this.resolve(raw.reference >>> 0);
             if (typeof resolved === 'number') color = resolved >>> 0;
             else if (typeof resolved === 'string') color = parseColorString(resolved) ?? 0;
+            else color = this.resolveColorValue(raw.reference >>> 0) ?? 0;
           }
         } else if (name === 'alpha') {
           alpha = Number(attr.value) || 0;

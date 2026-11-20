@@ -9,7 +9,7 @@ import {
   coerceLayoutParams,
   layoutParamsDescriptorFor,
 } from './layout-inflater.js';
-import { Resources, convertDimension } from './resources.js';
+import { Resources, convertDimension, parseColorString } from './resources.js';
 import { ATTR_IDS } from '../res/axml.js';
 import { Handler, Looper, Message, MessageQueue } from './os.js';
 import { Toast } from './toast.js';
@@ -11008,6 +11008,50 @@ function attributeValueFor(attributeSet, attrId, table = null) {
   return attr.value ?? attr.data;
 }
 
+/** 把主题属性值（颜色整数 / 资源引用 / 字符串 / 尺寸）转成 TypedValue 三元组。 */
+function themeTypedValue(vm, value, resolveRefs) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    const color = parseColorString(value);
+    if (color !== null) return { type: 0x1c, data: color | 0, resourceId: 0 };
+    return { type: 0x03, data: 0, resourceId: 0, string: value };
+  }
+  if (typeof value === 'boolean') return { type: 0x12, data: value ? 1 : 0, resourceId: 0 };
+  if (typeof value === 'object') {
+    if (value.dimension) return { type: 0x05, data: (value.raw ?? 0) | 0, resourceId: 0 };
+    if (value.reference !== undefined) return themeTypedValueReference(vm, value.reference >>> 0, resolveRefs);
+    if (value.value !== undefined) return themeTypedValue(vm, value.value, resolveRefs);
+    return null;
+  }
+  if (typeof value !== 'number') return null;
+  const id = value >>> 0;
+  const entry = vm.resources?.table?.getEntry?.(id);
+  const systemId = id >= 0x01000000 && id < 0x02000000;
+  if (entry || systemId) return themeTypedValueReference(vm, id, resolveRefs);
+  return { type: 0x10, data: value | 0, resourceId: 0 };
+}
+
+function themeTypedValueReference(vm, id, resolveRefs) {
+  if (!resolveRefs) return { type: 0x01, data: id | 0, resourceId: id };
+  const resources = vm.resources;
+  const entry = resources?.table?.getEntry?.(id);
+  // 颜色（含指向系统色 0x01xxxxxx 的引用链）优先；注意只对缺少表项的系统 id
+  // 或 color 类型资源调用，避免把普通 integer 资源当成颜色。
+  if (!entry || entry.typeName === 'color') {
+    const color = resources?.resolveColorValue?.(id);
+    if (color !== null && color !== undefined) return { type: 0x1c, data: color | 0, resourceId: id };
+  }
+  const resolved = resources?.resolve?.(id);
+  if (resolved && typeof resolved === 'object') {
+    if (resolved.dimension) return { type: 0x05, data: (resolved.raw ?? 0) | 0, resourceId: id };
+    if (resolved.reference !== undefined) return themeTypedValueReference(vm, resolved.reference >>> 0, true);
+  }
+  if (typeof resolved === 'string') return { type: 0x03, data: 0, resourceId: id, string: resolved };
+  if (typeof resolved === 'number') return { type: 0x10, data: resolved | 0, resourceId: id };
+  if (typeof resolved === 'boolean') return { type: 0x12, data: resolved ? 1 : 0, resourceId: id };
+  return { type: 0x01, data: id | 0, resourceId: id };
+}
+
 function getThemeObject(vm) {
   if (!vm) return null;
   if (!vm.themeObject) {
@@ -11015,27 +11059,28 @@ function getThemeObject(vm) {
     object.$peer = {
       applyStyle: () => undefined,
       setTo: () => undefined,
-      resolveAttribute: (attrId, out, _resolveRefs) => {
+      resolveAttribute: (attrId, out, resolveRefs) => {
         const store = themeStore(vm);
         const table = vm.resources?.table || null;
         const key = table ? table.getEntry(attrId >>> 0)?.key : null;
-        if (!key || !Object.prototype.hasOwnProperty.call(store, key)) return false;
+        if (!key) return false;
+        let value;
+        if (Object.prototype.hasOwnProperty.call(store, key)) value = store[key];
+        else if (store.$attrReferences && Object.prototype.hasOwnProperty.call(store.$attrReferences, key)) {
+          value = store.$attrReferences[key];
+        } else return false;
+        const typed = themeTypedValue(vm, value, !!resolveRefs);
+        if (!typed) return false;
         if (out) {
-          const data = typeof store[key] === 'number' ? store[key] | 0 : 0;
-          const resourceId = typeof store[key] === 'number' ? store[key] >>> 0 : 0;
-          if (out.$fields instanceof Map) {
-            out.$fields.set('Landroid/util/TypedValue;->type:I', 0x10);
-            out.$fields.set('Landroid/util/TypedValue;->data:I', data);
-            out.$fields.set('Landroid/util/TypedValue;->resourceId:I', resourceId);
-          } else if (out.$peer) {
-            out.$peer.data = data;
-            out.$peer.type = 0x10;
-            out.$peer.resourceId = resourceId;
-          } else {
-            out.data = data;
-            out.type = 0x10;
-            out.resourceId = resourceId;
-          }
+          const write = (name, fieldValue) => {
+            if (out.$fields instanceof Map) out.$fields.set(`Landroid/util/TypedValue;->${name}`, fieldValue);
+            else if (out.$peer) out.$peer[name] = fieldValue;
+            else out[name] = fieldValue;
+          };
+          write('type:I', typed.type);
+          write('data:I', typed.data | 0);
+          write('resourceId:I', typed.resourceId >>> 0);
+          if (typed.string !== undefined) write('string:Ljava/lang/CharSequence;', typed.string);
         }
         return true;
       },

@@ -352,8 +352,9 @@ export function formatTypedValue(dataType, data) {
 
 export function decodeComplex(data) {
   const radix = [1, 1 / 128, 1 / 32768, 1 / 8388608];
-  let mantissa = (data & 0xffffff00) >> 8;
-  if (mantissa & 0x800000) mantissa -= 0x1000000;
+  // AOSP 把 mantissa 当作「左移 8 位后的有符号整数」：算术右移本身已带符号，
+  // 再按 24 位符号位修正一次会把 -73 变成 -16777289。
+  const mantissa = (data & 0xffffff00) >> 8;
   const value = mantissa * radix[(data >> 4) & 0x3];
   const unit = data & 0xf;
   const units = ['px', 'dp', 'sp', 'pt', 'in', 'mm'];
