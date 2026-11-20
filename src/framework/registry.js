@@ -3664,7 +3664,11 @@ function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/widget/TextView;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText?.(jsString(text)); },
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => {
+          // Android 里 setText(null) 等于清空文本；jsString(null) 会返回字面量
+          // "null"，直接把控件文字变成 "null"，所以这里先挡掉空引用。
+          self.view?.setText?.(text === null || text === undefined ? '' : jsString(text));
+        },
         'setText(I)V': (self, [resId]) => self.view?.setText(self.vm.resources.getString(resId >>> 0)),
         'setTextAppearance(Landroid/content/Context;I)V': (self, _args, _vm, resId) => applyTextAppearance(self, _args[1]),
         'setTextAppearance(I)V': (self, [resId]) => applyTextAppearance(self, resId),
@@ -4221,7 +4225,11 @@ function vmShowChild(self, index) {
       super: 'Landroid/widget/TextView;',
       ctor: viewPeerConstructor('Landroid/widget/Button;'),
       methods: {
-        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => { self.view?.setText?.(jsString(text)); },
+        'setText(Ljava/lang/CharSequence;)V': (self, [text]) => {
+          // Android 里 setText(null) 等于清空文本；jsString(null) 会返回字面量
+          // "null"，直接把控件文字变成 "null"，所以这里先挡掉空引用。
+          self.view?.setText?.(text === null || text === undefined ? '' : jsString(text));
+        },
       },
     })
   );
