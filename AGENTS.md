@@ -168,7 +168,7 @@ npm run site
 - 分支 `main`，最新 HEAD 以 `git log -1` 为准。
 - 入口分层：`apk.js`（核心引擎）/ `android-framework.js`（宿主类 + 模拟器）。
 - 拦截层：`src/runtime/xposed.js`（Xposed 风格 API）；`src/runtime/hooks.js` 只剩生命周期事件。
-- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
+- 测试套件：coverage、duplicates、shadowing、playground、refs、run、check、parse、api、hooks、hooks-apk、bundles、layout-flag、list-callbacks、recyclerview、appbar、elevation-overlay、dialog-theme、progress-animation、list-choices、appcompat-hosts、typed-array、measure-constraints、style-precedence、inflate-dispatch、system-service、class-object、linked-hash-set、material-input-color、zip、listview、format、diagnose、touch、interaction、widgets、drawables。
 - 提交前三项校验：`npm run build`、`npm run test:all`、`npm run site`。
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 
@@ -310,6 +310,10 @@ npm run site
 - **`drawRoundRect` vs `drawPath`**：MaterialShapeDrawable 的圆角矩形走 `k.a(RectF)` 为真时的 `drawRoundRect`，路径分支只在非圆角/凸形状时用。
 - **不要为单个 APK 写特判**；设备数据走 `VIRTUAL_FS` / `navigator`。调试钩子只针对单 APK 类名的必须交付前清理。
 
+- **`getColor` 的三个来源要分清**：资源里取到的值可能是「颜色整数」「指向 color 资源的引用」「指向主题属性的引用（`?attr/xxx`，值形如 `0x7f0xxxxx`）」。第三类必须查 `themeAttributes`，系统资源（`0x01xxxxxx`）必须走 `resources.resolve` 的内置映射。少了任何一步，调用方就会拿一个 id 当颜色渲染——实测 Material 输入框因此被涂成洋红 `#FFFF00FF`（`Color.MAGENTA` 正是它的兜底值）。看到洋红先怀疑这一条。
+
+- **库级 R 包要列全**：`--extra-packages` 只为列出的包生成 R 类。缺 `androidx.core` 时 `R$styleable` 取不到，`ColorStateList` 解析整体退化成兜底；缺 `androidx.appcompat.resources` 时 `R$drawable.abc_vector_test` 为 0，vector 自检失败并中断整个控件构造。
+
 ### 已知的行为简化（不是 bug，但和原生有差距）
 
 1. **ProgressBar 插值**：已实现 VisualProgress——`setProgress` 记录起止值与起始时间，`visualProgress()` 按 250ms 减速曲线插值，绘制与帧循环都读它；不确定态仍走自己的旋转动画。仍缺：进入不确定态时的 morph 过渡。
@@ -337,12 +341,18 @@ npm run site
    - 因此构建脚本的正确配置就是：`aapt2 link` 一次（不加 `--static-lib`），`--extra-packages` 里列出 `androidx.appcompat:androidx.appcompat.resources:com.google.android.material`，再把这些 R 类一起编译进 dex。已验证 `R$drawable` 能拿到 dexClass。
    - **已解决**（2026-11-20）：真正的卡点是 `java.util.LinkedHashSet` **没有 host 实现**。`EndCompoundLayout` 用它存监听器，构造期 `initEndIconView → setEndIconMode → dispatchOnEndIconChanged` 就要遍历，集合退化成裸对象后 `iterator()` 返回 null，于是报「调用 hasNext 时对象为空」，`endLayout` / `editText` 一直是 null。补齐该集合后两者立即正常，**样例 APK 首次画出输入框**。
    - 顺带修掉：`setText(null)` 之前经 `jsString(null)` 变成字面量 `"null"`（应为清空），两处 `setText(CharSequence)` 绑定已挡掉空引用；`themedStyledValue` 对系统资源 id（`0x01xxxxxx`）查不到时改走 `resources.resolve` 的内置映射。
-   - **洋红底色的最终结论**（2026-11-20，已逐层取证）：
-     1. `boxBackgroundColor` / `defaultFilledBackgroundColor` 实测都是 `0xffff00ff`；
+   - **洋红底色已修复**（2026-11-20）：根因是三处叠加的取色缺陷，而非资源缺失。
+     1. `TypedArray.getColor` 拿到 `?attr/colorPrimary` 这类**主题属性引用**（值形如 `0x7f0xxxxx`）时，把它当颜色整数直接返回——调用方拿着 attr id 去渲染，显示出完全不相关的颜色；
+     2. **系统资源**（`0x01xxxxxx`）不在 APK 的 arsc 里，查表查不到时同样被原样当成颜色；
+     3. `themeAttributeValues` 在「表里没有 key、但样式确实给了值」时凭空写 0，丢了真实引用。
+     修复：`getColor` 按「attr 引用查主题 → 系统资源走内置映射 → 普通资源正常解析」取值；`themeAttributeValues` 保留原始引用交给访问器解析。同时构建脚本补上 `androidx.appcompat.resources` 与 `androidx.core` 两个 R 包——缺了它们 `R$styleable`/`R$drawable` 取不到，颜色列表解析会整体退化成兜底值。
+     实测：输入框底色从 `rgb(255,0,255)` 变为 `rgb(98,0,238)`（#6200EE，主题主色）。回归见 `tests/material-input-color.mjs`。
+   - 以下是**排查中被推翻的错误结论**，保留仅为记录弯路，不要再据此行动：
+     1. 曾认为 `boxBackgroundColor` / `defaultFilledBackgroundColor` 取到 `0xffff00ff` 是资源缺失所致；
      2. 追踪到 `TypedArray.getColor(idx=0, fallback=0xffff00ff)` 返回 fallback，调用栈是 `ResourcesCompat.getColorStateList → inflateColorStateList → ColorStateListInflaterCompat.createFromXml`，即 **color XML 解析失败后走了兜底**；
      3. 用 `parseBinaryXml` 直接解析 `res/color/mtrl_filled_background_color.xml`，结构完全正常：`selector` 下 4 个 `item`，各带 `color`/`alpha`/`state_*`；
      4. 但 `item` 的 `color` 属性值是 `2130903306`（`0x7f03000a`），在资源表里指向 **`attr/actionBarTabTextStyle`**，而 `R.java` 里 `colorSurface=0x7f030120`——**同一份 APK 内 id 不自洽**。
-     5. 结论：`res/color/*.xml` 是编译期固化 id 的二进制，最终 link 重新编号后与 AXML 内嵌 id 对不上。这是多包 `--extra-packages` 链路的固有后果，**不是框架缺陷**，框架侧不应为它兜底。
+     5. 曾据此结论为「构建链路问题、框架侧不予兜底」——**错误**。真实原因是取色时把 `?attr` 引用当成了颜色整数，已在 `getColor` 修复。
    - 排查方法教训：`parseBinaryXml` 返回的是 `{ root, first, manifest, pool }` 而不是节点本身，直接当节点用会误判成「解析失败」。
    - 浮动标签文本控件的尺寸为 `0x0` 属正常：未输入时 hint 由 `CollapsingTextHelper` 自绘，不走 TextView。
    - 教训：统计型 grep 必须用完整模式（`0x[0-9a-f]*`），否则会把十六进制值误读成 0。本文件此前三条基于该误读的结论已作废。
