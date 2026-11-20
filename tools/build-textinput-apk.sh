@@ -53,7 +53,7 @@ done
   -I "$ANDROID_JAR" \
   --manifest "$SRC/AndroidManifest.xml" \
   --java "$OUT/gen" \
-  --extra-packages androidx.appcompat:com.google.android.material \
+  --extra-packages androidx.appcompat:androidx.appcompat.resources:androidx.core:com.google.android.material \
   --auto-add-overlay --no-static-lib-packages \
   $DEPS \
   "$OUT/compiled/app.zip"

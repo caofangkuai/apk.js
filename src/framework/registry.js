@@ -7726,10 +7726,30 @@ function vmShowChild(self, index) {
         'getLayout(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getXml(I)Landroid/content/res/XmlResourceParser;': (self, [resId], vm) => makeXmlParserPeer(vm, safeGetLayout(vm, resId)),
         'getValue(ILandroid/util/TypedValue;Z)V': (self, [resId, out], vm) => {
-          const value = vm.resources.resolve(resId >>> 0);
+          const id = resId >>> 0;
+          // 主题属性（?attr/xxx）要先换成它实际指向的值，否则调用方
+          // （如颜色列表解析器）会把这个 attr id 当成资源 id 再去取 XML。
+          const table = vm.resources?.table;
+          const entry = table?.getEntry?.(id);
+          let value;
+          let type = 5;
+          if (entry?.typeName === 'attr') {
+            const themed = vm.themeAttributes?.[entry.key];
+            if (typeof themed === 'number') {
+              value = themed >>> 0;
+              type = 0x1c; // TYPE_INT_COLOR_ARGB8
+            } else {
+              value = null;
+              type = 0;
+            }
+          } else {
+            value = vm.resources.resolve(id);
+            if (typeof value === 'number') type = 0x1c;
+            else if (typeof value === 'string') type = 3;
+          }
           if (!out) return;
           const peer = out.$peer || (out.$peer = {});
-          peer.type = typeof value === 'string' ? 3 : 5;
+          peer.type = type;
           peer.data = value;
           peer.string = value === null || value === undefined ? null : String(value);
           if (typeof value === 'number') peer.data = value >>> 0;
@@ -9898,6 +9918,13 @@ function themeAttributeValues(vm, attrIds, styleId, attributeSet = null, defStyl
     } else if (key && Object.prototype.hasOwnProperty.call(store, key)) {
       result.set(id, store[key]);
       present.add(id);
+    } else if (styleAttributes && styleAttributes.has(id)) {
+      // 主题里没有这个 key，但样式本身给了值：原样保留引用，交给
+      // TypedArray 的访问器（getColor / getResourceId 等）去解析。
+      // 之前这里按 key 名字猜成 0 或一个蓝色，既丢了真实资源，
+      // 又让调用方拿到一个凭空捏造的数值。
+      result.set(id, styleAttributes.get(id));
+      present.add(id);
     } else if (key) {
       const isColorAttr = key.endsWith('Color') || key.startsWith('color');
       result.set(id, isColorAttr ? 0xff2196f3 >>> 0 : 0);
@@ -10046,16 +10073,54 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
     getColor: (index, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
-      if (typeof value === 'number') return value >>> 0;
+      // 值可能是：颜色整数、指向 color 资源的引用、或指向主题属性的引用
+      // （`?attr/colorSurface` 这类）。第三种必须查主题，否则会把 attr id
+      // 当成颜色直接返回，渲染出完全不相关的颜色。
+      const asColor = (raw) => {
+        if (typeof raw !== 'number') return undefined;
+        const numeric = raw >>> 0;
+        const entry = vm.resources?.table?.getEntry?.(numeric);
+        if (entry?.typeName === 'attr') {
+          const themed = vm.themeAttributes?.[entry.key];
+          if (typeof themed === 'number') return themed >>> 0;
+          const refId = vm.themeAttributes?.$attrReferences?.[entry.key];
+          if (typeof refId === 'number') {
+            const resolvedRef = vm.resources?.resolve?.(refId >>> 0);
+            if (typeof resolvedRef === 'number') return resolvedRef >>> 0;
+          }
+          return undefined;
+        }
+        // 系统资源（0x01xxxxxx）不在 APK 的 arsc 里，getEntry 查不到，
+        // 但 resources.resolve 有内置映射（如 android:color/transparent）。
+        if (!entry) {
+          const resolvedUnknown = vm.resources?.resolve?.(numeric);
+          if (typeof resolvedUnknown === 'number') return resolvedUnknown >>> 0;
+          if (typeof resolvedUnknown === 'string' && resolvedUnknown.startsWith('#')) {
+            const hex = resolvedUnknown.slice(1);
+            if (hex.length === 6) return (0xff000000 | parseInt(hex, 16)) >>> 0;
+            if (hex.length === 8) return parseInt(hex, 16) >>> 0;
+          }
+          if ((numeric >>> 24) === 0x01) return undefined;
+        }
+        return numeric;
+      };
+      if (typeof value === 'number') {
+        const direct = asColor(value);
+        if (direct !== undefined) return direct;
+        return fallback;
+      }
       if (value && typeof value === 'object' && value.reference !== undefined) {
-        const resolved = vm.resources?.resolve?.(value.reference >>> 0);
+        const reference = value.reference >>> 0;
+        const viaAttr = asColor(reference);
+        if (viaAttr !== undefined) return viaAttr;
+        const resolved = vm.resources?.resolve?.(reference);
         if (typeof resolved === 'number') return resolved >>> 0;
         if (typeof resolved === 'string' && resolved.startsWith('#')) {
           const hex = resolved.slice(1);
           if (hex.length === 6) return (0xff000000 | parseInt(hex, 16)) >>> 0;
           if (hex.length === 8) return parseInt(hex, 16) >>> 0;
         }
-        const key = vm.resources?.table?.getEntry?.(value.reference >>> 0)?.key;
+        const key = vm.resources?.table?.getEntry?.(reference)?.key;
         const themed = key ? vm.themeAttributes?.[key] : undefined;
         if (typeof themed === 'number') return themed >>> 0;
       }
