@@ -328,7 +328,10 @@ npm run site
      3. 拿到 null 后它把 `mHasCheckedVectorDrawableSetup` 重置回 false 并抛 `IllegalStateException`，构造中断；
      4. 根因：`Landroidx/appcompat/resources/R$drawable;` 这个 R 类**没有进 dex**——构建脚本的 `--extra-packages` 只列了 `androidx.appcompat` 和 `com.google.android.material`。
    - **尝试过但失败的修法**：把 `--extra-packages` 扩成十几个包后，R 类确实生成了、吞掉的异常也归零，但资源 id 整体偏移，画面变成全白。说明多包 `--extra-packages` 会让 id 分配与 dex 里的 R 常量对不上。已回退。
-   - 已查清 `--extra-packages` 的语义（2026-11-20 复核）：它只是「用不同包名额外生成同一份 R.java」，即主包 R 的副本，**不会**为其它库包生成独立的 R 类。所以 `androidx.appcompat.resources` 的 R 无论怎么列都不会出现——dex 里该类型只被引用、没有定义（实测该类定义数为 0，而它的资源 dep-3.zip 确实参与了 link）。要拿到库级 R，必须像 Gradle 那样对每个 AAR 单独 `aapt2 link --static-lib` 再按依赖拓扑引用。**不建议**继续在构建脚本上盲试。
+   - **更正**（2026-11-20 复核，推翻此前记录）：`--extra-packages` **确实会为库包生成 R 类**。实测把 `androidx.appcompat.resources` 写进 `--extra-packages` 后，`androidx/appcompat/resources/R.java` 正常产出、link 无报错。
+   - 真正的问题在**包归属**：现有 link 用了 `--no-static-lib-packages`，它把所有资源并进应用包（id 前缀 `0x7f`），于是库 R 里的常量全是 0（实测 `abc_vector_test=0`，而资源表里该资源 id 是 `0x7f070076`，确实存在）。
+   - 另外单独对单个 AAR 用 `--static-lib` 生成 R 也能成功（`appcompat-resources` 的 R.java 能产出），但 id 同样是 0——`--static-lib` 下库资源 id 本就不确定，运行时对不上。
+   - 结论：要拿到 id 正确的库级 R，需要让各库资源保持自己的包归属（去掉 `--no-static-lib-packages`），但那会重新引爆 appcompat 与 material 的 `SearchView` styleable 冲突。这是一条真实的取舍，不是靠调参能绕过的，需要 Gradle 式的完整资源管线。**建议**直接要一个 Gradle 构建的 APK，不要在构建脚本上继续试参数。
    - 期间顺带修掉的通用缺陷（都有独立测试，与这个样例无关）：`MATCH_PARENT` 测量、`LayoutParams` 默认值、`TypedArray` 下标、`defStyleAttr` 优先级、样式引用解析、inflate 派发 `addView`、系统服务类型、`Class` 对象类型归属、静默吞异常。
 4. **Dialog/AlertDialog**：圆角表面、阴影、三段按钮已有；配色改为从主题解析（colorSurface / colorOnSurface / colorPrimary），用 tests/dialog-theme.mjs 覆盖。仍缺：应用自定义 Dialog 主题样式（setTheme）与自定义 contentView 的像素对照。
 
