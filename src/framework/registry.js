@@ -517,6 +517,37 @@ function manifestAttrText(node, ...names) {
   return '';
 }
 
+/**
+ * 清单 `<application>` 下的 `<meta-data>`：值可能是字符串、数字，或资源引用。
+ * 资源引用先查资源表，查不到就保留 null（调用方按缺失处理）。
+ */
+function manifestMetaDataMap(vm, application) {
+  const values = new Map();
+  for (const node of application?.children || []) {
+    if (!node || node.name !== 'meta-data') continue;
+    const name = manifestAttrText(node, 'name');
+    if (!name) continue;
+    const raw = node.getAttribute?.('value');
+    let value = null;
+    if (typeof raw === 'string' || typeof raw === 'number') {
+      value = raw;
+    } else if (raw && typeof raw === 'object') {
+      if (typeof raw.stringValue === 'string') value = raw.stringValue;
+      else if (raw.reference !== undefined) {
+        try {
+          const resolved = vm?.resources?.resolve?.(raw.reference >>> 0);
+          if (typeof resolved === 'string' || typeof resolved === 'number') value = resolved;
+          else if (resolved && resolved.value !== undefined) value = resolved.value;
+        } catch (_error) {
+          value = null;
+        }
+      } else if (raw.value !== undefined) value = raw.value;
+    }
+    values.set(name, value);
+  }
+  return values;
+}
+
 function dialogTheme(peer) {
   const theme = peer.vm?.themeAttributes || {};
   const night = theme.isLightTheme === false;
@@ -1936,11 +1967,11 @@ export function buildFrameworkDefinitions(vm) {
         },
         'size()I': (self) => self.map.size,
         'isEmpty()Z': (self) => self.map.size === 0,
-        'keySet()Ljava/util/Set;': (self, _args, vm) => vm.wrapPeer({
-          map: self.map,
-          constructor: { $descriptor: 'Ljava/util/Set;' },
-          toArray: () => [...self.map.keys()],
-        }),
+        'keySet()Ljava/util/Set;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/Set;');
+          object.$peer = { setItems: [...self.map.keys()] };
+          return object;
+        },
         'get(Ljava/lang/String;)Ljava/lang/Object;': (self, [key]) => self.map.get(jsString(key)) ?? null,
         'putAll(Landroid/os/Bundle;)V': (self, [other]) => {
           const source = other?.$peer?.map;
@@ -7427,7 +7458,17 @@ function vmShowChild(self, index) {
         'getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;': (self, [pkg], vm) => {
           const requested = jsString(pkg);
           const info = vm.allocateRawObject('Landroid/content/pm/ApplicationInfo;');
-          info.$peer = { vm, constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' } };
+          const application = vm.apk?.manifest?.findChild?.('application') || null;
+          const metadata = vm.allocateRawObject('Landroid/os/Bundle;');
+          const values = manifestMetaDataMap(vm, application);
+          metadata.$peer = { map: values };
+          info.$peer = {
+            vm,
+            constructor: { $descriptor: 'Landroid/content/pm/ApplicationInfo;' },
+            packageName: requested || vm.packageName || '',
+            metaData: metadata,
+            className: manifestAttrText(application, 'name'),
+          };
           return info;
         },
       },

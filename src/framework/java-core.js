@@ -430,17 +430,42 @@ let mapKeyCounter = 0;
  */
 function findValueSlot(self, key, vm) {
   if (!vm || !isJavaObject(key) || !self.rawKeys || self.rawKeys.size === 0) return null;
-  if (!classOverridesMethod(vm, key, 'hashCode', '()I')) return null;
+  const overrides = classOverridesMethod(vm, key, 'hashCode', '()I');
+  if (!overrides) return null;
   for (const [slot, raw] of self.rawKeys) {
     if (raw === key) return slot;
     if (!isJavaObject(raw)) continue;
     try {
-      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw]) === true) return slot;
+      const equal = vm.invokeByName('equals', '(Ljava/lang/Object;)Z', key, [raw]);
+      if (equal === true) return slot;
     } catch (error) {
       // equals 抛错按不相等处理，避免把宿主异常带进 Map 语义。
     }
   }
   return null;
+}
+
+/**
+ * Set 与 Map 一样要按 Java 语义比较：只覆写 hashCode/equals 的值对象（如
+ * Firebase 的 Qualified）必须用 dex 的 equals 查找，否则「同一个接口的另一个实例」
+ * 会被当成新元素，依赖解析就会误报缺依赖。
+ */
+function findSetIndex(self, value, vm) {
+  const items = self.setItems || [];
+  if (!vm || !isJavaObject(value) || !classOverridesMethod(vm, value, 'hashCode', '()I')) {
+    return items.indexOf(value);
+  }
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item === value) return index;
+    if (!isJavaObject(item)) continue;
+    try {
+      if (vm.invokeByName('equals', '(Ljava/lang/Object;)Z', value, [item]) === true) return index;
+    } catch (_error) {
+      // equals 抛错按不相等处理
+    }
+  }
+  return -1;
 }
 
 
@@ -3707,25 +3732,25 @@ JAVA_CORE_CLASSES['Ljava/util/HashSet;'] = nativeDef('Ljava/util/HashSet;', {
     },
     // new HashSet(collection)：漏掉这个构造会让集合保持空，
     // 依赖它的组件注册（Firebase Component.Builder）直接看不到任何接口。
-    '<init>(Ljava/util/Collection;)V': (self, [source]) => {
+    '<init>(Ljava/util/Collection;)V': (self, [source], vm) => {
       self.setItems = [];
       for (const item of collectionItems(source)) {
-        if (!self.setItems.includes(item)) self.setItems.push(item);
+        if (findSetIndex(self, item, vm) < 0) self.setItems.push(item);
       }
     },
-    'add(Ljava/lang/Object;)Z': (self, [value]) => {
+    'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
       if (!self.setItems) self.setItems = [];
-      if (self.setItems.includes(value)) return false;
+      if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems.push(value);
       return true;
     },
-    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
-      const index = (self.setItems || []).indexOf(value);
+    'remove(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      const index = findSetIndex(self, value, vm);
       if (index < 0) return false;
       self.setItems.splice(index, 1);
       return true;
     },
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.setItems || []).includes(value),
+    'contains(Ljava/lang/Object;)Z': (self, [value], vm) => findSetIndex(self, value, vm) >= 0,
     'size()I': (self) => (self.setItems || []).length,
     'isEmpty()Z': (self) => (self.setItems || []).length === 0,
     'clear()V': (self) => {
@@ -3756,24 +3781,24 @@ JAVA_CORE_CLASSES['Ljava/util/LinkedHashSet;'] = nativeDef('Ljava/util/LinkedHas
     '<init>(IFZ)V': (self) => {
       self.setItems = [];
     },
-    '<init>(Ljava/util/Collection;)V': (self, [source]) => {
+    '<init>(Ljava/util/Collection;)V': (self, [source], vm) => {
       const items = source?.$peer?.setItems || source?.$peer?.items || source?.$data || source?.setItems || source?.items || [];
       self.setItems = [];
-      for (const item of items) if (!self.setItems.includes(item)) self.setItems.push(item);
+      for (const item of items) if (findSetIndex(self, item, vm) < 0) self.setItems.push(item);
     },
-    'add(Ljava/lang/Object;)Z': (self, [value]) => {
+    'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
       if (!self.setItems) self.setItems = [];
-      if (self.setItems.includes(value)) return false;
+      if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems.push(value);
       return true;
     },
-    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
-      const index = (self.setItems || []).indexOf(value);
+    'remove(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      const index = findSetIndex(self, value, vm);
       if (index < 0) return false;
       self.setItems.splice(index, 1);
       return true;
     },
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => (self.setItems || []).includes(value),
+    'contains(Ljava/lang/Object;)Z': (self, [value], vm) => findSetIndex(self, value, vm) >= 0,
     'size()I': (self) => (self.setItems || []).length,
     'isEmpty()Z': (self) => (self.setItems || []).length === 0,
     'clear()V': (self) => {
@@ -3792,26 +3817,27 @@ JAVA_CORE_CLASSES['Ljava/util/concurrent/CopyOnWriteArraySet;'] = nativeDef('Lja
     '<init>()V': (self) => {
       self.setItems = [];
     },
-    '<init>(Ljava/util/Collection;)V': (self, [other]) => {
-      self.setItems = [...collectionItems(other)];
+    '<init>(Ljava/util/Collection;)V': (self, [other], vm) => {
+      self.setItems = [];
+      for (const item of collectionItems(other)) if (findSetIndex(self, item, vm) < 0) self.setItems.push(item);
     },
-    'add(Ljava/lang/Object;)Z': (self, [value]) => {
-      if (self.setItems.includes(value)) return false;
+    'add(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems = [...self.setItems, value];
       return true;
     },
-    'addIfAbsent(Ljava/lang/Object;)Z': (self, [value]) => {
-      if (self.setItems.includes(value)) return false;
+    'addIfAbsent(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      if (findSetIndex(self, value, vm) >= 0) return false;
       self.setItems = [...self.setItems, value];
       return true;
     },
-    'remove(Ljava/lang/Object;)Z': (self, [value]) => {
-      const index = self.setItems.indexOf(value);
+    'remove(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      const index = findSetIndex(self, value, vm);
       if (index < 0) return false;
       self.setItems = self.setItems.filter((_item, i) => i !== index);
       return true;
     },
-    'contains(Ljava/lang/Object;)Z': (self, [value]) => self.setItems.includes(value),
+    'contains(Ljava/lang/Object;)Z': (self, [value], vm) => findSetIndex(self, value, vm) >= 0,
     'size()I': (self) => self.setItems.length,
     'isEmpty()Z': (self) => self.setItems.length === 0,
     'clear()V': (self) => {
