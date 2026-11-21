@@ -175,6 +175,20 @@ npm run site
 - 自检：`grep -rin "androidx\|com.google" src/` 必须为空；`npm run test:bundles` 会校验两个产物的依赖方向与导出面。
 - Via 浏览器（`/tmp/via.apk`）：隐私弹窗 → 主页可正常渲染（标题/底栏改为主题深色文字，此前误显示白字），冒烟无未捕获异常；WebView 内容区仍为空（宿主不解析真实网页）。
 
+### 本轮已完成（2026-11-21 第十九轮：浏览器 H5 能力转接）
+
+1. **新增 `src/framework/browser-io.js`**：把「Android 里能用、浏览器里也有对应能力」的 API 全部接到真实 H5 能力，而不是返回假数据：
+   - `ACTION_GET_CONTENT` / `OPEN_DOCUMENT` / `PICK` → 隐藏 `<input type=file>`（accept/multiple 按 Intent type 与 `EXTRA_ALLOW_MULTIPLE` 决定）；
+   - `MediaStore.ACTION_IMAGE_CAPTURE` / `VIDEO_CAPTURE` → `getUserMedia`（后置摄像头）+ canvas 截帧 / `MediaRecorder`，无媒体设备时回退 `<input capture>`；
+   - `ACTION_SEND` → `navigator.share`（不可用写剪贴板）；`ACTION_VIEW` → `window.open`；`ACTION_DIAL` / `SENDTO` → `tel:` / `mailto:` / `sms:`；
+   - `ACTION_CREATE_DOCUMENT` / `DownloadManager.enqueue` → `VIRTUAL_FS` 落盘 + `<a download>` 触发浏览器下载。
+   - 结果统一写进 `VIRTUAL_FS`（`/storage/emulated/0/DCIM/Camera`、`Download`），再以 `onActivityResult(requestCode, RESULT_OK, Intent)` 回投；`EXTRA_OUTPUT` 写目标路径、`data` 为空；`ClipData` 支持多选；拍照无 output 时把 Bitmap 放进 extras。
+2. **`WebView.onShowFileChooser`**（`compat.js`）由 `return false` 改为真正调用 `showFileChooser`：选文件后通过 `onReceiveValue` 回投 `Uri[]`，被 `WebChromeClient` 真实消费。
+3. **系统服务接 H5**（`registry.js`）：`Vibrator`（`navigator.vibrate`，含波形展开）、`ClipboardManager`（`navigator.clipboard` + 监听器）、`LocationManager`（`navigator.geolocation`，含 `LocationListener` / GNSS 回调 / PendingIntent 变体 / 测试 Provider）、`NotificationManager`（浏览器 `Notification` + 权限申请，标题正文从 Notification extras 取）、`DownloadManager`（真实下载）。`Location` / `VibrationEffect` / `ClipData` 等值对象按 AOSP 语义实现。
+4. **`InputStream` / `OutputStream` 真实读写**（`java-core.js`）：`InputStream` 支持 `read()/read([B)/read([BII)/skip/available/mark/reset/markSupported/close`，底层为字节数组；`OutputStream` 的 `flush/close` 把缓冲区写回 `VIRTUAL_FS`（`$targetPath`），`ContentResolver.openOutputStream` 因此真正落盘。`VirtualFs.write` 新增 `onWrite` 回调，供下载链路复用。
+5. **`tools/check-sdk.mjs` 修正**：此前只统计 registry defs、漏掉 `JAVA_CORE_CLASSES`，且按 def 而非按类输出（同名类出现重复条目、虚报缺失）。改为「java-core + framework，byDescriptor 后者覆盖，按类输出」，当前覆盖 **9923/12070**。
+6. **回归**：新增 `tests/browser-io.mjs`（fake DOM + fake vm，覆盖 Intent 识别、选择回投、EXTRA_OUTPUT、重名去重、OutputStream 落盘、`onShowFileChooser` 回调），已并入 `test:all`；同时修掉 `WebView.addJavascriptInterface` / `evaluateJavascript` 写错落点（应写 `self.view` 而非 peer）导致 `tests/compat.mjs` 失败的问题。
+
 ### 本轮已完成（2026-11-21 第十七轮：主题属性引用与系统颜色解析）
 
 Via 主页此前标题与底部导航文字为白色、底栏呈半透明深灰。定位到三处互相独立的通用缺陷（都不是 Via 特判）：

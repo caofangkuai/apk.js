@@ -1,5 +1,6 @@
 import { floatBitsToNumber } from '../runtime/values.js';
 import { Bitmap } from './graphics.js';
+import { showFileChooser } from './browser-io.js';
 
 /**
  * 公共 API 兼容层：对照 android.jar 补齐宿主类缺失的方法。
@@ -1632,7 +1633,10 @@ const WEBVIEW_CLIENT_METHODS = {
 const WEB_CHROME_CLIENT_METHODS = {
   'onConsoleMessage(Landroid/webkit/ConsoleMessage;)Z': () => false,
   'onConsoleMessage(Ljava/lang/String;ILjava/lang/String;)V': () => undefined,
-  'onShowFileChooser(Landroid/webkit/WebView;Landroid/webkit/ValueCallback;Landroid/webkit/WebChromeClient$FileChooserParams;)Z': () => false,
+  'onShowFileChooser(Landroid/webkit/WebView;Landroid/webkit/ValueCallback;Landroid/webkit/WebChromeClient$FileChooserParams;)Z': (_self, [_view, callback, params], vm) => {
+    showFileChooser(vm, callback, params);
+    return true;
+  },
   'onPermissionRequest(Landroid/webkit/PermissionRequest;)V': () => undefined,
   'onPermissionRequestCanceled(Landroid/webkit/PermissionRequest;)V': () => undefined,
   'onCreateWindow(Landroid/webkit/WebView;ZZLandroid/os/Message;)Z': () => false,

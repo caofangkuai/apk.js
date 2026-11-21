@@ -4747,6 +4747,13 @@ const VIRTUAL_FS = {
     const parent = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
     this.mkdirs(parent);
     this.files.set(normalized, Uint8Array.from(bytes || []));
+    if (typeof this.onWrite === 'function') {
+      try {
+        this.onWrite(normalized, this.files.get(normalized));
+      } catch (_) {
+        // 写入回调失败不应影响文件本身。
+      }
+    }
     return true;
   },
   read(path) {
@@ -5325,6 +5332,13 @@ JAVA_CORE_CLASSES['Ljava/io/InputStream;'] ??= nativeDef('Ljava/io/InputStream;'
     'close()V': () => undefined,
   },
 });
+/** OutputStream 落盘：带 $targetPath 的流在 flush/close 时把缓冲写入 VIRTUAL_FS。 */
+function flushOutputStreamSink(self) {
+  if (!self?.$targetPath || !Array.isArray(self.$buffer)) return;
+  VIRTUAL_FS.write(self.$targetPath, Uint8Array.from(self.$buffer));
+  self.$buffer = [];
+}
+
 JAVA_CORE_CLASSES['Ljava/io/OutputStream;'] ??= nativeDef('Ljava/io/OutputStream;', {
   super: 'Ljava/lang/Object;',
   interfaces: ['Ljava/io/Closeable;', 'Ljava/io/Flushable;'],
@@ -5345,8 +5359,8 @@ JAVA_CORE_CLASSES['Ljava/io/OutputStream;'] ??= nativeDef('Ljava/io/OutputStream
       const end = start + (Number(length) || 0);
       for (let i = start; i < end && i < data.length; i += 1) self.$buffer.push(data[i] & 0xff);
     },
-    'flush()V': () => undefined,
-    'close()V': () => undefined,
+    'flush()V': (self) => flushOutputStreamSink(self),
+    'close()V': (self) => flushOutputStreamSink(self),
   },
 });
 JAVA_CORE_CLASSES['Ljava/io/Flushable;'] ??= nativeDef('Ljava/io/Flushable;', { super: null });

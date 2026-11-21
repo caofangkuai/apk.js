@@ -2,9 +2,9 @@
 
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
-- 源文件：19
-- 注册的 native 类：425
-- 方法/构造函数键（静态统计）：8796
+- 源文件：20
+- 注册的 native 类：436
+- 方法/构造函数键（静态统计）：9013
 
 ## Native 类清单
 
@@ -23,6 +23,8 @@
 | `Landroid/app/AlertDialog$Builder;` | registry.js |
 | `Landroid/app/Application;` | registry.js |
 | `Landroid/app/Dialog;` | registry.js |
+| `Landroid/app/DownloadManager;` | registry.js |
+| `Landroid/app/DownloadManager$Request;` | registry.js |
 | `Landroid/app/Fragment;` | registry.js |
 | `Landroid/app/FragmentManager;` | registry.js |
 | `Landroid/app/FragmentTransaction;` | registry.js |
@@ -30,6 +32,10 @@
 | `Landroid/app/ProgressDialog;` | registry.js |
 | `Landroid/bluetooth/BluetoothManager;` | java-core.js |
 | `Landroid/content/ActivityNotFoundException;` | java-core.js |
+| `Landroid/content/ClipboardManager;` | registry.js |
+| `Landroid/content/ClipData;` | registry.js |
+| `Landroid/content/ClipData$Item;` | registry.js |
+| `Landroid/content/ClipDescription;` | registry.js |
 | `Landroid/content/ComponentName;` | registry.js |
 | `Landroid/content/ContentResolver;` | registry.js |
 | `Landroid/content/Context;` | registry.js |
@@ -105,6 +111,9 @@
 | `Landroid/hardware/Sensor;` | registry.js |
 | `Landroid/hardware/SensorManager;` | registry.js |
 | `Landroid/hardware/usb/UsbManager;` | registry.js |
+| `Landroid/location/Location;` | registry.js |
+| `Landroid/location/LocationListener;` | registry.js |
+| `Landroid/location/LocationManager;` | registry.js |
 | `Landroid/media/AudioDeviceInfo;` | registry.js |
 | `Landroid/media/AudioManager;` | registry.js |
 | `Landroid/media/MediaCodecInfo;` | registry.js |
@@ -137,8 +146,10 @@
 | `Landroid/os/Trace;` | registry.js |
 | `Landroid/os/UserHandle;` | registry.js |
 | `Landroid/os/UserManager;` | registry.js |
+| `Landroid/os/VibrationEffect;` | registry.js |
+| `Landroid/os/Vibrator;` | registry.js |
 | `Landroid/preference/PreferenceManager;` | java-core.js |
-| `Landroid/provider/Settings$Global;` | registry.js |
+| `Landroid/provider/MediaStore;` | registry.js |
 | `Landroid/system/Os;` | registry.js |
 | `Landroid/system/StructUtsname;` | registry.js |
 | `Landroid/telephony/ServiceState;` | registry.js |

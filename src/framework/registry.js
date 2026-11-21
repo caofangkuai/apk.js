@@ -57,6 +57,7 @@ import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.
 import { DRAWABLE_CLASSES, OUTLINE_CLASSES, SHADER_CLASSES, drawableObject } from './drawables.js';
 import { WEBKIT_CLASSES, uriObject } from './webkit.js';
 import { OPENGL_CLASSES } from './opengl.js';
+import { handleBrowserIntent, uriVirtualPath, triggerBrowserDownload } from './browser-io.js';
 
 export const FRAMEWORK_CLASSES = {};
 
@@ -593,21 +594,14 @@ function conflictSqlBundle(vm, { selection, sortOrder } = {}) {
   return object;
 }
 
-/** ContentResolver.openInputStream：file:// 与绝对路径走 VIRTUAL_FS，content:// 无法解析时返回 null。 */
+/** ContentResolver.openInputStream：file://、content:// 与绝对路径统一走 VIRTUAL_FS 的二进制内容。 */
 function contentResolverInputStream(vm, uri) {
-  const value = String(uri?.$peer?.$value ?? '');
-  if (!value) return null;
-  const path = value.startsWith('file://') ? decodeURIComponent(value.slice(7)) : value;
-  if (!path.startsWith('/')) return null;
-  let text = null;
-  try {
-    text = readFsText(path);
-  } catch (_) {
-    text = null;
-  }
-  if (text == null) return null;
+  const path = uriVirtualPath(uri);
+  if (!path) return null;
+  const bytes = VIRTUAL_FS.read(path);
+  if (!bytes) return null;
   const object = vm.allocateRawObject('Ljava/io/InputStream;');
-  object.$peer = { bytes: new TextEncoder().encode(text), offset: 0 };
+  object.$peer = { bytes, offset: 0 };
   return object;
 }
 
@@ -708,10 +702,12 @@ function makeFakeProcess(vm, command) {
   return object;
 }
 
-function makeSinkStream(vm) {
+function makeSinkStream(vm, uri) {
   if (!vm || typeof vm.allocateRawObject !== 'function') return null;
   const object = vm.allocateRawObject('Ljava/io/OutputStream;');
   object.$buffer = [];
+  const path = uriVirtualPath(uri);
+  if (path) object.$targetPath = path;
   return object;
 }
 
@@ -1158,6 +1154,230 @@ function cloneIntent(vm, peer) {
   copy.categories = [...(peer.categories || [])];
   object.$peer = copy;
   return object;
+}
+
+/** 构造 ClipData：item 可以是 Uri 对象、文本或 Intent，描述里带 label 与 mime 列表。 */
+function makeClipData(vm, label, values, mimeTypes) {
+  const object = vm.allocateRawObject('Landroid/content/ClipData;');
+  const items = (values || []).map((value) => {
+    const item = vm.allocateRawObject('Landroid/content/ClipData$Item;');
+    const isUri = value && typeof value === 'object' && value.$peer && value.$peer.$value !== undefined;
+    const isIntent = value && typeof value === 'object' && value.$peer && value.$peer.action !== undefined;
+    item.$peer = {
+      $uri: isUri ? value : null,
+      $text: isUri || isIntent ? null : (value == null ? null : (jsString(value) ?? String(value))),
+      $htmlText: null,
+      $intent: isIntent ? value : null,
+    };
+    return item;
+  });
+  const description = vm.allocateRawObject('Landroid/content/ClipDescription;');
+  description.$peer = { $label: jsString(label) ?? '', $mimeTypes: [...(mimeTypes || ['*/*'])] };
+  object.$peer = { $items: items, $description: description };
+  return object;
+}
+
+/** 把振动节奏转交给浏览器 Vibration API；0 表示取消。 */
+function vibrateDevice(pattern) {
+  const nav = typeof navigator !== 'undefined' ? navigator : null;
+  if (!nav || typeof nav.vibrate !== 'function') return;
+  try {
+    nav.vibrate(Array.isArray(pattern) && pattern.length ? pattern : 0);
+  } catch (_) {
+    // 部分浏览器在非用户手势下会拒绝，忽略即可。
+  }
+}
+
+/** 按 Android repeat 语义把振动节奏循环三次，避免无限振动挂住页面。 */
+function expandVibrationPattern(timings, repeat) {
+  if (!Array.isArray(timings) || !timings.length) return [0];
+  if (repeat < 0 || repeat >= timings.length) return timings;
+  const head = timings.slice(0, repeat);
+  const loop = timings.slice(repeat);
+  return head.concat(loop, loop, loop);
+}
+
+function haversineMeters(a, b) {
+  const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+  const radius = 6371000;
+  const dLat = toRad((b?.latitude ?? 0) - (a?.latitude ?? 0));
+  const dLon = toRad((b?.longitude ?? 0) - (a?.longitude ?? 0));
+  const lat1 = toRad(a?.latitude ?? 0);
+  const lat2 = toRad(b?.latitude ?? 0);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return Math.round(2 * radius * Math.asin(Math.min(1, Math.sqrt(h))));
+}
+
+/** 构造一个包含指定字符串的 Java List（ArrayList peer）。 */
+function listOfStrings(vm, values) {
+  const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+  list.$peer = { items: [...values] };
+  return list;
+}
+
+/** 浏览器 Geolocation 位置 → android.location.Location 对象。 */
+function geolocationObject(vm, position) {
+  const coords = position?.coords ?? {};
+  const object = vm.allocateRawObject('Landroid/location/Location;');
+  object.$peer = {
+    latitude: Number(coords.latitude ?? 0),
+    longitude: Number(coords.longitude ?? 0),
+    altitude: coords.altitude == null ? undefined : Number(coords.altitude),
+    accuracy: Number(coords.accuracy ?? 0),
+    speed: coords.speed == null ? undefined : Number(coords.speed),
+    bearing: coords.heading == null ? undefined : Number(coords.heading),
+    time: Number(position?.timestamp ?? Date.now()),
+    provider: 'gps',
+  };
+  return object;
+}
+
+/** 启动 navigator.geolocation 监听，并把位置分发给 LocationListener / Consumer / PendingIntent。 */
+function startGeolocation(manager, vm, single, target = null) {
+  const geo = typeof navigator !== 'undefined' ? navigator.geolocation : null;
+  if (!geo) return;
+  if (!(manager.listeners instanceof Map)) manager.listeners = new Map();
+  if (target && !(manager.$pendingIntents instanceof Set)) manager.$pendingIntents = new Set();
+  if (target) manager.$pendingIntents.add(target);
+  const deliver = (position) => {
+    const location = geolocationObject(vm, position);
+    manager.lastLocation = location;
+    for (const [key, entry] of [...manager.listeners]) {
+      try {
+        vm.invokeByName('onLocationChanged', '(Landroid/location/Location;)V', entry.listener, [location]);
+      } catch (_) {
+        // 单个监听器异常不影响其它监听器。
+      }
+      if (entry.single) manager.listeners.delete(key);
+    }
+    for (const pending of manager.$pendingIntents ?? []) {
+      try {
+        vm.invokeByName('accept', '(Ljava/lang/Object;)V', pending, [location]);
+      } catch (_) {
+        try {
+          vm.invokeByName('onLocationChanged', '(Landroid/location/Location;)V', pending, [location]);
+        } catch (_) {
+          // PendingIntent 无法投递时保持最后位置即可。
+        }
+      }
+    }
+  };
+  const fail = (error) => vm.log?.('warn', 'Location', `定位失败: ${error?.message ?? 'unavailable'}`);
+  if (single) {
+    geo.getCurrentPosition(deliver, fail, { enableHighAccuracy: true });
+    return;
+  }
+  if (manager.watchId == null) {
+    manager.watchId = geo.watchPosition(deliver, fail, { enableHighAccuracy: true });
+  }
+}
+
+/** 注册一个测试 Provider（LocationManager 的测试接口）。 */
+function testProvider(manager, name) {
+  if (!(manager.$testProviders instanceof Map)) manager.$testProviders = new Map();
+  manager.$testProviders.set(jsString(name), { enabled: true });
+}
+
+/** 记录 GNSS 类回调，返回是否首次注册。 */
+function trackGnssCallback(manager, callback, key) {
+  if (!callback) return 0;
+  if (!(manager[key] instanceof Set)) manager[key] = new Set();
+  const first = !manager[key].has(callback);
+  manager[key].add(callback);
+  return first ? 1 : 0;
+}
+
+function untrackGnssCallback(manager, callback, key) {
+  manager[key]?.delete?.(callback);
+}
+
+/** 取 ClipData 第一个文本项，供 ClipboardManager.getText 使用。 */
+function clipTextContent(clip) {
+  const peer = clip?.$peer ?? clip;
+  const item = peer?.$items?.[0] ?? null;
+  const itemPeer = item?.$peer ?? item;
+  const text = itemPeer?.$text ?? null;
+  if (text === null || text === undefined) return null;
+  return typeof text === 'string' ? text : String(text);
+}
+
+/** 从 Notification.extras Bundle 里取出标题与正文。 */
+function notificationContent(notification) {
+  const extras = notification?.$fields?.get?.('Landroid/app/Notification;->extras:Landroid/os/Bundle;') ?? notification?.extras ?? null;
+  const map = extras?.$peer?.map ?? extras?.map ?? null;
+  const textOf = (value) => {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value.$string === 'string') return value.$string;
+    return String(value);
+  };
+  if (!map) return { title: '', text: '' };
+  return {
+    title: textOf(map.get?.('android.title') ?? map.get?.('android.title.big')),
+    text: textOf(map.get?.('android.text')),
+  };
+}
+
+/** 把 Notification 转交给浏览器 Notification API（需要用户授权）。 */
+function postBrowserNotification(manager, id, notification) {
+  const store = (manager.$notifications ||= new Map());
+  const nav = typeof navigator !== 'undefined' ? navigator : null;
+  if (!nav || typeof globalThis.Notification !== 'function') return;
+  const { title, text } = notificationContent(notification);
+  const show = () => {
+    try {
+      const instance = new globalThis.Notification(title || 'apk.js', { body: text, tag: String(id) });
+      store.set(id | 0, instance);
+    } catch (_) {
+      // 权限或平台限制导致构造失败时静默跳过。
+    }
+  };
+  const Permission = globalThis.Notification;
+  if (Permission.permission === 'granted') show();
+  else if (Permission.permission !== 'denied') {
+    Permission.requestPermission?.().then((result) => {
+      if (result === 'granted') show();
+    }).catch(() => undefined);
+  }
+}
+
+/** 大圆初始方位角（度，0..360）。 */
+function initialBearingDegrees(a, b) {
+  const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+  const toDeg = (rad) => (rad * 180) / Math.PI;
+  const lat1 = toRad(a?.latitude ?? 0);
+  const lat2 = toRad(b?.latitude ?? 0);
+  const dLon = toRad((b?.longitude ?? 0) - (a?.longitude ?? 0));
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/** Location.convert 的写侧：支持十进制度、度分、度分秒三种格式。 */
+function formatCoordinate(value, format) {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  const degrees = Math.floor(abs);
+  const minutesTotal = (abs - degrees) * 60;
+  const minutes = Math.floor(minutesTotal);
+  const seconds = (minutesTotal - minutes) * 60;
+  if (format === 2) return `${sign}${degrees}:${minutes}:${seconds.toFixed(3)}`;
+  if (format === 3) return `${sign}${degrees}:${minutesTotal.toFixed(5)}`;
+  return `${sign}${abs.toFixed(6)}`;
+}
+
+/** Location.convert 的读侧：解析 `d:m:s` / `d:m` / 十进制。 */
+function parseCoordinate(text) {
+  if (!text) return 0;
+  const parts = String(text).trim().split(':').map((part) => Number(part));
+  if (parts.some((part) => Number.isNaN(part))) return 0;
+  const sign = parts[0] < 0 ? -1 : 1;
+  const degrees = Math.abs(parts[0] || 0);
+  if (parts.length === 1) return sign * degrees;
+  const minutes = Math.abs(parts[1] || 0);
+  if (parts.length === 2) return sign * (degrees + minutes / 60);
+  const seconds = Math.abs(parts[2] || 0);
+  return sign * (degrees + minutes / 60 + seconds / 3600);
 }
 
 function normalizeMimeType(type) {
@@ -2428,12 +2648,15 @@ export function buildFrameworkDefinitions(vm) {
         'isFinishing()Z': (self) => !!self.finished,
         'finish()V': (self) => self.finish(),
         'startActivity(Landroid/content/Intent;)V': (self, [intent], vm) => {
+          if (handleBrowserIntent(vm, self.object || self.$object || vm.activity, intent, -1)) return;
           vm.startActivity(intent, self);
         },
-        'startActivityForResult(Landroid/content/Intent;I)V': (self, [intent], vm) => {
+        'startActivityForResult(Landroid/content/Intent;I)V': (self, [intent, requestCode], vm) => {
+          if (handleBrowserIntent(vm, self.object || self.$object || vm.activity, intent, requestCode | 0)) return;
           vm.startActivity(intent, self);
         },
-        'startActivityIfNeeded(Landroid/content/Intent;I)Z': (self, [intent], vm) => {
+        'startActivityIfNeeded(Landroid/content/Intent;I)Z': (self, [intent, requestCode], vm) => {
+          if (handleBrowserIntent(vm, self.object || self.$object || vm.activity, intent, requestCode | 0)) return true;
           vm.startActivity(intent, self);
           return true;
         },
@@ -4589,6 +4812,13 @@ export function buildFrameworkDefinitions(vm) {
         ['ACTION_GET_CONTENT:Ljava/lang/String;', 'android.intent.action.GET_CONTENT'],
         ['ACTION_OPEN_DOCUMENT:Ljava/lang/String;', 'android.intent.action.OPEN_DOCUMENT'],
         ['ACTION_CREATE_DOCUMENT:Ljava/lang/String;', 'android.intent.action.CREATE_DOCUMENT'],
+        ['ACTION_CHOOSER:Ljava/lang/String;', 'android.intent.action.CHOOSER'],
+        ['ACTION_IMAGE_CAPTURE:Ljava/lang/String;', 'android.media.action.IMAGE_CAPTURE'],
+        ['ACTION_VIDEO_CAPTURE:Ljava/lang/String;', 'android.media.action.VIDEO_CAPTURE'],
+        ['EXTRA_OUTPUT:Ljava/lang/String;', 'android.intent.extra.OUTPUT'],
+        ['EXTRA_INTENT:Ljava/lang/String;', 'android.intent.extra.INTENT'],
+        ['EXTRA_ALLOW_MULTIPLE:Ljava/lang/String;', 'android.intent.extra.ALLOW_MULTIPLE'],
+        ['EXTRA_STREAM:Ljava/lang/String;', 'android.intent.extra.STREAM'],
         ['CATEGORY_DEFAULT:Ljava/lang/String;', 'android.intent.category.DEFAULT'],
         ['CATEGORY_LAUNCHER:Ljava/lang/String;', 'android.intent.category.LAUNCHER'],
         ['FLAG_ACTIVITY_NEW_TASK:I', 0x10000000],
@@ -4597,6 +4827,88 @@ export function buildFrameworkDefinitions(vm) {
         ['FLAG_ACTIVITY_CLEAR_TASK:I', 0x00008000],
         ['FLAG_GRANT_READ_URI_PERMISSION:I', 0x00000001],
         ['FLAG_GRANT_WRITE_URI_PERMISSION:I', 0x00000002],
+      ]),
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/content/ClipData$Item;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getUri()Landroid/net/Uri;': (self) => self.$uri ?? null,
+        'getText()Ljava/lang/CharSequence;': (self) => self.$text ?? null,
+        'getHtmlText()Ljava/lang/String;': (self) => self.$htmlText ?? null,
+        'getIntent()Landroid/content/Intent;': (self) => self.$intent ?? null,
+        'coerceToText(Landroid/content/Context;)Ljava/lang/CharSequence;': (self, _args, vm) => {
+          if (self.$text != null) return self.$text;
+          if (self.$uri) {
+            const path = uriVirtualPath(self.$uri);
+            const bytes = path ? VIRTUAL_FS.read(path) : null;
+            if (bytes) return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+          }
+          return null;
+        },
+        'toString()Ljava/lang/String;': (self) => String(self.$text ?? self.$uri?.$peer?.$value ?? ''),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/content/ClipDescription;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getLabel()Ljava/lang/CharSequence;': (self) => self.$label ?? null,
+        'getMimeTypeCount()I': (self) => (self.$mimeTypes || []).length,
+        'getMimeType(I)Ljava/lang/String;': (self, [index]) => self.$mimeTypes?.[index | 0] ?? null,
+        'hasMimeType(Ljava/lang/String;)Z': (self, [mime]) => (self.$mimeTypes || []).includes(jsString(mime)),
+        'compareTo(Landroid/content/ClipDescription;)I': (self, [other]) => String(self.$label ?? '').localeCompare(String(other?.$label ?? '')),
+        'toString()Ljava/lang/String;': (self) => String(self.$label ?? ''),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/content/ClipData;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getItemCount()I': (self) => (self.$items || []).length,
+        'getItemAt(I)Landroid/content/ClipData$Item;': (self, [index]) => (self.$items || [])[index | 0] ?? null,
+        'getDescription()Landroid/content/ClipDescription;': (self) => self.$description ?? null,
+        'toString()Ljava/lang/String;': (self) => String(self.$description?.$label ?? ''),
+      },
+      staticMethods: {
+        'newUri(Landroid/content/ContentResolver;Ljava/lang/CharSequence;Landroid/net/Uri;)Landroid/content/ClipData;': (self, [_resolver, label, uri], vm) =>
+          makeClipData(vm, label, [uri], ['*/*']),
+        'newRawUri(Ljava/lang/CharSequence;Landroid/net/Uri;)Landroid/content/ClipData;': (self, [label, uri], vm) =>
+          makeClipData(vm, label, [uri], ['*/*']),
+        'newPlainText(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;': (self, [label, text], vm) =>
+          makeClipData(vm, label, [text], ['text/plain']),
+        'newHtmlText(Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/String;)Landroid/content/ClipData;': (self, [label, text, html], vm) => {
+          const clip = makeClipData(vm, label, [text], ['text/html']);
+          if (clip.$items[0]) clip.$items[0].$htmlText = jsString(html);
+          return clip;
+        },
+        'newIntent(Ljava/lang/CharSequence;Landroid/content/Intent;)Landroid/content/ClipData;': (self, [label, intent], vm) => {
+          const clip = makeClipData(vm, label, [intent], ['text/uri-list']);
+          if (clip.$items[0]) clip.$items[0].$intent = intent ?? null;
+          return clip;
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/provider/MediaStore;', {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['ACTION_IMAGE_CAPTURE:Ljava/lang/String;', 'android.media.action.IMAGE_CAPTURE'],
+        ['ACTION_VIDEO_CAPTURE:Ljava/lang/String;', 'android.media.action.VIDEO_CAPTURE'],
+        ['ACTION_PICK_IMAGES:Ljava/lang/String;', 'android.provider.action.PICK_IMAGES'],
+        ['ACTION_PICK:Ljava/lang/String;', 'android.intent.action.PICK'],
+        ['EXTRA_OUTPUT:Ljava/lang/String;', 'output'],
+        ['EXTRA_VIDEO_QUALITY:Ljava/lang/String;', 'android.intent.extra.videoQuality'],
+        ['EXTRA_SIZE_LIMIT:Ljava/lang/String;', 'android.intent.extra.sizeLimit'],
+        ['EXTRA_DURATION_LIMIT:Ljava/lang/String;', 'android.intent.extra.durationLimit'],
       ]),
     })
   );
@@ -7179,9 +7491,12 @@ export function buildFrameworkDefinitions(vm) {
         'clearHistory()V': () => undefined,
         'loadUrl(Ljava/lang/String;Ljava/util/Map;)V': (self, [url]) => self.view?.loadUrl?.(jsString(url)),
         'addJavascriptInterface(Ljava/lang/Object;Ljava/lang/String;)V': (self, [object, name]) => {
-          (self.javascriptInterfaces ||= new Map()).set(jsString(name), object ?? null);
+          const target = self.view ?? self;
+          (target.javascriptInterfaces ||= new Map()).set(jsString(name), object ?? null);
         },
         'evaluateJavascript(Ljava/lang/String;Landroid/webkit/ValueCallback;)V': (self, [script, callback]) => {
+          const target = self.view ?? self;
+          if (target) target.lastEvaluatedScript = jsString(script);
           if (callback?.$peer?.onReceiveValue) {
             try {
               self.vm?.invokeMethod?.(callback, 'onReceiveValue', [null]);
@@ -7189,7 +7504,6 @@ export function buildFrameworkDefinitions(vm) {
               void _error;
             }
           }
-          void script;
         },
         'destroy()V': (self) => { self.destroyed = true; },
         'stopLoading()V': (self) => { self.loading = false; },
@@ -15803,16 +16117,506 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/os/VibrationEffect;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'getDuration()J': (self) => BigInt(self.duration ?? -1),
+        'getId()I': (self) => self.id ?? 0,
+        'toString()Ljava/lang/String;': (self) => `VibrationEffect(${self.timings?.join(',') ?? self.duration ?? ''})`,
+      },
+      staticMethods: {
+        'createOneShot(JI)Landroid/os/VibrationEffect;': (_self, [duration, amplitude]) => ({
+          duration: Number(duration), timings: [0, Number(duration)], amplitudes: [0, amplitude | 0],
+        }),
+        'createWaveform([JI)Landroid/os/VibrationEffect;': (_self, [timings, repeat]) => ({
+          timings: Array.from(timings?.$data ?? []).map((v) => Number(BigInt.asIntN(64, BigInt(v)))),
+          repeat: repeat | 0,
+        }),
+        'createWaveform([J[II)Landroid/os/VibrationEffect;': (_self, [timings, amplitudes, repeat]) => ({
+          timings: Array.from(timings?.$data ?? []).map((v) => Number(BigInt.asIntN(64, BigInt(v)))),
+          amplitudes: Array.from(amplitudes?.$data ?? []).map((v) => v | 0),
+          repeat: repeat | 0,
+        }),
+        'createPrebaked(I)Landroid/os/VibrationEffect;': (_self, [id]) => ({ id: id | 0 }),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/os/Vibrator;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'hasVibrator()Z': () => 1,
+        'hasAmplitudeControl()Z': () => 1,
+        'hasExternalVibrator()Z': () => 0,
+        'vibrate(J)V': (_self, [milliseconds]) => vibrateDevice([Number(milliseconds) | 0]),
+        'vibrate([JI)V': (_self, [pattern, repeat]) => {
+          const timings = Array.from(pattern?.$data ?? []).map((v) => Number(BigInt.asIntN(64, BigInt(v))));
+          vibrateDevice(expandVibrationPattern(timings, repeat | 0));
+        },
+        'vibrate(Landroid/os/VibrationEffect;)V': (_self, [effect]) => {
+          if (!effect) return;
+          if (effect.timings?.length) vibrateDevice(expandVibrationPattern(effect.timings, effect.repeat ?? -1));
+          else if (Number.isFinite(effect.duration) && effect.duration > 0) vibrateDevice([effect.duration]);
+        },
+        'cancel()V': () => vibrateDevice([0]),
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/location/Location;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>()V': () => undefined,
+        '<init>(Ljava/lang/String;)V': (self, [provider]) => { self.provider = jsString(provider); },
+        '<init>(Landroid/location/Location;)V': (self, [other]) => {
+          if (!other) return;
+          const source = other.$peer ?? other;
+          for (const key of ['latitude', 'longitude', 'altitude', 'accuracy', 'speed', 'bearing', 'time', 'provider', 'elapsedNanos', 'extras']) {
+            if (source[key] !== undefined) self[key] = source[key];
+          }
+        },
+        'set(Landroid/location/Location;)V': (self, [other]) => {
+          if (!other) return;
+          const source = other.$peer ?? other;
+          for (const key of ['latitude', 'longitude', 'altitude', 'accuracy', 'speed', 'bearing', 'time', 'provider', 'elapsedNanos', 'extras']) {
+            if (source[key] !== undefined) self[key] = source[key];
+          }
+        },
+        'reset()V': (self) => {
+          self.latitude = 0;
+          self.longitude = 0;
+          self.altitude = undefined;
+          self.accuracy = undefined;
+          self.speed = undefined;
+          self.bearing = undefined;
+          self.time = 0;
+          self.provider = null;
+          self.extras = null;
+        },
+        'getLatitude()D': (self) => Number(self.latitude ?? 0),
+        'getLongitude()D': (self) => Number(self.longitude ?? 0),
+        'getAltitude()D': (self) => Number(self.altitude ?? 0),
+        'getAccuracy()F': (self) => Number(self.accuracy ?? 0),
+        'getSpeed()F': (self) => Number(self.speed ?? 0),
+        'getBearing()F': (self) => Number(self.bearing ?? 0),
+        'getTime()J': (self) => BigInt(self.time ?? Date.now()),
+        'getElapsedRealtimeNanos()J': (self) => BigInt(Math.round((self.time ?? Date.now()) * 1e6)),
+        'getProvider()Ljava/lang/String;': (self) => self.provider ?? 'gps',
+        'setLatitude(D)V': (self, [value]) => { self.latitude = Number(value); },
+        'setLongitude(D)V': (self, [value]) => { self.longitude = Number(value); },
+        'setAltitude(D)V': (self, [value]) => { self.altitude = Number(value); },
+        'removeAltitude()V': (self) => { self.altitude = undefined; },
+        'setSpeed(F)V': (self, [value]) => { self.speed = Number(value); },
+        'removeSpeed()V': (self) => { self.speed = undefined; },
+        'setBearing(F)V': (self, [value]) => { self.bearing = Number(value); },
+        'removeBearing()V': (self) => { self.bearing = undefined; },
+        'setAccuracy(F)V': (self, [value]) => { self.accuracy = Number(value); },
+        'removeAccuracy()V': (self) => { self.accuracy = undefined; },
+        'getElapsedRealtimeUncertaintyNanos()D': (self) => Number(self.elapsedUncertaintyNanos ?? 0),
+        'setElapsedRealtimeUncertaintyNanos(D)V': (self, [value]) => { self.elapsedUncertaintyNanos = Number(value); },
+        'hasElapsedRealtimeUncertaintyNanos()Z': (self) => (self.elapsedUncertaintyNanos != null ? 1 : 0),
+        'hasVerticalAccuracy()Z': (self) => (self.verticalAccuracy != null ? 1 : 0),
+        'getVerticalAccuracyMeters()F': (self) => Number(self.verticalAccuracy ?? 0),
+        'setVerticalAccuracyMeters(F)V': (self, [value]) => { self.verticalAccuracy = Number(value); },
+        'hasSpeedAccuracy()Z': (self) => (self.speedAccuracy != null ? 1 : 0),
+        'getSpeedAccuracyMetersPerSecond()F': (self) => Number(self.speedAccuracy ?? 0),
+        'setSpeedAccuracyMetersPerSecond(F)V': (self, [value]) => { self.speedAccuracy = Number(value); },
+        'hasBearingAccuracy()Z': (self) => (self.bearingAccuracy != null ? 1 : 0),
+        'getBearingAccuracyDegrees()F': (self) => Number(self.bearingAccuracy ?? 0),
+        'setBearingAccuracyDegrees(F)V': (self, [value]) => { self.bearingAccuracy = Number(value); },
+        'bearingTo(Landroid/location/Location;)F': (self, [other]) => Math.round(initialBearingDegrees(self, other?.$peer ?? other)),
+        'isFromMockProvider()Z': (self) => (self.mock ? 1 : 0),
+        'isMock()Z': (self) => (self.mock ? 1 : 0),
+        'setMock(Z)V': (self, [value]) => { self.mock = !!value; },
+        'dump(Landroid/util/Printer;Ljava/lang/String;)V': (self, [printer, prefix], vm) => {
+          if (printer) {
+            try {
+              vm.invokeByName('println', '(Ljava/lang/String;)V', printer, [`${jsString(prefix) ?? ''}${self.provider ?? 'gps'} ${self.latitude ?? 0},${self.longitude ?? 0}`]);
+            } catch (_) {
+              // Printer 实现异常时不影响 Location 本身。
+            }
+          }
+        },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'setTime(J)V': (self, [value]) => { self.time = Number(value); },
+        'setProvider(Ljava/lang/String;)V': (self, [value]) => { self.provider = jsString(value); },
+        'setElapsedRealtimeNanos(J)V': (self, [value]) => { self.elapsedNanos = Number(value); },
+        'setExtras(Landroid/os/Bundle;)V': (self, [value]) => { self.extras = value ?? null; },
+        'hasAccuracy()Z': (self) => (self.accuracy != null ? 1 : 0),
+        'hasAltitude()Z': (self) => (self.altitude != null ? 1 : 0),
+        'hasSpeed()Z': (self) => (self.speed != null ? 1 : 0),
+        'hasBearing()Z': (self) => (self.bearing != null ? 1 : 0),
+        'distanceTo(Landroid/location/Location;)F': (self, [other]) => haversineMeters(self, other?.$peer ?? other),
+        'toString()Ljava/lang/String;': (self) => `Location[${self.provider ?? 'gps'} ${self.latitude ?? 0},${self.longitude ?? 0}]`,
+        'getExtras()Landroid/os/Bundle;': (self) => self.extras ?? null,
+      },
+      staticMethods: {
+        'convert(DI)Ljava/lang/String;': (_self, [coordinate, format]) => formatCoordinate(Number(coordinate), (format | 0) || 1),
+        'convert(Ljava/lang/String;)D': (_self, [text]) => parseCoordinate(jsString(text)),
+        'distanceBetween(DDDD[F)V': (_self, [lat1, lon1, lat2, lon2, results]) => {
+          const meters = haversineMeters({ latitude: Number(lat1), longitude: Number(lon1) }, { latitude: Number(lat2), longitude: Number(lon2) });
+          const data = results?.$data ?? results ?? [];
+          if (data.length >= 1) data[0] = meters;
+          if (data.length >= 2) data[1] = initialBearingDegrees({ latitude: Number(lat1), longitude: Number(lon1) }, { latitude: Number(lat2), longitude: Number(lon2) });
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/location/LocationManager;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class LocationManagerPeer {
+        constructor(vm) {
+          this.vm = vm;
+          this.watchId = null;
+          this.listeners = new Map();
+          this.lastLocation = null;
+        }
+      },
+      methods: {
+        'isProviderEnabled(Ljava/lang/String;)Z': () => (typeof navigator !== 'undefined' && !!navigator.geolocation ? 1 : 0),
+        'isLocationEnabled()Z': () => (typeof navigator !== 'undefined' && !!navigator.geolocation ? 1 : 0),
+        'hasProvider(Ljava/lang/String;)Z': (_self, [provider]) => ['gps', 'network', 'passive'].includes(jsString(provider)),
+        'getCurrentLocation(Ljava/lang/String;Landroid/os/CancellationSignal;Ljava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': (self, [_provider, _signal, _executor, consumer], vm) => {
+          startGeolocation(self, vm, true, consumer);
+        },
+        'getCurrentLocation(Ljava/lang/String;Landroid/location/LocationRequest;Landroid/os/CancellationSignal;Ljava/util/concurrent/Executor;Ljava/util/function/Consumer;)V': (self, [_provider, _request, _signal, _executor, consumer], vm) => {
+          startGeolocation(self, vm, true, consumer);
+        },
+        'requestSingleUpdate(Landroid/location/Criteria;Landroid/location/LocationListener;Landroid/os/Looper;)V': (self, [_criteria, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          self.listeners.set(String(listener?.$peer?.id ?? listener?.$id ?? 'single'), { listener, single: true });
+          startGeolocation(self, vm, true);
+        },
+        'requestSingleUpdate(Ljava/lang/String;Landroid/app/PendingIntent;)V': (self, [provider, pendingIntent], vm) => {
+          startGeolocation(self, vm, true, pendingIntent);
+          void provider;
+        },
+        'requestSingleUpdate(Landroid/location/Criteria;Landroid/app/PendingIntent;)V': (self, [_criteria, pendingIntent], vm) => {
+          startGeolocation(self, vm, true, pendingIntent);
+        },
+        'requestLocationUpdates(Ljava/lang/String;JFLjava/util/concurrent/Executor;Landroid/location/LocationListener;)V': (self, [provider, minTime, minDistance, _executor, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          self.listeners.set(String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size), { listener, provider: jsString(provider) });
+          startGeolocation(self, vm, false);
+        },
+        'requestLocationUpdates(JFLandroid/location/Criteria;Landroid/location/LocationListener;Landroid/os/Looper;)V': (self, [_minTime, _minDistance, _criteria, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          self.listeners.set(String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size), { listener });
+          startGeolocation(self, vm, false);
+        },
+        'requestLocationUpdates(JFLandroid/location/Criteria;Ljava/util/concurrent/Executor;Landroid/location/LocationListener;)V': (self, [_minTime, _minDistance, _criteria, _executor, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          self.listeners.set(String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size), { listener });
+          startGeolocation(self, vm, false);
+        },
+        'requestLocationUpdates(Ljava/lang/String;JFLandroid/app/PendingIntent;)V': (self, [_provider, _minTime, _minDistance, pendingIntent], vm) => {
+          startGeolocation(self, vm, false, pendingIntent);
+        },
+        'requestLocationUpdates(JFLandroid/location/Criteria;Landroid/app/PendingIntent;)V': (self, [_minTime, _minDistance, _criteria, pendingIntent], vm) => {
+          startGeolocation(self, vm, false, pendingIntent);
+        },
+        'requestLocationUpdates(Ljava/lang/String;Landroid/location/LocationRequest;Ljava/util/concurrent/Executor;Landroid/location/LocationListener;)V': (self, [provider, _request, _executor, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          self.listeners.set(String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size), { listener, provider: jsString(provider) });
+          startGeolocation(self, vm, false);
+        },
+        'requestLocationUpdates(Ljava/lang/String;Landroid/location/LocationRequest;Landroid/app/PendingIntent;)V': (self, [_provider, _request, pendingIntent], vm) => {
+          startGeolocation(self, vm, false, pendingIntent);
+        },
+        'requestFlush(Ljava/lang/String;Landroid/location/LocationListener;I)V': () => undefined,
+        'requestFlush(Ljava/lang/String;Landroid/app/PendingIntent;I)V': () => undefined,
+        'removeUpdates(Landroid/app/PendingIntent;)V': (self, [pendingIntent]) => {
+          self.$pendingIntents?.delete?.(pendingIntent);
+        },
+        'addTestProvider(Ljava/lang/String;ZZZZZZZII)V': (self, [name]) => {
+          testProvider(self, name);
+        },
+        'addTestProvider(Ljava/lang/String;Landroid/location/provider/ProviderProperties;)V': (self, [name]) => {
+          testProvider(self, name);
+        },
+        'addTestProvider(Ljava/lang/String;Landroid/location/provider/ProviderProperties;Ljava/util/Set;)V': (self, [name]) => {
+          testProvider(self, name);
+        },
+        'removeTestProvider(Ljava/lang/String;)V': (self, [name]) => {
+          self.$testProviders?.delete?.(jsString(name));
+        },
+        'setTestProviderLocation(Ljava/lang/String;Landroid/location/Location;)V': (self, [name, location], vm) => {
+          const provider = jsString(name) ?? 'test';
+          const peer = location?.$peer ?? location;
+          if (peer) peer.provider = provider;
+          self.lastLocation = location;
+          for (const entry of [...(self.listeners?.values?.() ?? [])]) {
+            try {
+              vm.invokeByName('onLocationChanged', '(Landroid/location/Location;)V', entry.listener, [location]);
+            } catch (_) {
+              // 单个监听器异常不影响其它监听器。
+            }
+          }
+        },
+        'clearTestProviderLocation(Ljava/lang/String;)V': () => undefined,
+        'setTestProviderEnabled(Ljava/lang/String;Z)V': (self, [name, enabled]) => {
+          if (!(self.$testProviders instanceof Map)) self.$testProviders = new Map();
+          self.$testProviders.set(jsString(name), { enabled: !!enabled });
+        },
+        'clearTestProviderEnabled(Ljava/lang/String;)V': (self, [name]) => {
+          self.$testProviders?.delete?.(jsString(name));
+        },
+        'setTestProviderStatus(Ljava/lang/String;ILandroid/os/Bundle;J)V': () => undefined,
+        'clearTestProviderStatus(Ljava/lang/String;)V': () => undefined,
+        'addProximityAlert(DDFJLandroid/app/PendingIntent;)V': () => undefined,
+        'removeProximityAlert(Landroid/app/PendingIntent;)V': () => undefined,
+        'getGnssYearOfHardware()I': () => 2020,
+        'getGnssHardwareModelName()Ljava/lang/String;': () => 'apk.js GNSS',
+        'getGnssAntennaInfos()Ljava/util/List;': (_self, _args, vm) => listOfStrings(vm, []),
+        'getGpsStatus(Landroid/location/GpsStatus;)Landroid/location/GpsStatus;': (_self, [status]) => status ?? null,
+        'registerGnssStatusCallback(Landroid/location/GnssStatus$Callback;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssStatus'),
+        'registerGnssStatusCallback(Landroid/location/GnssStatus$Callback;Landroid/os/Handler;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssStatus'),
+        'registerGnssStatusCallback(Ljava/util/concurrent/Executor;Landroid/location/GnssStatus$Callback;)Z': (self, [_executor, callback]) => trackGnssCallback(self, callback, '$gnssStatus'),
+        'unregisterGnssStatusCallback(Landroid/location/GnssStatus$Callback;)V': (self, [callback]) => untrackGnssCallback(self, callback, '$gnssStatus'),
+        'addNmeaListener(Landroid/location/OnNmeaMessageListener;)Z': (self, [listener]) => trackGnssCallback(self, listener, '$nmea'),
+        'addNmeaListener(Landroid/location/OnNmeaMessageListener;Landroid/os/Handler;)Z': (self, [listener]) => trackGnssCallback(self, listener, '$nmea'),
+        'addNmeaListener(Ljava/util/concurrent/Executor;Landroid/location/OnNmeaMessageListener;)Z': (self, [_executor, listener]) => trackGnssCallback(self, listener, '$nmea'),
+        'removeNmeaListener(Landroid/location/OnNmeaMessageListener;)V': (self, [listener]) => untrackGnssCallback(self, listener, '$nmea'),
+        'registerGnssMeasurementsCallback(Landroid/location/GnssMeasurementsEvent$Callback;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssMeasurements'),
+        'registerGnssMeasurementsCallback(Landroid/location/GnssMeasurementsEvent$Callback;Landroid/os/Handler;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssMeasurements'),
+        'registerGnssMeasurementsCallback(Ljava/util/concurrent/Executor;Landroid/location/GnssMeasurementsEvent$Callback;)Z': (self, [_executor, callback]) => trackGnssCallback(self, callback, '$gnssMeasurements'),
+        'registerGnssMeasurementsCallback(Landroid/location/GnssMeasurementRequest;Ljava/util/concurrent/Executor;Landroid/location/GnssMeasurementsEvent$Callback;)Z': (self, [_request, _executor, callback]) => trackGnssCallback(self, callback, '$gnssMeasurements'),
+        'unregisterGnssMeasurementsCallback(Landroid/location/GnssMeasurementsEvent$Callback;)V': (self, [callback]) => untrackGnssCallback(self, callback, '$gnssMeasurements'),
+        'registerAntennaInfoListener(Ljava/util/concurrent/Executor;Landroid/location/GnssAntennaInfo$Listener;)Z': (self, [_executor, listener]) => trackGnssCallback(self, listener, '$antenna'),
+        'unregisterAntennaInfoListener(Landroid/location/GnssAntennaInfo$Listener;)V': (self, [listener]) => untrackGnssCallback(self, listener, '$antenna'),
+        'registerGnssNavigationMessageCallback(Landroid/location/GnssNavigationMessage$Callback;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssNavigation'),
+        'registerGnssNavigationMessageCallback(Landroid/location/GnssNavigationMessage$Callback;Landroid/os/Handler;)Z': (self, [callback]) => trackGnssCallback(self, callback, '$gnssNavigation'),
+        'registerGnssNavigationMessageCallback(Ljava/util/concurrent/Executor;Landroid/location/GnssNavigationMessage$Callback;)Z': (self, [_executor, callback]) => trackGnssCallback(self, callback, '$gnssNavigation'),
+        'unregisterGnssNavigationMessageCallback(Landroid/location/GnssNavigationMessage$Callback;)V': (self, [callback]) => untrackGnssCallback(self, callback, '$gnssNavigation'),
+        'getProviderProperties(Ljava/lang/String;)Landroid/location/provider/ProviderProperties;': () => null,
+        'getGnssCapabilities()Landroid/location/GnssCapabilities;': () => null,
+        'getAllProviders()Ljava/util/List;': (_self, _args, vm) => listOfStrings(vm, ['gps', 'network', 'passive']),
+        'getProviders(Z)Ljava/util/List;': (_self, _args, vm) => listOfStrings(vm, ['gps', 'network', 'passive']),
+        'getBestProvider(Landroid/location/Criteria;Z)Ljava/lang/String;': () => 'gps',
+        'requestLocationUpdates(Ljava/lang/String;JFLandroid/location/LocationListener;)V': (self, [provider, minTime, minDistance, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          const key = String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size);
+          self.listeners.set(key, { listener, provider: jsString(provider), minTime: Number(minTime) | 0 });
+          startGeolocation(self, vm, false);
+        },
+        'requestLocationUpdates(Ljava/lang/String;JFLandroid/location/LocationListener;Landroid/os/Looper;)V': (self, [provider, minTime, minDistance, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          const key = String(listener?.$peer?.id ?? listener?.$id ?? self.listeners.size);
+          self.listeners.set(key, { listener, provider: jsString(provider), minTime: Number(minTime) | 0 });
+          startGeolocation(self, vm, false);
+        },
+        'requestSingleUpdate(Ljava/lang/String;Landroid/location/LocationListener;Landroid/os/Looper;)V': (self, [_provider, listener], vm) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          const key = String(listener?.$peer?.id ?? listener?.$id ?? 'single');
+          self.listeners.set(key, { listener, single: true });
+          startGeolocation(self, vm, true);
+        },
+        'removeUpdates(Landroid/location/LocationListener;)V': (self, [listener]) => {
+          if (!(self.listeners instanceof Map)) self.listeners = new Map();
+          const key = String(listener?.$peer?.id ?? listener?.$id ?? '');
+          self.listeners.delete(key);
+          if (!self.listeners.size && self.watchId != null) {
+            if (typeof navigator !== 'undefined' ? navigator.geolocation : null) {
+              navigator.geolocation.clearWatch(self.watchId);
+            }
+            self.watchId = null;
+          }
+        },
+        'getLastKnownLocation(Ljava/lang/String;)Landroid/location/Location;': (self) => self.lastLocation,
+        'getProvider(Ljava/lang/String;)Landroid/location/LocationProvider;': () => null,
+        'getProviders(Landroid/location/Criteria;Z)Ljava/util/List;': (_self, _args, vm) => listOfStrings(vm, ['gps', 'network']),
+        'addGpsStatusListener(Landroid/location/GpsStatus$Listener;)Z': () => 1,
+        'removeGpsStatusListener(Landroid/location/GpsStatus$Listener;)V': () => undefined,
+        'addNmeaListener(Landroid/location/GpsStatus$NmeaListener;)Z': () => 1,
+        'removeNmeaListener(Landroid/location/GpsStatus$NmeaListener;)V': () => undefined,
+        'sendExtraCommand(Ljava/lang/String;Ljava/lang/String;Landroid/os/Bundle;)Z': () => 0,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/location/LocationListener;', { super: 'Ljava/lang/Object;' })
+  );
+
+  defs.push(
+    nativeDef('Landroid/content/ClipboardManager;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class ClipboardManagerPeer {
+        constructor(vm) {
+          this.vm = vm;
+          this.clip = null;
+          this.listeners = new Set();
+        }
+      },
+      methods: {
+        'setPrimaryClip(Landroid/content/ClipData;)V': (self, [clip], vm) => {
+          self.clip = clip ?? null;
+          if (!(self.listeners instanceof Set)) self.listeners = new Set();
+          const text = clipTextContent(clip);
+          if (text && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).catch(() => undefined);
+          }
+          for (const listener of self.listeners) {
+            try {
+              vm.invokeByName('onPrimaryClipChanged', '()V', listener, []);
+            } catch (_) {
+              // 监听器抛错不应阻止剪贴板更新。
+            }
+          }
+        },
+        'getPrimaryClip()Landroid/content/ClipData;': (self) => self.clip,
+        'hasPrimaryClip()Z': (self) => (self.clip ? 1 : 0),
+        'clearPrimaryClip()V': (self) => { self.clip = null; },
+        'getText()Ljava/lang/CharSequence;': (self) => clipTextContent(self.clip),
+        'setText(Ljava/lang/CharSequence;)V': (self, [text], vm) => {
+          const clip = makeClipData(vm, 'text', [jsString(text) ?? String(text ?? '')], ['text/plain']);
+          self.clip = clip;
+          const value = jsString(text);
+          if (value && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(value).catch(() => undefined);
+          }
+        },
+        'hasText()Z': (self) => (clipTextContent(self.clip) ? 1 : 0),
+        'addPrimaryClipChangedListener(Landroid/content/ClipboardManager$OnPrimaryClipChangedListener;)V': (self, [listener]) => {
+          if (!(self.listeners instanceof Set)) self.listeners = new Set();
+          if (listener) self.listeners.add(listener);
+        },
+        'removePrimaryClipChangedListener(Landroid/content/ClipboardManager$OnPrimaryClipChangedListener;)V': (self, [listener]) => {
+          if (!(self.listeners instanceof Set)) self.listeners = new Set();
+          if (listener) self.listeners.delete(listener);
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/app/DownloadManager$Request;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class DownloadRequestPeer {
+        constructor(vm, uri) {
+          this.vm = vm;
+          this.uri = uri ?? null;
+          this.title = null;
+          this.description = null;
+          this.mimeType = null;
+          this.fileName = null;
+          this.destination = null;
+          this.visibility = 0;
+          this.headers = new Map();
+          this.allowedOverMetered = true;
+          this.allowedOverRoaming = true;
+          this.scanning = false;
+        }
+      },
+      methods: {
+        'setTitle(Ljava/lang/CharSequence;)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.title = jsString(value); return self.$object ?? self;
+        },
+        'setDescription(Ljava/lang/CharSequence;)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.description = jsString(value); return self.$object ?? self;
+        },
+        'setMimeType(Ljava/lang/String;)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.mimeType = jsString(value); return self.$object ?? self;
+        },
+        'setDestinationInExternalPublicDir(Ljava/lang/String;Ljava/lang/String;)Landroid/app/DownloadManager$Request;': (self, [dir, name]) => {
+          self.destination = `/storage/emulated/0/${jsString(dir) ?? 'Download'}/${jsString(name) ?? 'download'}`;
+          self.fileName = jsString(name);
+          return self.$object ?? self;
+        },
+        'setDestinationInExternalFilesDir(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Landroid/app/DownloadManager$Request;': (self, [_ctx, dir, name]) => {
+          self.destination = `/storage/emulated/0/Android/data/app/files/${jsString(dir) ?? 'Download'}/${jsString(name) ?? 'download'}`;
+          self.fileName = jsString(name);
+          return self.$object ?? self;
+        },
+        'setDestinationUri(Landroid/net/Uri;)Landroid/app/DownloadManager$Request;': (self, [uri]) => {
+          self.destination = uriVirtualPath(uri);
+          return self.$object ?? self;
+        },
+        'setNotificationVisibility(I)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.visibility = value | 0; return self.$object ?? self;
+        },
+        'setAllowedOverMetered(Z)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.allowedOverMetered = !!value; return self.$object ?? self;
+        },
+        'setAllowedOverRoaming(Z)Landroid/app/DownloadManager$Request;': (self, [value]) => {
+          self.allowedOverRoaming = !!value; return self.$object ?? self;
+        },
+        'setVisibleInDownloadsUi(Z)Landroid/app/DownloadManager$Request;': (self) => self.$object ?? self,
+        'allowScanningByMediaScanner()V': (self) => { self.scanning = true; },
+        'addRequestHeader(Ljava/lang/String;Ljava/lang/String;)Landroid/app/DownloadManager$Request;': (self, [key, value]) => {
+          self.headers.set(jsString(key), jsString(value)); return self.$object ?? self;
+        },
+        'getUri()Landroid/net/Uri;': (self) => self.uri ?? null,
+        'getMimeType()Ljava/lang/String;': (self) => self.mimeType ?? null,
+        'getTitle()Ljava/lang/CharSequence;': (self) => self.title ?? null,
+        'getDescription()Ljava/lang/CharSequence;': (self) => self.description ?? null,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/app/DownloadManager;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'enqueue(Landroid/app/DownloadManager$Request;)J': (self, [request], vm) => {
+          const id = (self.$nextId ||= 1000) + 1;
+          self.$nextId = id;
+          const downloads = (self.$downloads ||= new Map());
+          const path = request?.destination || uriVirtualPath(request?.uri);
+          const bytes = path ? VIRTUAL_FS.read(path) : null;
+          const name = request?.fileName || String(request?.title || path?.split('/').pop() || `download_${id}`);
+          downloads.set(id, { path, name, mime: request?.mimeType ?? null });
+          if (bytes) triggerBrowserDownload(name, bytes);
+          return BigInt(id);
+        },
+        'remove([J)I': (self, [ids]) => {
+          const list = Array.from(ids?.$data ?? []).map((value) => Number(BigInt.asIntN(64, BigInt(value))));
+          let removed = 0;
+          for (const id of list) {
+            if (self.$downloads?.delete?.(id)) removed += 1;
+          }
+          return removed;
+        },
+        'getUriForDownloadedFile(J)Landroid/net/Uri;': (self, [id], vm) => {
+          const entry = self.$downloads?.get?.(Number(id));
+          return entry?.path ? uriObject(vm, `file://${encodeURI(entry.path)}`) : null;
+        },
+        'getMimeTypeForDownloadedFile(J)Ljava/lang/String;': (self, [id]) => self.$downloads?.get?.(Number(id))?.mime ?? null,
+        'openDownloadedFile(J)Landroid/os/ParcelFileDescriptor;': () => null,
+        'getMaxBytesOverMobile()J': () => BigInt(4 * 1024 * 1024 * 1024),
+        'getRecommendedMaxBytesOverMobile()J': () => BigInt(2 * 1024 * 1024 * 1024),
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/app/NotificationManager;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'notify(ILandroid/app/Notification;)V': () => undefined,
-        'cancel(I)V': () => undefined,
-        'cancelAll()V': () => undefined,
-        'notify(Ljava/lang/String;ILandroid/app/Notification;)V': () => undefined,
-        'notifyAsPackage(Ljava/lang/String;Ljava/lang/String;ILandroid/app/Notification;)V': () => undefined,
-        'cancel(Ljava/lang/String;I)V': () => undefined,
-        'cancelAsPackage(Ljava/lang/String;Ljava/lang/String;I)V': () => undefined,
+        'notify(ILandroid/app/Notification;)V': (self, [id, notification]) => postBrowserNotification(self, id, notification),
+        'cancel(I)V': (self, [id]) => {
+          self.$notifications?.get?.(id | 0)?.close?.();
+          self.$notifications?.delete?.(id | 0);
+        },
+        'cancelAll()V': (self) => {
+          for (const instance of self.$notifications?.values?.() ?? []) instance?.close?.();
+          self.$notifications?.clear?.();
+        },
+        'notify(Ljava/lang/String;ILandroid/app/Notification;)V': (self, [_tag, id, notification]) => postBrowserNotification(self, id, notification),
+        'notifyAsPackage(Ljava/lang/String;Ljava/lang/String;ILandroid/app/Notification;)V': (self, [_pkg, _tag, id, notification]) => postBrowserNotification(self, id, notification),
+        'cancel(Ljava/lang/String;I)V': (self, [_tag, id]) => {
+          self.$notifications?.get?.(id | 0)?.close?.();
+          self.$notifications?.delete?.(id | 0);
+        },
+        'cancelAsPackage(Ljava/lang/String;Ljava/lang/String;I)V': (self, [_pkg, _tag, id]) => {
+          self.$notifications?.get?.(id | 0)?.close?.();
+          self.$notifications?.delete?.(id | 0);
+        },
         'setNotificationDelegate(Ljava/lang/String;)V': (self, [delegate]) => { self.delegate = jsString(delegate) || null; },
         'getNotificationDelegate()Ljava/lang/String;': (self) => self.delegate ?? null,
         'canNotifyAsPackage(Ljava/lang/String;)Z': () => false,
@@ -17017,8 +17821,8 @@ function settingsDefs() {
         'acquireUnstableContentProviderClient(Landroid/net/Uri;)Landroid/content/ContentProviderClient;': () => null,
         'acquireUnstableContentProviderClient(Ljava/lang/String;)Landroid/content/ContentProviderClient;': () => null,
         'openInputStream(Landroid/net/Uri;)Ljava/io/InputStream;': (self, [uri]) => contentResolverInputStream(self.vm, uri),
-        'openOutputStream(Landroid/net/Uri;)Ljava/io/OutputStream;': (self) => makeSinkStream(self.vm),
-        'openOutputStream(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;': (self) => makeSinkStream(self.vm),
+        'openOutputStream(Landroid/net/Uri;)Ljava/io/OutputStream;': (self, [uri]) => makeSinkStream(self.vm, uri),
+        'openOutputStream(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;': (self, [uri]) => makeSinkStream(self.vm, uri),
         'openFile(Landroid/net/Uri;Ljava/lang/String;Landroid/os/CancellationSignal;)Landroid/os/ParcelFileDescriptor;': () => null,
         'openFileDescriptor(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;': () => null,
         'openFileDescriptor(Landroid/net/Uri;Ljava/lang/String;Landroid/os/CancellationSignal;)Landroid/os/ParcelFileDescriptor;': () => null,
