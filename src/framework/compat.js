@@ -1152,7 +1152,7 @@ const PAINT_METHODS = {
 
 function bitmapSelf(self) {
   if (!self) return self;
-  return bitmapSelf(self).image !== undefined ? self : (bitmapSelf(self).bitmap ?? self);
+  return self.image !== undefined ? self : (self.bitmap ?? self);
 }
 
 const BITMAP_METHODS = {

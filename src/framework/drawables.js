@@ -1423,6 +1423,73 @@ const DrawableDef = nativeDef('Landroid/graphics/drawable/Drawable;', {
     'getLayoutDirection()I': () => 0,
     'setLayoutDirection(I)Z': () => false,
     'onStateChange([I)Z': () => false,
+    '<init>()V': () => undefined,
+    'getDirtyBounds()Landroid/graphics/Rect;': (self) => {
+      const rect = ensureRectObject(self);
+      writeBoundsToRect(self, rect);
+      return rect;
+    },
+    'setChangingConfigurations(I)V': (self, [value]) => { self.changingConfigurations = toInt(value); },
+    'getChangingConfigurations()I': (self) => self.changingConfigurations | 0,
+    'setDither(Z)V': (self, [value]) => { self.dither = !!value; },
+    'setFilterBitmap(Z)V': (self, [value]) => { self.filterBitmap = !!value; },
+    'isFilterBitmap()Z': (self) => !!self.filterBitmap,
+    'onLayoutDirectionChanged(I)Z': () => false,
+    'setColorFilter(ILandroid/graphics/PorterDuff$Mode;)V': (self, [color]) => {
+      self.colorFilter = { mode: toInt(color) ? 'SRC_IN' : null, color: toInt(color) >>> 0 };
+    },
+    'setTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.tintBlendMode = mode ?? null; },
+    'setHotspot(FF)V': (self, [x, y]) => {
+      self.hotspotX = Number(x) || 0;
+      self.hotspotY = Number(y) || 0;
+    },
+    'setHotspotBounds(IIII)V': (self, [left, top, right, bottom]) => {
+      self.hotspotBounds = { left: toInt(left), top: toInt(top), right: toInt(right), bottom: toInt(bottom) };
+    },
+    'getHotspotBounds(Landroid/graphics/Rect;)V': (self, [rect]) => {
+      const bounds = self.hotspotBounds || self.bounds || { left: 0, top: 0, right: 0, bottom: 0 };
+      writeBoundsToRect({ bounds }, rect);
+    },
+    'isProjected()Z': () => false,
+    'hasFocusStateSpecified()Z': () => false,
+    'getCurrent()Landroid/graphics/drawable/Drawable;': (self) => self.$object ?? self,
+    'setLevel(I)Z': (self, [level]) => {
+      const next = toInt(level);
+      const changed = self.level !== next;
+      self.level = next;
+      return changed;
+    },
+    'getLevel()I': (self) => self.level | 0,
+    'setAutoMirrored(Z)V': (self, [value]) => { self.autoMirrored = !!value; },
+    'isAutoMirrored()Z': (self) => !!self.autoMirrored,
+    'canApplyTheme()Z': () => false,
+    'getTransparentRegion()Landroid/graphics/Region;': () => null,
+    'onLevelChange(I)Z': (self, [level]) => {
+      const changed = self.level !== toInt(level);
+      self.level = toInt(level);
+      return changed;
+    },
+    'onBoundsChange(Landroid/graphics/Rect;)V': () => undefined,
+    'getOpticalInsets()Landroid/graphics/Insets;': () => null,
+    'getOutline(Landroid/graphics/Outline;)V': () => undefined,
+    'inflate(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;)V': () => undefined,
+    'inflate(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;Landroid/content/res/Resources$Theme;)V': () => undefined,
+    'getConstantState()Landroid/graphics/drawable/Drawable$ConstantState;': () => null,
+  },
+  staticMethods: {
+    'resolveOpacity(II)I': (_self, [first, second]) => {
+      const a = toInt(first);
+      const b = toInt(second);
+      return a === b ? a : 2;
+    },
+    'createFromStream(Ljava/io/InputStream;Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromResourceStream(Landroid/content/res/Resources;Landroid/util/TypedValue;Ljava/io/InputStream;Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromResourceStream(Landroid/content/res/Resources;Landroid/util/TypedValue;Ljava/io/InputStream;Ljava/lang/String;Landroid/graphics/BitmapFactory$Options;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromXml(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromXml(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/content/res/Resources$Theme;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromXmlInner(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromXmlInner(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;Landroid/content/res/Resources$Theme;)Landroid/graphics/drawable/Drawable;': () => null,
+    'createFromPath(Ljava/lang/String;)Landroid/graphics/drawable/Drawable;': () => null,
   },
 });
 
@@ -1507,7 +1574,7 @@ const GradientDrawableDef = nativeDef('Landroid/graphics/drawable/GradientDrawab
       self.strokeColor = toInt(color) >>> 0;
     },
     'setCornerRadius(F)V': (self, [radius]) => { self.cornerRadius = Number(radius) || 0; self.cornerRadii = null; },
-    'getCornerRadius()F': (self) => numberToFloatBits(Number(self.cornerRadius) || 0),
+    'getCornerRadius()F': (self) => Number(self.cornerRadius) || 0,
     'setCornerRadii([F)V': (self, [radii]) => {
       self.cornerRadii = parseRadiiArray(self.vm, radii);
       self.cornerRadius = 0;
@@ -1538,6 +1605,47 @@ const GradientDrawableDef = nativeDef('Landroid/graphics/drawable/GradientDrawab
       return 1;
     },
     'getOpacity()I': () => -3,
+    'setStroke(IIFF)V': (self, [width, color, dashWidth, dashGap]) => {
+      self.strokeWidth = toInt(width);
+      self.strokeColor = toInt(color) >>> 0;
+      self.dashWidth = Number(dashWidth) || 0;
+      self.dashGap = Number(dashGap) || 0;
+    },
+    'setStroke(ILandroid/content/res/ColorStateList;FF)V': (self, [width, csl, dashWidth, dashGap]) => {
+      self.strokeWidth = toInt(width);
+      const color = colorStateListColor(csl, stateSetFor(self.state));
+      self.strokeColor = color === null ? 0xff000000 : color;
+      self.strokeColorList = csl ?? null;
+      self.dashWidth = Number(dashWidth) || 0;
+      self.dashGap = Number(dashGap) || 0;
+    },
+    'getGradientCenterX()F': (self) => Number(self.gradientCenterX) || 0,
+    'getGradientCenterY()F': (self) => Number(self.gradientCenterY) || 0,
+    'getGradientRadius()F': (self) => Number(self.gradientRadius) || 0,
+    'getUseLevel()Z': (self) => !!self.useLevel,
+    'getOrientation()Landroid/graphics/drawable/GradientDrawable$Orientation;': (self) => ({
+      $descriptor: 'Landroid/graphics/drawable/GradientDrawable$Orientation;',
+      $peer: { ordinal: self.orientation | 0 },
+    }),
+    'setOrientation(Landroid/graphics/drawable/GradientDrawable$Orientation;)V': (self, [orientation]) => {
+      self.orientation = toInt(orientation?.$peer?.ordinal ?? orientation);
+      self.gradientAngle = ORIENTATION_ANGLES[self.orientation | 0] ?? 270;
+    },
+    'setColors([I[F)V': (self, [colors, offsets]) => {
+      const values = (colors?.$data || colors || []).map((c) => c >>> 0);
+      self.colors = values.length ? values : null;
+      if (values.length) self.color = values[values.length - 1];
+      self.colorOffsets = Array.from(offsets?.$data || offsets || [], (value) => Number(value) || 0);
+    },
+    'setInnerRadiusRatio(F)V': (self, [ratio]) => { self.innerRadiusRatio = Number(ratio) || 0; },
+    'getInnerRadiusRatio()F': (self) => Number(self.innerRadiusRatio) || 0,
+    'setInnerRadius(I)V': (self, [radius]) => { self.innerRadius = toInt(radius); },
+    'getInnerRadius()I': (self) => self.innerRadius | 0,
+    'setThicknessRatio(F)V': (self, [ratio]) => { self.thicknessRatio = Number(ratio) || 0; },
+    'getThicknessRatio()F': (self) => Number(self.thicknessRatio) || 0,
+    'setThickness(I)V': (self, [thickness]) => { self.thickness = toInt(thickness); },
+    'getThickness()I': (self) => self.thickness | 0,
+    'getColor()Landroid/content/res/ColorStateList;': (self) => self.colorStateList ?? null,
     ...baseDrawableMethods(),
   },
 });
@@ -1727,6 +1835,81 @@ const LayerDrawableDef = nativeDef('Landroid/graphics/drawable/LayerDrawable;', 
       return result;
     },
     'getOpacity()I': () => -3,
+    'inflate(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;Landroid/content/res/Resources$Theme;)V': () => undefined,
+    'canApplyTheme()Z': () => false,
+    'isProjected()Z': () => false,
+    'findIndexByLayerId(I)I': (self, [id]) =>
+      (self.layers || []).findIndex((entry) => (entry.id | 0) === (toInt(id) | 0)),
+    'setDrawable(ILandroid/graphics/drawable/Drawable;)V': (self, [index, drawable]) => {
+      const layer = (self.layers || [])[toInt(index)];
+      if (layer) layer.drawable = drawable ?? null;
+    },
+    'setLayerSize(III)V': (self, [index, width, height]) => {
+      const layer = (self.layers || [])[toInt(index)];
+      if (!layer) return;
+      layer.width = toInt(width);
+      layer.height = toInt(height);
+    },
+    'getLayerWidth(I)I': (self, [index]) => (self.layers || [])[toInt(index)]?.width | 0,
+    'getLayerHeight(I)I': (self, [index]) => (self.layers || [])[toInt(index)]?.height | 0,
+    'setLayerGravity(II)V': (self, [index, gravity]) => {
+      const layer = (self.layers || [])[toInt(index)];
+      if (layer) layer.gravity = toInt(gravity);
+    },
+    'getLayerGravity(I)I': (self, [index]) => (self.layers || [])[toInt(index)]?.gravity | 0,
+    'setLayerInsetStart(II)V': (self, [index, value]) => {
+      const layer = (self.layers || [])[toInt(index)];
+      if (layer) layer.insetStart = toInt(value);
+    },
+    'getLayerInsetStart(I)I': (self, [index]) => (self.layers || [])[toInt(index)]?.insetStart | 0,
+    'setLayerInsetEnd(II)V': (self, [index, value]) => {
+      const layer = (self.layers || [])[toInt(index)];
+      if (layer) layer.insetEnd = toInt(value);
+    },
+    'getLayerInsetEnd(I)I': (self, [index]) => (self.layers || [])[toInt(index)]?.insetEnd | 0,
+    'setPaddingMode(I)V': (self, [value]) => { self.paddingMode = toInt(value); },
+    'getPaddingMode()I': (self) => self.paddingMode | 0,
+    'invalidateDrawable(Landroid/graphics/drawable/Drawable;)V': (self) => { self.vm?.screen?.invalidate?.(); },
+    'scheduleDrawable(Landroid/graphics/drawable/Drawable;Ljava/lang/Runnable;J)V': () => undefined,
+    'unscheduleDrawable(Landroid/graphics/drawable/Drawable;Ljava/lang/Runnable;)V': () => undefined,
+    'getChangingConfigurations()I': (self) => self.changingConfigurations | 0,
+    'setPaddingRelative(IIII)V': (self, [start, top, end, bottom]) => {
+      self.paddingStart = toInt(start);
+      self.paddingTop = toInt(top);
+      self.paddingEnd = toInt(end);
+      self.paddingBottom = toInt(bottom);
+    },
+    'getLeftPadding()I': (self) => self.paddingLeft | 0,
+    'getRightPadding()I': (self) => self.paddingRight | 0,
+    'getStartPadding()I': (self) => (self.paddingStart ?? self.paddingLeft ?? 0) | 0,
+    'getEndPadding()I': (self) => (self.paddingEnd ?? self.paddingRight ?? 0) | 0,
+    'getTopPadding()I': (self) => self.paddingTop | 0,
+    'getBottomPadding()I': (self) => self.paddingBottom | 0,
+    'getOutline(Landroid/graphics/Outline;)V': () => undefined,
+    'setHotspot(FF)V': (self, [x, y]) => {
+      self.hotspotX = Number(x) || 0;
+      self.hotspotY = Number(y) || 0;
+    },
+    'setHotspotBounds(IIII)V': (self, [left, top, right, bottom]) => {
+      self.hotspotBounds = { left: toInt(left), top: toInt(top), right: toInt(right), bottom: toInt(bottom) };
+    },
+    'getHotspotBounds(Landroid/graphics/Rect;)V': (self, [rect]) => {
+      writeBoundsToRect({ bounds: self.hotspotBounds || self.bounds || {} }, rect);
+    },
+    'setDither(Z)V': (self, [value]) => { self.dither = !!value; },
+    'setTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.tintBlendMode = mode ?? null; },
+    'setOpacity(I)V': (self, [value]) => { self.opacity = toInt(value); },
+    'setAutoMirrored(Z)V': (self, [value]) => { self.autoMirrored = !!value; },
+    'isAutoMirrored()Z': (self) => !!self.autoMirrored,
+    'hasFocusStateSpecified()Z': () => false,
+    'onLevelChange(I)Z': (self, [level]) => {
+      const changed = self.level !== toInt(level);
+      self.level = toInt(level);
+      return changed;
+    },
+    'onBoundsChange(Landroid/graphics/Rect;)V': () => undefined,
+    'getConstantState()Landroid/graphics/drawable/Drawable$ConstantState;': () => null,
+    'onLayoutDirectionChanged(I)Z': () => false,
     ...baseDrawableMethods(),
   },
 });
@@ -1848,6 +2031,56 @@ const BitmapDrawableDef = nativeDef('Landroid/graphics/drawable/BitmapDrawable;'
     'getIntrinsicWidth()I': (self) => self.image?.width ?? -1,
     'getIntrinsicHeight()I': (self) => self.image?.height ?? -1,
     'getOpacity()I': () => -3,
+    '<init>()V': () => undefined,
+    '<init>(Landroid/content/res/Resources;)V': () => undefined,
+    '<init>(Ljava/lang/String;)V': () => undefined,
+    '<init>(Landroid/content/res/Resources;Ljava/lang/String;)V': () => undefined,
+    '<init>(Ljava/io/InputStream;)V': () => undefined,
+    '<init>(Landroid/content/res/Resources;Ljava/io/InputStream;)V': () => undefined,
+    'getPaint()Landroid/graphics/Paint;': (self, _args, vm) => {
+      if (!self.paintObject) {
+        self.paintObject = vm.allocateRawObject('Landroid/graphics/Paint;');
+        self.paintObject.$peer = { color: 0xff000000, style: 'fill', antiAlias: true, filterBitmap: true };
+      }
+      return self.paintObject;
+    },
+    'setBitmap(Landroid/graphics/Bitmap;)V': (self, [bitmap]) => {
+      self.bitmap = bitmap ?? null;
+      self.image = bitmap?.$peer?.image ?? bitmap?.image ?? null;
+    },
+    'setTargetDensity(Landroid/graphics/Canvas;)V': (self, [canvas]) => { self.targetDensity = canvas?.$peer?.density | 0; },
+    'setTargetDensity(Landroid/util/DisplayMetrics;)V': (self, [metrics]) => {
+      const peer = metrics?.$peer ?? metrics ?? {};
+      self.targetDensity = Number(peer.densityDpi) | 0;
+    },
+    'setTargetDensity(I)V': (self, [density]) => { self.targetDensity = toInt(density); },
+    'getGravity()I': (self) => self.gravity | 0,
+    'setMipMap(Z)V': (self, [value]) => { self.mipMap = !!value; },
+    'hasMipMap()Z': (self) => !!self.mipMap,
+    'setAntiAlias(Z)V': (self, [value]) => { self.antiAlias = !!value; },
+    'hasAntiAlias()Z': (self) => self.antiAlias !== false,
+    'setFilterBitmap(Z)V': (self, [value]) => { self.filterBitmap = !!value; },
+    'isFilterBitmap()Z': (self) => self.filterBitmap !== false,
+    'setDither(Z)V': (self, [value]) => { self.dither = !!value; },
+    'getTileModeX()Landroid/graphics/Shader$TileMode;': (self) => self.tileModeX ?? null,
+    'getTileModeY()Landroid/graphics/Shader$TileMode;': (self) => self.tileModeY ?? null,
+    'setTileModeX(Landroid/graphics/Shader$TileMode;)V': (self, [mode]) => { self.tileModeX = mode ?? null; },
+    'setTileModeY(Landroid/graphics/Shader$TileMode;)V': (self, [mode]) => { self.tileModeY = mode ?? null; },
+    'setTileModeXY(Landroid/graphics/Shader$TileMode;Landroid/graphics/Shader$TileMode;)V': (self, [x, y]) => {
+      self.tileModeX = x ?? null;
+      self.tileModeY = y ?? null;
+    },
+    'setAutoMirrored(Z)V': (self, [value]) => { self.autoMirrored = !!value; },
+    'isAutoMirrored()Z': (self) => !!self.autoMirrored,
+    'getChangingConfigurations()I': (self) => self.changingConfigurations | 0,
+    'onBoundsChange(Landroid/graphics/Rect;)V': () => undefined,
+    'getOpticalInsets()Landroid/graphics/Insets;': () => null,
+    'getOutline(Landroid/graphics/Outline;)V': () => undefined,
+    'setTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => { self.tintBlendMode = mode ?? null; },
+    'hasFocusStateSpecified()Z': () => false,
+    'inflate(Landroid/content/res/Resources;Lorg/xmlpull/v1/XmlPullParser;Landroid/util/AttributeSet;Landroid/content/res/Resources$Theme;)V': () => undefined,
+    'canApplyTheme()Z': () => false,
+    'getConstantState()Landroid/graphics/drawable/Drawable$ConstantState;': () => null,
     ...baseDrawableMethods(),
   },
 });
