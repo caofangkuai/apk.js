@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：459
-- 方法/构造函数键（静态统计）：9550
+- 注册的 native 类：460
+- 方法/构造函数键（静态统计）：9645
 
 ## Native 类清单
 
@@ -448,6 +448,7 @@
 | `Ljava/util/Objects;` | java-core.js |
 | `Ljava/util/Random;` | java-core.js |
 | `Ljava/util/regex/Matcher;` | java-core.js |
+| `Ljava/util/regex/MatchResult;` | java-core.js |
 | `Ljava/util/regex/Pattern;` | java-core.js |
 | `Ljava/util/Set;` | java-core.js |
 | `Ljava/util/Spliterator;` | java-core.js |

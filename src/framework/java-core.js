@@ -5269,7 +5269,18 @@ function getRuntimeSingleton(vm) {
 
 function writeThrough(writer, text) {
   const target = writer.writer;
-  if (!target) return;
+  if (!target) {
+    // 文件后端的 Writer/PrintWriter：没有委托对象时直接落到虚拟文件系统。
+    if (writer.path) {
+      const previous = VIRTUAL_FS.read(writer.path) || new Uint8Array(0);
+      const chunk = new TextEncoder().encode(text ?? '');
+      const merged = new Uint8Array(previous.length + chunk.length);
+      merged.set(previous);
+      merged.set(chunk, previous.length);
+      VIRTUAL_FS.write(writer.path, merged);
+    }
+    return;
+  }
   if (typeof target.write === 'function') {
     target.write(text);
   } else if (target.buffer !== undefined) {
@@ -11553,4 +11564,661 @@ JAVA_CORE_CLASSES['Landroid/view/animation/CycleInterpolator;'] = nativeDef('Lan
       return Math.sin(2 * Math.PI * (Number(self.cycles) || 1) * value);
     },
   },
+});
+
+/* ==========================================================================
+ * 文件 IO 补全：RandomAccessFile 原始类型读写、File 元数据/过滤/临时文件、
+ * PrintWriter 文件构造与格式化、Matcher 区域/替换语义。
+ * 所有实现都落到 VIRTUAL_FS 的真实字节与真实光标，不写空壳返回。
+ * ========================================================================== */
+
+const randomAccessFiles = JAVA_CORE_CLASSES['Ljava/io/RandomAccessFile;'];
+
+function randomAccessView(peer) {
+  return new DataView(peer.data.buffer, peer.data.byteOffset, peer.data.byteLength);
+}
+
+function randomAccessEnsure(peer, extra) {
+  const needed = peer.cursor + extra;
+  if (needed <= peer.data.length) return;
+  const next = new Uint8Array(needed);
+  next.set(peer.data);
+  peer.data = next;
+}
+
+function randomAccessRequire(vm, peer, count) {
+  if (peer.cursor + count <= peer.data.length) return true;
+  vm.throwException('Ljava/io/EOFException;', `RandomAccessFile: need ${count} bytes at ${peer.cursor}`);
+  return false;
+}
+
+function randomAccessRead(size, read) {
+  return (self, _args, vm) => {
+    if (!randomAccessRequire(vm, self, size)) return 0;
+    const value = read(randomAccessView(self), self.cursor);
+    self.cursor += size;
+    return value;
+  };
+}
+
+function randomAccessWrite(size, write) {
+  return (self, [value]) => {
+    randomAccessEnsure(self, size);
+    write(randomAccessView(self), self.cursor, value);
+    self.cursor += size;
+    return undefined;
+  };
+}
+
+/** 按 Java modified UTF-8 解码：NUL 编成 C0 80，补充平面字符拆成两个三字节序列。 */
+function decodeModifiedUtf8(bytes) {
+  let text = '';
+  let index = 0;
+  while (index < bytes.length) {
+    const first = bytes[index++];
+    if (first < 0x80) {
+      text += String.fromCharCode(first);
+    } else if ((first & 0xe0) === 0xc0 && index < bytes.length) {
+      const second = bytes[index++];
+      text += String.fromCharCode(((first & 0x1f) << 6) | (second & 0x3f));
+    } else if ((first & 0xf0) === 0xe0 && index + 1 < bytes.length) {
+      const second = bytes[index++];
+      const third = bytes[index++];
+      text += String.fromCharCode(((first & 0x0f) << 12) | ((second & 0x3f) << 6) | (third & 0x3f));
+    } else {
+      text += '\ufffd';
+    }
+  }
+  return text;
+}
+
+/** 按 Java modified UTF-8 编码字符串。 */
+function encodeModifiedUtf8(text) {
+  const bytes = [];
+  const input = String(text ?? '');
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code >= 0x01 && code <= 0x7f) {
+      bytes.push(code);
+    } else if (code <= 0x7ff) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return Uint8Array.from(bytes);
+}
+
+for (const [key, fn] of Object.entries({
+  'skipBytes(I)I': (self, [count]) => {
+    const step = Math.max(0, count | 0);
+    const actual = Math.min(step, Math.max(0, self.data.length - self.cursor));
+    self.cursor += actual;
+    return actual;
+  },
+  'readBoolean()Z': randomAccessRead(1, (view, at) => (view.getUint8(at) !== 0 ? 1 : 0)),
+  'readByte()B': randomAccessRead(1, (view, at) => view.getInt8(at)),
+  'readUnsignedByte()I': randomAccessRead(1, (view, at) => view.getUint8(at)),
+  'readShort()S': randomAccessRead(2, (view, at) => view.getInt16(at)),
+  'readUnsignedShort()I': randomAccessRead(2, (view, at) => view.getUint16(at)),
+  'readChar()C': randomAccessRead(2, (view, at) => view.getUint16(at)),
+  'readInt()I': randomAccessRead(4, (view, at) => view.getInt32(at)),
+  'readLong()J': randomAccessRead(8, (view, at) => view.getBigInt64(at)),
+  'readFloat()F': randomAccessRead(4, (view, at) => view.getFloat32(at)),
+  'readDouble()D': randomAccessRead(8, (view, at) => view.getFloat64(at)),
+  'readUTF()Ljava/lang/String;': (self, _args, vm) => {
+    if (!randomAccessRequire(vm, self, 2)) return null;
+    const view = randomAccessView(self);
+    const length = view.getUint16(self.cursor);
+    self.cursor += 2;
+    if (!randomAccessRequire(vm, self, length)) return null;
+    const text = decodeModifiedUtf8(self.data.subarray(self.cursor, self.cursor + length));
+    self.cursor += length;
+    return text;
+  },
+  'writeBoolean(Z)V': randomAccessWrite(1, (view, at, value) => view.setUint8(at, value ? 1 : 0)),
+  'writeByte(I)V': randomAccessWrite(1, (view, at, value) => view.setUint8(at, toInt(value) & 0xff)),
+  'writeShort(I)V': randomAccessWrite(2, (view, at, value) => view.setInt16(at, toInt(value))),
+  'writeChar(I)V': randomAccessWrite(2, (view, at, value) => view.setUint16(at, toInt(value) & 0xffff)),
+  'writeInt(I)V': randomAccessWrite(4, (view, at, value) => view.setInt32(at, toInt(value))),
+  'writeLong(J)V': randomAccessWrite(8, (view, at, value) => view.setBigInt64(at, BigInt(value ?? 0))),
+  'writeFloat(F)V': randomAccessWrite(4, (view, at, value) => view.setFloat32(at, Number(value) || 0)),
+  'writeDouble(D)V': randomAccessWrite(8, (view, at, value) => view.setFloat64(at, Number(value) || 0)),
+  'writeBytes(Ljava/lang/String;)V': (self, [text]) => {
+    const value = jsString(text) ?? '';
+    randomAccessEnsure(self, value.length);
+    for (let i = 0; i < value.length; i++) self.data[self.cursor++] = value.charCodeAt(i) & 0xff;
+  },
+  'writeChars(Ljava/lang/String;)V': (self, [text]) => {
+    const value = jsString(text) ?? '';
+    randomAccessEnsure(self, value.length * 2);
+    const view = randomAccessView(self);
+    for (let i = 0; i < value.length; i++) {
+      view.setUint16(self.cursor, value.charCodeAt(i));
+      self.cursor += 2;
+    }
+  },
+  'writeUTF(Ljava/lang/String;)V': (self, [text], vm) => {
+    const encoded = encodeModifiedUtf8(jsString(text) ?? '');
+    if (encoded.length > 0xffff) {
+      vm.throwException('Ljava/io/UTFDataFormatException;', 'encoded string too long');
+      return;
+    }
+    randomAccessEnsure(self, encoded.length + 2);
+    const view = randomAccessView(self);
+    view.setUint16(self.cursor, encoded.length);
+    self.cursor += 2;
+    self.data.set(encoded, self.cursor);
+    self.cursor += encoded.length;
+  },
+  'finalize()V': (self) => {
+    randomFiles.set(VIRTUAL_FS.normalize(self.path), self.data);
+    VIRTUAL_FS.write(self.path, self.data);
+  },
+})) {
+  randomAccessFiles.methods.set(key, fn);
+}
+
+/* ---- File 元数据与目录过滤 ---- */
+
+const FILE_PERMISSIONS = new Map();
+const DELETE_ON_EXIT = new Set();
+
+function filePermission(path) {
+  const normalized = VIRTUAL_FS.normalize(path);
+  if (!FILE_PERMISSIONS.has(normalized)) {
+    FILE_PERMISSIONS.set(normalized, { readable: true, writable: true, executable: false });
+  }
+  return FILE_PERMISSIONS.get(normalized);
+}
+
+function installDeleteOnExitHook() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && !window.__apkjsDeleteOnExitHooked) {
+      window.__apkjsDeleteOnExitHooked = true;
+      window.addEventListener('beforeunload', () => {
+        for (const path of DELETE_ON_EXIT) {
+          VIRTUAL_FS.files.delete(VIRTUAL_FS.normalize(path));
+          VIRTUAL_FS.dirs.delete(VIRTUAL_FS.normalize(path));
+        }
+      });
+    }
+  } catch (_) {
+    // 非浏览器环境没有 beforeunload。
+  }
+}
+
+function filePathOfValue(file) {
+  if (!file) return '';
+  if (typeof file === 'string') return file;
+  return file.path ?? file.$peer?.path ?? file.$fields?.get?.('Ljava/io/File;->path:Ljava/lang/String;') ?? '';
+}
+
+function renameVirtualPath(fromPath, toPath) {
+  const from = VIRTUAL_FS.normalize(fromPath);
+  const to = VIRTUAL_FS.normalize(toPath);
+  if (from === to) return true;
+  let moved = false;
+  if (VIRTUAL_FS.files.has(from)) {
+    VIRTUAL_FS.files.set(to, VIRTUAL_FS.files.get(from));
+    VIRTUAL_FS.files.delete(from);
+    moved = true;
+  }
+  for (const [path, data] of [...VIRTUAL_FS.files.entries()]) {
+    if (path.startsWith(`${from}/`)) {
+      VIRTUAL_FS.files.set(`${to}${path.slice(from.length)}`, data);
+      VIRTUAL_FS.files.delete(path);
+      moved = true;
+    }
+  }
+  if (VIRTUAL_FS.dirs.has(from)) {
+    VIRTUAL_FS.dirs.delete(from);
+    VIRTUAL_FS.dirs.add(to);
+    for (const dir of [...VIRTUAL_FS.dirs]) {
+      if (dir.startsWith(`${from}/`)) {
+        VIRTUAL_FS.dirs.delete(dir);
+        VIRTUAL_FS.dirs.add(`${to}${dir.slice(from.length)}`);
+      }
+    }
+    moved = true;
+  }
+  return moved;
+}
+
+function createTempFilePath(directory, prefix, suffix) {
+  const dir = VIRTUAL_FS.normalize(directory || '/data/local/tmp');
+  VIRTUAL_FS.mkdirs(dir);
+  const head = String(prefix ?? 'tmp');
+  const tail = String(suffix ?? '.tmp');
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const token = Math.random().toString(36).slice(2, 10);
+    const path = joinPaths(dir, `${head}${token}${tail}`);
+    if (!VIRTUAL_FS.exists(path)) {
+      VIRTUAL_FS.write(path, []);
+      return path;
+    }
+  }
+  const fallback = joinPaths(dir, `${head}${Date.now().toString(36)}${tail}`);
+  VIRTUAL_FS.write(fallback, []);
+  return fallback;
+}
+
+const fileDefinition = JAVA_CORE_CLASSES['Ljava/io/File;'];
+for (const [key, fn] of Object.entries({
+  '<init>(Ljava/net/URI;)V': (self, [uri]) => {
+    const raw = uri?.$peer?.parts?.path ?? uri?.parts?.path ?? uri?.$peer?.text ?? '';
+    let path = String(raw ?? '');
+    try { path = decodeURIComponent(path); } catch (_) { /* 保留原样 */ }
+    self.path = path;
+  },
+  'isAbsolute()Z': (self) => (String(self.path ?? '').startsWith('/') ? 1 : 0),
+  'getAbsoluteFile()Ljava/io/File;': (self, _args, vm) => wrapFilePath(vm, VIRTUAL_FS.normalize(self.path)),
+  'getCanonicalFile()Ljava/io/File;': (self, _args, vm) => wrapFilePath(vm, VIRTUAL_FS.normalize(self.path)),
+  'toURL()Ljava/net/URL;': (self, _args, vm) => {
+    const text = `file://${VIRTUAL_FS.normalize(self.path)}`;
+    const object = vm.allocateRawObject('Ljava/net/URL;');
+    object.$peer = { vm, text, parts: parseUrlParts(text) };
+    return object;
+  },
+  'toURI()Ljava/net/URI;': (self, _args, vm) => {
+    const text = `file:${VIRTUAL_FS.normalize(self.path)}`;
+    const object = vm.allocateRawObject('Ljava/net/URI;');
+    object.$peer = { vm, text, parts: parseUrlParts(text) };
+    return object;
+  },
+  'isHidden()Z': (self) => (String(self.path ?? '').split('/').pop()?.startsWith('.') ? 1 : 0),
+  'deleteOnExit()V': (self) => {
+    DELETE_ON_EXIT.add(VIRTUAL_FS.normalize(self.path));
+    installDeleteOnExitHook();
+  },
+  'list(Ljava/io/FilenameFilter;)[Ljava/lang/String;': (self, [filter], vm) => {
+    const names = VIRTUAL_FS.list(self.path).filter((name) => {
+      if (!filter) return true;
+      try {
+        return !!vm.invokeInterface(filter, 'accept', '(Ljava/io/File;Ljava/lang/String;)Z', [wrapFilePath(vm, self.path), name]);
+      } catch (_) {
+        return true;
+      }
+    });
+    const array = vm.newArray('[Ljava/lang/String;', names.length, null);
+    names.forEach((name, index) => { array.$data[index] = name; });
+    return array;
+  },
+  'listFiles(Ljava/io/FilenameFilter;)[Ljava/io/File;': (self, [filter], vm) => {
+    const names = VIRTUAL_FS.list(self.path).filter((name) => {
+      if (!filter) return true;
+      try {
+        return !!vm.invokeInterface(filter, 'accept', '(Ljava/io/File;Ljava/lang/String;)Z', [wrapFilePath(vm, self.path), name]);
+      } catch (_) {
+        return true;
+      }
+    });
+    const array = vm.newArray('[Ljava/io/File;', names.length, null);
+    names.forEach((name, index) => { array.$data[index] = wrapFilePath(vm, joinPaths(self.path, name)); });
+    return array;
+  },
+  'listFiles(Ljava/io/FileFilter;)[Ljava/io/File;': (self, [filter], vm) => {
+    const children = VIRTUAL_FS.list(self.path).map((name) => wrapFilePath(vm, joinPaths(self.path, name)));
+    const accepted = children.filter((child) => {
+      if (!filter) return true;
+      try {
+        return !!vm.invokeInterface(filter, 'accept', '(Ljava/io/File;)Z', [child]);
+      } catch (_) {
+        return true;
+      }
+    });
+    const array = vm.newArray('[Ljava/io/File;', accepted.length, null);
+    accepted.forEach((child, index) => { array.$data[index] = child; });
+    return array;
+  },
+  'renameTo(Ljava/io/File;)Z': (self, [destination]) => {
+    const target = filePathOfValue(destination);
+    if (!target) return 0;
+    return renameVirtualPath(self.path, target) ? 1 : 0;
+  },
+  'setReadOnly()Z': (self) => {
+    filePermission(self.path).writable = false;
+    return 1;
+  },
+  'setWritable(Z)Z': (self, [writable]) => {
+    filePermission(self.path).writable = !!writable;
+    return 1;
+  },
+  'setWritable(ZZ)Z': (self, [writable]) => {
+    filePermission(self.path).writable = !!writable;
+    return 1;
+  },
+  'setReadable(Z)Z': (self, [readable]) => {
+    filePermission(self.path).readable = !!readable;
+    return 1;
+  },
+  'setReadable(ZZ)Z': (self, [readable]) => {
+    filePermission(self.path).readable = !!readable;
+    return 1;
+  },
+  'setExecutable(Z)Z': (self, [executable]) => {
+    filePermission(self.path).executable = !!executable;
+    return 1;
+  },
+  'setExecutable(ZZ)Z': (self, [executable]) => {
+    filePermission(self.path).executable = !!executable;
+    return 1;
+  },
+  'canRead()Z': (self) => (filePermission(self.path).readable ? 1 : 0),
+  'canWrite()Z': (self) => (filePermission(self.path).writable ? 1 : 0),
+  'canExecute()Z': (self) => (filePermission(self.path).executable ? 1 : 0),
+})) {
+  fileDefinition.methods.set(key, fn);
+}
+
+fileDefinition.staticMethods.set('listRoots()[Ljava/io/File;', (_self, _args, vm) => {
+  const array = vm.newArray('[Ljava/io/File;', 1, null);
+  array.$data[0] = wrapFilePath(vm, '/');
+  return array;
+});
+fileDefinition.staticMethods.set('createTempFile(Ljava/lang/String;Ljava/lang/String;)Ljava/io/File;', (_self, [prefix, suffix], vm) =>
+  wrapFilePath(vm, createTempFilePath('/data/local/tmp', jsString(prefix), jsString(suffix))));
+fileDefinition.staticMethods.set('createTempFile(Ljava/lang/String;Ljava/lang/String;Ljava/io/File;)Ljava/io/File;', (_self, [prefix, suffix, directory], vm) =>
+  wrapFilePath(vm, createTempFilePath(filePathOfValue(directory) || '/data/local/tmp', jsString(prefix), jsString(suffix))));
+
+/* ---- PrintWriter：文件构造与格式化 ---- */
+
+const printWriterDefinition = JAVA_CORE_CLASSES['Ljava/io/PrintWriter;'];
+for (const [key, fn] of Object.entries({
+  '<init>(Ljava/lang/String;)V': (self, [path]) => {
+    self.writer = null;
+    self.path = jsString(path);
+    self.autoFlush = false;
+  },
+  '<init>(Ljava/lang/String;Ljava/lang/String;)V': (self, [path]) => {
+    self.writer = null;
+    self.path = jsString(path);
+    self.autoFlush = false;
+  },
+  '<init>(Ljava/io/File;)V': (self, [file]) => {
+    self.writer = null;
+    self.path = filePathOfValue(file);
+    self.autoFlush = false;
+  },
+  '<init>(Ljava/io/File;Ljava/lang/String;)V': (self, [file]) => {
+    self.writer = null;
+    self.path = filePathOfValue(file);
+    self.autoFlush = false;
+  },
+  'setError()V': (self) => { self.hasError = true; },
+  'clearError()V': (self) => { self.hasError = false; },
+  'checkError()Z': (self) => (self.hasError ? 1 : 0),
+  'print(F)V': (self, [value]) => writeThrough(self, String(Number(value) || 0)),
+  'print(D)V': (self, [value]) => writeThrough(self, String(Number(value) || 0)),
+  'print([C)V': (self, [chars]) => {
+    const codes = chars?.$data ?? chars ?? [];
+    writeThrough(self, Array.from(codes).map((code) => String.fromCharCode(toInt(code))).join(''));
+  },
+  'println(F)V': (self, [value]) => writeThrough(self, `${String(Number(value) || 0)}\n`),
+  'println(D)V': (self, [value]) => writeThrough(self, `${String(Number(value) || 0)}\n`),
+  'println([C)V': (self, [chars]) => {
+    const codes = chars?.$data ?? chars ?? [];
+    writeThrough(self, `${Array.from(codes).map((code) => String.fromCharCode(toInt(code))).join('')}\n`);
+  },
+  'printf(Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintWriter;': (self, [format, args], vm) => {
+    writeThrough(self, formatJavaString(format, args, vm));
+    return self.$object ?? self;
+  },
+  'printf(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintWriter;': (self, [_locale, format, args], vm) => {
+    writeThrough(self, formatJavaString(format, args, vm));
+    return self.$object ?? self;
+  },
+  'format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintWriter;': (self, [format, args], vm) => {
+    writeThrough(self, formatJavaString(format, args, vm));
+    return self.$object ?? self;
+  },
+  'format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintWriter;': (self, [_locale, format, args], vm) => {
+    writeThrough(self, formatJavaString(format, args, vm));
+    return self.$object ?? self;
+  },
+  'append(Ljava/lang/CharSequence;)Ljava/io/PrintWriter;': (self, [text]) => {
+    writeThrough(self, jsString(text));
+    return self.$object ?? self;
+  },
+  'append(Ljava/lang/CharSequence;II)Ljava/io/PrintWriter;': (self, [text, start, end]) => {
+    const value = jsString(text);
+    writeThrough(self, value.slice(start | 0, end | 0));
+    return self.$object ?? self;
+  },
+  'append(C)Ljava/io/PrintWriter;': (self, [code]) => {
+    writeThrough(self, String.fromCharCode(code | 0));
+    return self.$object ?? self;
+  },
+})) {
+  printWriterDefinition.methods.set(key, fn);
+}
+
+/* ---- Matcher：区域、命名分组、替换与命中状态 ---- */
+
+const matcherDefinition = JAVA_CORE_CLASSES['Ljava/util/regex/Matcher;'];
+
+function matcherRegion(peer) {
+  const length = String(peer.input ?? '').length;
+  const start = Math.max(0, Math.min(length, Number(peer.regionStart ?? 0) | 0));
+  const end = Math.max(start, Math.min(length, Number(peer.regionEnd ?? length) | 0));
+  return { start, end };
+}
+
+function matcherFindAt(vm, peer, from) {
+  const { start, end } = matcherRegion(peer);
+  const input = String(peer.input ?? '');
+  const window = input.slice(start, end);
+  let re;
+  try {
+    re = new RegExp(peer.regex || '', 'gd');
+  } catch (_) {
+    re = new RegExp(peer.regex || '', 'g');
+  }
+  re.lastIndex = Math.max(0, from - start);
+  const match = re.exec(window);
+  peer.hitEnd = !match ? 1 : 0;
+  if (!match) {
+    peer.last = null;
+    peer.cursor = end;
+    return false;
+  }
+  if (match.index + start === end - (match[0]?.length ?? 0) - 0 && end > start) peer.hitEnd = 1;
+  const groups = match.groups || null;
+  peer.last = Object.assign([...match], { index: match.index + start, groups, input });
+  peer.groups = groups;
+  peer.matchIndices = shiftMatchIndices(match.indices, start);
+  peer.cursor = start + match.index + (match[0].length || 1);
+  peer.requireEnd = peer.cursor >= end ? 1 : 0;
+  return true;
+}
+
+/** 把带 d 标志的 RegExp 捕获区间整体平移 region 偏移。 */
+function shiftMatchIndices(indices, offset) {
+  if (!indices) return null;
+  const shift = (span) => (span ? [span[0] + offset, span[1] + offset] : undefined);
+  const shifted = indices.map(shift);
+  if (indices.groups) {
+    shifted.groups = {};
+    for (const [name, span] of Object.entries(indices.groups)) shifted.groups[name] = shift(span);
+  }
+  return shifted;
+}
+
+for (const [key, fn] of Object.entries({
+  'pattern()Ljava/util/regex/Pattern;': (self, _args, vm) => makeRegexPattern(vm, self.regex || '', self.flags | 0),
+  'toMatchResult()Ljava/util/regex/MatchResult;': (self, _args, vm) => {
+    const object = vm.allocateRawObject('Ljava/util/regex/MatchResult;');
+    object.$peer = { last: self.last, input: self.input ?? '' };
+    return object;
+  },
+  'usePattern(Ljava/util/regex/Pattern;)Ljava/util/regex/Matcher;': (self, [pattern]) => {
+    self.regex = pattern?.$peer?.regex ?? pattern?.regex ?? '';
+    self.flags = pattern?.$peer?.flags ?? 0;
+    self.last = null;
+    self.cursor = matcherRegion(self).start;
+    return self.$object ?? self;
+  },
+  'find()Z': (self, _args, vm) => matcherFindAt(vm, self, self.cursor | 0),
+  'find(I)Z': (self, [start], vm) => {
+    self.cursor = matcherRegion(self).start + Math.max(0, start | 0);
+    self.last = null;
+    return matcherFindAt(vm, self, self.cursor);
+  },
+  'lookingAt()Z': (self) => {
+    const { start, end } = matcherRegion(self);
+    const window = String(self.input ?? '').slice(start, end);
+    let pattern;
+    try {
+      pattern = new RegExp(`^(?:${self.regex})`, 'd');
+    } catch (_) {
+      pattern = new RegExp(`^(?:${self.regex})`);
+    }
+    const match = pattern.exec(window);
+    if (!match) { self.last = null; self.hitEnd = 0; self.matchIndices = null; return 0; }
+    self.last = Object.assign([...match], { index: start, groups: match.groups || null, input: self.input });
+    self.groups = match.groups || null;
+    self.matchIndices = shiftMatchIndices(match.indices, start);
+    self.requireEnd = start + (match[0]?.length ?? 0) >= end ? 1 : 0;
+    return 1;
+  },
+  'start(I)I': (self, [index]) => {
+    const span = self.matchIndices?.[index | 0];
+    return span ? span[0] : -1;
+  },
+  'start(Ljava/lang/String;)I': (self, [name]) => {
+    const span = self.matchIndices?.groups?.[jsString(name)];
+    return span ? span[0] : -1;
+  },
+  'end(I)I': (self, [index]) => {
+    const span = self.matchIndices?.[index | 0];
+    return span ? span[1] : -1;
+  },
+  'end(Ljava/lang/String;)I': (self, [name]) => {
+    const span = self.matchIndices?.groups?.[jsString(name)];
+    return span ? span[1] : -1;
+  },
+  'group(Ljava/lang/String;)Ljava/lang/String;': (self, [name]) => {
+    if (!self.last) return null;
+    const value = self.last.groups?.[jsString(name)];
+    return value === undefined ? null : value;
+  },
+  'appendReplacement(Ljava/lang/StringBuffer;Ljava/lang/String;)Ljava/util/regex/Matcher;': (self, [buffer, replacement], vm) => {
+    if (!self.last) return self.$object ?? self;
+    const input = String(self.input ?? '');
+    const matchStart = self.last.index ?? 0;
+    const matchEnd = matchStart + (self.last[0]?.length ?? 0);
+    const before = input.slice(self.lastAppend ?? 0, matchStart);
+    const template = jsString(replacement) ?? '';
+    const expanded = template.replace(/\$(\d+|\{[^}]+\})/g, (match, token) => {
+      if (token.startsWith('{')) {
+        const value = self.last.groups?.[token.slice(1, -1)];
+        return value === undefined ? match : value;
+      }
+      const value = self.last[Number(token)];
+      return value === undefined ? match : value;
+    });
+    vm.invokeByName('append', '(Ljava/lang/String;)Ljava/lang/StringBuffer;', buffer, [before + expanded]);
+    self.lastAppend = matchEnd;
+    return self.$object ?? self;
+  },
+  'appendTail(Ljava/lang/StringBuffer;)Ljava/lang/StringBuffer;': (self, [buffer], vm) => {
+    const input = String(self.input ?? '');
+    vm.invokeByName('append', '(Ljava/lang/String;)Ljava/lang/StringBuffer;', buffer, [input.slice(self.lastAppend ?? 0)]);
+    self.lastAppend = input.length;
+    return buffer;
+  },
+  'region(II)Ljava/util/regex/Matcher;': (self, [start, end]) => {
+    const length = String(self.input ?? '').length;
+    self.regionStart = Math.max(0, Math.min(length, start | 0));
+    self.regionEnd = Math.max(self.regionStart, Math.min(length, end | 0));
+    self.cursor = self.regionStart;
+    self.last = null;
+    return self.$object ?? self;
+  },
+  'regionStart()I': (self) => matcherRegion(self).start,
+  'regionEnd()I': (self) => matcherRegion(self).end,
+  'hasTransparentBounds()Z': (self) => (self.transparentBounds ? 1 : 0),
+  'useTransparentBounds(Z)Ljava/util/regex/Matcher;': (self, [enabled]) => {
+    self.transparentBounds = !!enabled;
+    return self.$object ?? self;
+  },
+  'hasAnchoringBounds()Z': (self) => (self.anchoringBounds === false ? 0 : 1),
+  'useAnchoringBounds(Z)Ljava/util/regex/Matcher;': (self, [enabled]) => {
+    self.anchoringBounds = !!enabled;
+    return self.$object ?? self;
+  },
+  'hitEnd()Z': (self) => (self.hitEnd ? 1 : 0),
+  'requireEnd()Z': (self) => (self.requireEnd ? 1 : 0),
+})) {
+  matcherDefinition.methods.set(key, fn);
+}
+
+matcherDefinition.staticMethods.set('quoteReplacement(Ljava/lang/String;)Ljava/lang/String;', (_self, [text]) =>
+  String(jsString(text) ?? '').replace(/[\\$]/g, '\\$&'));
+
+JAVA_CORE_CLASSES['Ljava/util/regex/MatchResult;'] = nativeDef('Ljava/util/regex/MatchResult;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'groupCount()I': (self) => (self.last ? Math.max(0, self.last.length - 1) : 0),
+    'group()Ljava/lang/String;': (self) => self.last?.[0] ?? null,
+    'group(I)Ljava/lang/String;': (self, [index]) => self.last?.[index | 0] ?? null,
+    'start()I': (self) => self.last?.index ?? -1,
+    'start(I)I': (self) => (self.last ? self.last.index : -1),
+    'end()I': (self) => (self.last ? self.last.index + (self.last[0]?.length ?? 0) : -1),
+    'end(I)I': (self) => (self.last ? self.last.index + (self.last[0]?.length ?? 0) : -1),
+  },
+});
+
+/* matches/reset 需要与带索引的 find 语义保持一致。 */
+matcherDefinition.methods.set('matches()Z', (self) => {
+  let pattern;
+  try {
+    pattern = new RegExp(`^(?:${self.regex})$`, 'd');
+  } catch (_) {
+    pattern = new RegExp(`^(?:${self.regex})$`);
+  }
+  const match = pattern.exec(String(self.input ?? ''));
+  if (!match) {
+    self.last = null;
+    self.matchIndices = null;
+    self.hitEnd = 0;
+    return 0;
+  }
+  self.last = Object.assign([...match], { index: 0, groups: match.groups || null, input: self.input });
+  self.groups = match.groups || null;
+  self.matchIndices = shiftMatchIndices(match.indices, 0);
+  return 1;
+});
+matcherDefinition.methods.set('reset()Ljava/util/regex/Matcher;', (self) => {
+  self.cursor = matcherRegion(self).start;
+  self.last = null;
+  self.matchIndices = null;
+  self.lastAppend = 0;
+  return self.$object ?? self;
+});
+matcherDefinition.methods.set('reset(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;', (self, [input]) => {
+  self.input = jsString(input);
+  self.regionStart = 0;
+  self.regionEnd = String(self.input ?? '').length;
+  self.cursor = 0;
+  self.last = null;
+  self.matchIndices = null;
+  self.lastAppend = 0;
+  return self.$object ?? self;
+});
+
+const matchResultDefinition = JAVA_CORE_CLASSES['Ljava/util/regex/MatchResult;'];
+matchResultDefinition.methods.set('start(I)I', (self, [index]) => {
+  const span = self.matchIndices?.[index | 0];
+  if (span) return span[0];
+  const value = self.last?.[index | 0];
+  return value === undefined ? -1 : String(self.input ?? '').indexOf(value);
+});
+matchResultDefinition.methods.set('end(I)I', (self, [index]) => {
+  const span = self.matchIndices?.[index | 0];
+  if (span) return span[1];
+  const value = self.last?.[index | 0];
+  if (value === undefined) return -1;
+  const start = String(self.input ?? '').indexOf(value);
+  return start < 0 ? -1 : start + String(value).length;
 });
