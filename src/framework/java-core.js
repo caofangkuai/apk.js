@@ -9778,6 +9778,17 @@ CONN_METHODS.set('getRequestProperties()Ljava/util/Map;', (self, _args, vm) => {
   if (storage) for (const [key, value] of peer.headers) storage.set(key, value);
   return map;
 });
+CONN_METHODS.set('getHeaderField(Ljava/lang/String;)Ljava/lang/String;', (self, [key]) => {
+  const peer = connectionPeer(self);
+  return peer.headers.get(jsString(key)) ?? null;
+});
+CONN_METHODS.set('getHeaderFields()Ljava/util/Map;', (self, _args, vm) => {
+  const peer = connectionPeer(self);
+  const map = makeMap(vm);
+  const storage = mapPeer(map);
+  if (storage) for (const [key, value] of peer.headers) storage.set(key, value);
+  return map;
+});
 CONN_METHODS.set('getHeaderField(I)Ljava/lang/String;', (self, [index]) => {
   const peer = connectionPeer(self);
   const key = peer.headerOrder[toInt(index)];
@@ -9911,10 +9922,15 @@ CLASS_METHODS.set('getGenericInterfaces()[Ljava/lang/reflect/Type;', (self, _arg
 CLASS_METHODS.set('getComponentType()Ljava/lang/Class;', (self, _args, vm) => {
   const descriptor = String(self.$descriptor ?? '');
   if (!descriptor.startsWith('[')) return null;
+  const component = descriptor.slice(1);
   try {
-    return vm.getClassObject(descriptor.slice(1));
+    return vm.getClassObject(component);
   } catch (_) {
-    return null;
+    const object = vm.allocateRawObject('Ljava/lang/Class;');
+    const primitives = { I: 'int', J: 'long', S: 'short', B: 'byte', C: 'char', F: 'float', D: 'double', Z: 'boolean' };
+    object.$descriptor = component;
+    object.$name = primitives[component] || descriptorToName(component);
+    return object;
   }
 });
 CLASS_METHODS.set('getSigners()[Ljava/lang/Object;', () => null);
@@ -9924,10 +9940,15 @@ CLASS_METHODS.set('getDeclaringClass()Ljava/lang/Class;', (self, _args, vm) => {
   const name = self.$name || descriptorToName(self.$descriptor || '');
   const index = name.lastIndexOf('$');
   if (index <= 0) return null;
+  const outerName = name.slice(0, index);
+  const descriptor = nameToDescriptor(outerName);
   try {
-    return vm.getClassObject(nameToDescriptor(name.slice(0, index)));
+    return vm.getClassObject(descriptor);
   } catch (_) {
-    return null;
+    const object = vm.allocateRawObject('Ljava/lang/Class;');
+    object.$descriptor = descriptor;
+    object.$name = outerName;
+    return object;
   }
 });
 CLASS_METHODS.set('getEnclosingClass()Ljava/lang/Class;', (self, _args, vm) =>

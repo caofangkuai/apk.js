@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：436
-- 方法/构造函数键（静态统计）：9013
+- 注册的 native 类：447
+- 方法/构造函数键（静态统计）：9406
 
 ## Native 类清单
 
@@ -125,6 +125,7 @@
 | `Landroid/os/Build;` | registry.js |
 | `Landroid/os/Build$VERSION;` | registry.js |
 | `Landroid/os/Bundle;` | registry.js |
+| `Landroid/os/Debug$MemoryInfo;` | java-core.js |
 | `Landroid/os/Environment;` | java-core.js |
 | `Landroid/os/Handler;` | registry.js |
 | `Landroid/os/HandlerThread;` | registry.js |
@@ -357,6 +358,7 @@
 | `Ljava/lang/RuntimeException;` | java-core.js |
 | `Ljava/lang/StackTraceElement;` | java-core.js |
 | `Ljava/lang/String;` | java-core.js |
+| `Ljava/lang/StringBuffer;` | java-core.js |
 | `Ljava/lang/StringBuilder;` | java-core.js |
 | `Ljava/lang/System;` | java-core.js |
 | `Ljava/lang/Thread;` | java-core.js |
@@ -366,6 +368,7 @@
 | `Ljava/lang/UnsupportedOperationException;` | java-core.js |
 | `Ljava/math/BigDecimal;` | java-core.js |
 | `Ljava/net/ConnectException;` | java-core.js |
+| `Ljava/net/FileNameMap;` | java-core.js |
 | `Ljava/net/HttpURLConnection;` | java-core.js |
 | `Ljava/net/MalformedURLException;` | java-core.js |
 | `Ljava/net/SocketException;` | java-core.js |
@@ -378,11 +381,16 @@
 | `Ljava/nio/charset/Charset;` | java-core.js |
 | `Ljava/nio/charset/StandardCharsets;` | java-core.js |
 | `Ljava/security/KeyFactory;` | registry.js |
+| `Ljava/security/ProtectionDomain;` | java-core.js |
 | `Ljava/security/PublicKey;` | registry.js |
 | `Ljava/security/spec/X509EncodedKeySpec;` | registry.js |
 | `Ljava/sql/Timestamp;` | java-core.js |
+| `Ljava/text/AttributedCharacterIterator;` | java-core.js |
 | `Ljava/text/DecimalFormat;` | java-core.js |
 | `Ljava/text/DecimalFormatSymbols;` | java-core.js |
+| `Ljava/text/FieldPosition;` | java-core.js |
+| `Ljava/text/ParsePosition;` | java-core.js |
+| `Ljava/time/Instant;` | java-core.js |
 | `Ljava/util/AbstractList;` | java-core.js |
 | `Ljava/util/ArrayDeque;` | java-core.js |
 | `Ljava/util/ArrayList;` | java-core.js |
@@ -390,6 +398,7 @@
 | `Ljava/util/BitSet;` | registry.js |
 | `Ljava/util/Collection;` | java-core.js |
 | `Ljava/util/Collections;` | java-core.js |
+| `Ljava/util/Comparator;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicBoolean;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicInteger;` | java-core.js |
 | `Ljava/util/concurrent/atomic/AtomicReference;` | java-core.js |
@@ -412,6 +421,7 @@
 | `Ljava/util/concurrent/ThreadPoolExecutor;` | java-core.js |
 | `Ljava/util/concurrent/TimeUnit;` | java-core.js |
 | `Ljava/util/Date;` | java-core.js |
+| `Ljava/util/Enumeration;` | java-core.js |
 | `Ljava/util/HashMap;` | java-core.js |
 | `Ljava/util/HashSet;` | java-core.js |
 | `Ljava/util/Iterator;` | java-core.js |
@@ -428,6 +438,7 @@
 | `Ljava/util/regex/Matcher;` | java-core.js |
 | `Ljava/util/regex/Pattern;` | java-core.js |
 | `Ljava/util/Set;` | java-core.js |
+| `Ljava/util/Spliterator;` | java-core.js |
 | `Ljava/util/TimeZone;` | java-core.js |
 | `Ljava/util/UUID;` | java-core.js |
 | `Ljava/util/WeakHashMap;` | java-core.js |
