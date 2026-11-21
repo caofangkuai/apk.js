@@ -9009,13 +9009,13 @@ JAVA_CORE_CLASSES['Ljava/util/Spliterator;'] = nativeDef('Ljava/util/Spliterator
     'tryAdvance(Ljava/util/function/Consumer;)Z': (self, [consumer], vm) => {
       if (self.cursor >= self.items.length) return false;
       const value = self.items[self.cursor++];
-      if (consumer) vm.invokeByName('accept', '(Ljava/lang/Object;)V', consumer, [value]);
+      if (consumer) vm.invokeInterface(consumer, 'accept', '(Ljava/lang/Object;)V', [value]);
       return true;
     },
     'forEachRemaining(Ljava/util/function/Consumer;)V': (self, [consumer], vm) => {
       while (self.cursor < self.items.length) {
         const value = self.items[self.cursor++];
-        if (consumer) vm.invokeByName('accept', '(Ljava/lang/Object;)V', consumer, [value]);
+        if (consumer) vm.invokeInterface(consumer, 'accept', '(Ljava/lang/Object;)V', [value]);
       }
     },
     'trySplit()Ljava/util/Spliterator;': (self, _args, vm) => {
@@ -13596,3 +13596,667 @@ for (const signature of ['list(Ljava/io/PrintStream;)V', 'list(Ljava/io/PrintWri
     for (const line of lines) vm.invokeByName('println', '(Ljava/lang/String;)V', target, [line]);
   });
 }
+
+/* ===== Arrays 视图切分 / AbstractList / ThreadLocalRandom / 读写锁 / Instant ===== */
+
+const ARRAYS_STATIC = JAVA_CORE_CLASSES['Ljava/util/Arrays;'].staticMethods;
+
+function arraysSlice(array, from, to) {
+  const data = array?.$data || [];
+  const start = from === undefined || from === null ? 0 : toInt(from);
+  const end = to === undefined || to === null ? data.length : toInt(to);
+  return data.slice(start, end);
+}
+
+ARRAYS_STATIC.set('spliterator([Ljava/lang/Object;)Ljava/util/Spliterator;', (_self, [array], vm) =>
+  makeSpliterator(vm, arraysSlice(array)));
+ARRAYS_STATIC.set('spliterator([Ljava/lang/Object;II)Ljava/util/Spliterator;', (_self, [array, from, to], vm) =>
+  makeSpliterator(vm, arraysSlice(array, from, to)));
+ARRAYS_STATIC.set('spliterator([I)Ljava/util/Spliterator$OfInt;', (_self, [array], vm) =>
+  makeSpliterator(vm, arraysSlice(array)));
+ARRAYS_STATIC.set('spliterator([III)Ljava/util/Spliterator$OfInt;', (_self, [array, from, to], vm) =>
+  makeSpliterator(vm, arraysSlice(array, from, to)));
+ARRAYS_STATIC.set('spliterator([J)Ljava/util/Spliterator$OfLong;', (_self, [array], vm) =>
+  makeSpliterator(vm, arraysSlice(array)));
+ARRAYS_STATIC.set('spliterator([JII)Ljava/util/Spliterator$OfLong;', (_self, [array, from, to], vm) =>
+  makeSpliterator(vm, arraysSlice(array, from, to)));
+ARRAYS_STATIC.set('spliterator([D)Ljava/util/Spliterator$OfDouble;', (_self, [array], vm) =>
+  makeSpliterator(vm, arraysSlice(array)));
+ARRAYS_STATIC.set('spliterator([DII)Ljava/util/Spliterator$OfDouble;', (_self, [array, from, to], vm) =>
+  makeSpliterator(vm, arraysSlice(array, from, to)));
+
+const ABSTRACT_LIST_METHODS = JAVA_CORE_CLASSES['Ljava/util/AbstractList;'].methods;
+
+function abstractListItems(self) {
+  if (!Array.isArray(self.items)) self.items = [];
+  return self.items;
+}
+
+ABSTRACT_LIST_METHODS.set('<init>()V', (self) => {
+  self.items = [];
+  self.modCount = 0;
+});
+ABSTRACT_LIST_METHODS.set('add(Ljava/lang/Object;)Z', (self, [value]) => {
+  abstractListItems(self).push(value);
+  self.modCount = (self.modCount || 0) + 1;
+  return true;
+});
+ABSTRACT_LIST_METHODS.set('get(I)Ljava/lang/Object;', (self, [index], vm) => {
+  const list = abstractListItems(self);
+  const position = toInt(index);
+  if (position < 0 || position >= list.length) {
+    vm.throwException('Ljava/lang/IndexOutOfBoundsException;', `Index ${position} out of bounds for length ${list.length}`);
+  }
+  return list[position];
+});
+ABSTRACT_LIST_METHODS.set('set(ILjava/lang/Object;)Ljava/lang/Object;', (self, [index, value]) => {
+  const list = abstractListItems(self);
+  const previous = list[toInt(index)];
+  list[toInt(index)] = value;
+  return previous ?? null;
+});
+ABSTRACT_LIST_METHODS.set('add(ILjava/lang/Object;)V', (self, [index, value]) => {
+  abstractListItems(self).splice(toInt(index), 0, value);
+  self.modCount = (self.modCount || 0) + 1;
+});
+ABSTRACT_LIST_METHODS.set('remove(I)Ljava/lang/Object;', (self, [index]) => {
+  const removed = abstractListItems(self).splice(toInt(index), 1);
+  self.modCount = (self.modCount || 0) + 1;
+  return removed.length ? removed[0] : null;
+});
+ABSTRACT_LIST_METHODS.set('indexOf(Ljava/lang/Object;)I', (self, [value], vm) =>
+  abstractListItems(self).findIndex((item) => valuesEqual(item, value, vm)));
+ABSTRACT_LIST_METHODS.set('lastIndexOf(Ljava/lang/Object;)I', (self, [value], vm) => {
+  const list = abstractListItems(self);
+  for (let i = list.length - 1; i >= 0; i -= 1) if (valuesEqual(list[i], value, vm)) return i;
+  return -1;
+});
+ABSTRACT_LIST_METHODS.set('clear()V', (self) => {
+  abstractListItems(self).length = 0;
+  self.modCount = (self.modCount || 0) + 1;
+});
+ABSTRACT_LIST_METHODS.set('addAll(ILjava/util/Collection;)Z', (self, [index, collection]) => {
+  const items = collectionItems(collection);
+  if (!items.length) return false;
+  abstractListItems(self).splice(toInt(index), 0, ...items);
+  self.modCount = (self.modCount || 0) + 1;
+  return true;
+});
+ABSTRACT_LIST_METHODS.set('listIterator()Ljava/util/ListIterator;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+  object.$peer = { cursor: 0, abstractList: self.$object ?? self };
+  return object;
+});
+ABSTRACT_LIST_METHODS.set('listIterator(I)Ljava/util/ListIterator;', (self, [index], vm) => {
+  const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+  object.$peer = { cursor: toInt(index), abstractList: self.$object ?? self };
+  return object;
+});
+ABSTRACT_LIST_METHODS.set('subList(II)Ljava/util/List;', (self, [from, to], vm) =>
+  makeList(vm, abstractListItems(self).slice(toInt(from), toInt(to))));
+ABSTRACT_LIST_METHODS.set('equals(Ljava/lang/Object;)Z', (self, [other], vm) => {
+  const left = abstractListItems(self);
+  const right = collectionItems(other);
+  if (!right || left.length !== right.length) return 0;
+  return left.every((item, index) => valuesEqual(item, right[index], vm)) ? 1 : 0;
+});
+ABSTRACT_LIST_METHODS.set('hashCode()I', (self) => {
+  let result = 1;
+  for (const value of abstractListItems(self)) {
+    result = (Math.imul(result, 31) + (value === null || value === undefined ? 0 : hashCode(value))) | 0;
+  }
+  return result;
+});
+ABSTRACT_LIST_METHODS.set('removeRange(II)V', (self, [from, to]) => {
+  abstractListItems(self).splice(toInt(from), toInt(to) - toInt(from));
+  self.modCount = (self.modCount || 0) + 1;
+});
+
+const TLR_METHODS = JAVA_CORE_CLASSES['Ljava/util/concurrent/ThreadLocalRandom;'].methods;
+
+function tlrNext(self, bits) {
+  const next = (seed) => (Math.imul(seed, 0x5deece66d) + 0xb) | 0;
+  self.seed = next(self.seed | 0);
+  const shift = 32 - bits;
+  return (self.seed >>> shift) & (bits === 32 ? 0xffffffff : ((1 << bits) - 1));
+}
+
+function tlrBound(self, bound, vm) {
+  const limit = toInt(bound);
+  if (limit <= 0) vm.throwException('Ljava/lang/IllegalArgumentException;', 'bound must be positive');
+  return Math.abs(tlrNext(self, 31)) % limit;
+}
+
+TLR_METHODS.set('nextInt(II)I', (self, [origin, bound], vm) => {
+  const start = toInt(origin);
+  const limit = toInt(bound);
+  if (start >= limit) vm.throwException('Ljava/lang/IllegalArgumentException;', 'bound must be greater than origin');
+  return start + tlrBound(self, limit - start, vm);
+});
+TLR_METHODS.set('nextLong(J)J', (self, [bound], vm) => {
+  const limit = toLong(bound);
+  if (limit <= 0n) vm.throwException('Ljava/lang/IllegalArgumentException;', 'bound must be positive');
+  let value = (BigInt(tlrNext(self, 32)) << 32n) | BigInt(tlrNext(self, 32));
+  value &= BigInt(Number.MAX_SAFE_INTEGER);
+  return value % limit;
+});
+TLR_METHODS.set('nextLong(JJ)J', (self, [origin, bound], vm) => {
+  const start = toLong(origin);
+  const limit = toLong(bound);
+  if (start >= limit) vm.throwException('Ljava/lang/IllegalArgumentException;', 'bound must be greater than origin');
+  const span = limit - start;
+  let value = (BigInt(tlrNext(self, 32)) << 32n) | BigInt(tlrNext(self, 32));
+  value &= BigInt(Number.MAX_SAFE_INTEGER);
+  return start + (value % span);
+});
+TLR_METHODS.set('nextDouble(D)D', (self, [bound]) => {
+  const limit = Number(bound);
+  return tlrNext(self, 26) / 67108864 * limit;
+});
+TLR_METHODS.set('nextDouble(DD)D', (self, [origin, bound]) => {
+  const start = Number(origin);
+  const limit = Number(bound);
+  return start + (tlrNext(self, 26) / 67108864) * (limit - start);
+});
+
+function readWriteLockStates(self) {
+  if (typeof self.readCount !== 'number') self.readCount = 0;
+  if (typeof self.writeCount !== 'number') self.writeCount = 0;
+  return self;
+}
+
+function makeReadWriteLockObject(vm, descriptor, parent, kind) {
+  const object = vm.allocateRawObject(descriptor);
+  object.$peer = { vm, parent, kind, holdCount: 0 };
+  return object;
+}
+
+function lockStateOf(self) {
+  const parent = self.parent;
+  if (!parent) return null;
+  return readWriteLockStates(parent);
+}
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock;'].methods.set(
+  'readLock()Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;',
+  (self, _args, vm) => {
+    readWriteLockStates(self);
+    if (!self.readLockObject) {
+      self.readLockObject = makeReadWriteLockObject(
+        vm, 'Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;', self, 'read');
+    }
+    return self.readLockObject;
+  });
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock;'].methods.set(
+  'writeLock()Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;',
+  (self, _args, vm) => {
+    readWriteLockStates(self);
+    if (!self.writeLockObject) {
+      self.writeLockObject = makeReadWriteLockObject(
+        vm, 'Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;', self, 'write');
+    }
+    return self.writeLockObject;
+  });
+const RWL_METHODS = JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock;'].methods;
+RWL_METHODS.set('isFair()Z', (self) => (self.fair ? 1 : 0));
+RWL_METHODS.set('getOwner()Ljava/lang/Thread;', (self) => {
+  readWriteLockStates(self);
+  return self.writeCount > 0 ? (self.owner ?? null) : null;
+});
+RWL_METHODS.set('getReadLockCount()I', (self) => readWriteLockStates(self).readCount);
+RWL_METHODS.set('isWriteLocked()Z', (self) => (readWriteLockStates(self).writeCount > 0 ? 1 : 0));
+RWL_METHODS.set('isWriteLockedByCurrentThread()Z', (self) => {
+  readWriteLockStates(self);
+  return self.writeCount > 0 && self.owner === self.vm?.currentThreadObject?.() ? 1 : 0;
+});
+RWL_METHODS.set('getWriteHoldCount()I', (self) => readWriteLockStates(self).writeCount);
+RWL_METHODS.set('getReadHoldCount()I', (self) => readWriteLockStates(self).readCount);
+for (const getter of [
+  'getQueuedWriterThreads()Ljava/util/Collection;',
+  'getQueuedReaderThreads()Ljava/util/Collection;',
+  'getQueuedThreads()Ljava/util/Collection;',
+]) {
+  RWL_METHODS.set(getter, (_self, _args, vm) => makeList(vm, []));
+}
+RWL_METHODS.set('hasQueuedThreads()Z', () => 0);
+RWL_METHODS.set('hasQueuedThread(Ljava/lang/Thread;)Z', () => 0);
+RWL_METHODS.set('getQueueLength()I', () => 0);
+RWL_METHODS.set('hasWaiters(Ljava/util/concurrent/locks/Condition;)Z', () => 0);
+RWL_METHODS.set('getWaitQueueLength(Ljava/util/concurrent/locks/Condition;)I', () => 0);
+RWL_METHODS.set('getWaitingThreads(Ljava/util/concurrent/locks/Condition;)Ljava/util/Collection;', (_self, _args, vm) =>
+  makeList(vm, []));
+
+const READ_LOCK_METHODS = {
+  'lock()V': (self) => {
+    const state = lockStateOf(self);
+    if (state) state.readCount += 1;
+    self.holdCount = (self.holdCount || 0) + 1;
+    self.held = true;
+  },
+  'lockInterruptibly()V': (self) => {
+    const state = lockStateOf(self);
+    if (state) state.readCount += 1;
+    self.holdCount = (self.holdCount || 0) + 1;
+    self.held = true;
+  },
+  'tryLock()Z': (self) => {
+    const state = lockStateOf(self);
+    if (state) state.readCount += 1;
+    self.holdCount = (self.holdCount || 0) + 1;
+    self.held = true;
+    return true;
+  },
+  'tryLock(JLjava/util/concurrent/TimeUnit;)Z': (self) => {
+    const state = lockStateOf(self);
+    if (state) state.readCount += 1;
+    self.holdCount = (self.holdCount || 0) + 1;
+    self.held = true;
+    return true;
+  },
+  'unlock()V': (self, _args, vm) => {
+    if (!self.holdCount) vm.throwException('Ljava/lang/IllegalMonitorStateException;', 'unlock without lock');
+    self.holdCount -= 1;
+    const state = lockStateOf(self);
+    if (state && state.readCount > 0) state.readCount -= 1;
+    self.held = self.holdCount > 0;
+  },
+  'newCondition()Ljava/util/concurrent/locks/Condition;': () => null,
+  'isHeldByCurrentThread()Z': (self) => (self.holdCount > 0 ? 1 : 0),
+  'getHoldCount()I': (self) => self.holdCount || 0,
+  'toString()Ljava/lang/String;': (self) => {
+    const state = lockStateOf(self);
+    return `ReadLock[count=${state?.readCount ?? 0}]`;
+  },
+};
+const WRITE_LOCK_METHODS = {
+  'lock()V': (self) => {
+    const state = lockStateOf(self);
+    if (state) {
+      state.writeCount += 1;
+      state.owner = self.vm?.currentThreadObject?.() ?? null;
+    }
+    self.holdCount = (self.holdCount || 0) + 1;
+    self.held = true;
+  },
+  'lockInterruptibly()V': (self) => WRITE_LOCK_METHODS['lock()V'](self),
+  'tryLock()Z': (self) => {
+    WRITE_LOCK_METHODS['lock()V'](self);
+    return true;
+  },
+  'tryLock(JLjava/util/concurrent/TimeUnit;)Z': (self) => {
+    WRITE_LOCK_METHODS['lock()V'](self);
+    return true;
+  },
+  'unlock()V': (self, _args, vm) => {
+    if (!self.holdCount) vm.throwException('Ljava/lang/IllegalMonitorStateException;', 'unlock without lock');
+    self.holdCount -= 1;
+    const state = lockStateOf(self);
+    if (state && state.writeCount > 0) {
+      state.writeCount -= 1;
+      if (state.writeCount === 0) state.owner = null;
+    }
+    self.held = self.holdCount > 0;
+  },
+  'newCondition()Ljava/util/concurrent/locks/Condition;': () => null,
+  'isHeldByCurrentThread()Z': (self) => (self.holdCount > 0 ? 1 : 0),
+  'getHoldCount()I': (self) => self.holdCount || 0,
+  'toString()Ljava/lang/String;': (self) => {
+    const state = lockStateOf(self);
+    return `WriteLock[count=${state?.writeCount ?? 0}]`;
+  },
+};
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;'] = nativeDef(
+  'Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;', {
+    super: 'Ljava/lang/Object;',
+    interfaces: ['Ljava/util/concurrent/locks/Lock;'],
+    ctor: peerClass(function () {
+      this.parent = null;
+      this.holdCount = 0;
+      this.held = false;
+    }, { parent: null, holdCount: 0, held: false }),
+    methods: READ_LOCK_METHODS,
+  });
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;'] = nativeDef(
+  'Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;', {
+    super: 'Ljava/lang/Object;',
+    interfaces: ['Ljava/util/concurrent/locks/Lock;'],
+    ctor: peerClass(function () {
+      this.parent = null;
+      this.holdCount = 0;
+      this.held = false;
+    }, { parent: null, holdCount: 0, held: false }),
+    methods: WRITE_LOCK_METHODS,
+  });
+
+JAVA_CORE_CLASSES['Ljava/time/temporal/ValueRange;'] = nativeDef('Ljava/time/temporal/ValueRange;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.minimum = 0n;
+    this.maximum = 0n;
+  }, { minimum: 0n, maximum: 0n }),
+  methods: {
+    'getMinimum()J': (self) => BigInt(self.minimum ?? 0n),
+    'getLargestMinimum()J': (self) => BigInt(self.largestMinimum ?? self.minimum ?? 0n),
+    'getMaximum()J': (self) => BigInt(self.maximum ?? 0n),
+    'getSmallestMaximum()J': (self) => BigInt(self.smallestMaximum ?? self.maximum ?? 0n),
+    'isFixed()Z': (self) => (BigInt(self.minimum ?? 0n) === BigInt(self.maximum ?? 0n) ? 1 : 0),
+    'isIntValue()Z': (self) => (BigInt(self.minimum ?? 0n) >= -2147483648n && BigInt(self.maximum ?? 0n) <= 2147483647n ? 1 : 0),
+    'isValidValue(J)Z': (self, [value]) => {
+      const number = BigInt(value);
+      return number >= BigInt(self.minimum ?? 0n) && number <= BigInt(self.maximum ?? 0n) ? 1 : 0;
+    },
+    'isValidIntValue(J)Z': (self, [value]) => {
+      const number = BigInt(value);
+      return number >= -2147483648n && number <= 2147483647n
+        && number >= BigInt(self.minimum ?? 0n) && number <= BigInt(self.maximum ?? 0n) ? 1 : 0;
+    },
+    'checkValidValue(J)J': (self, [value], vm) => {
+      const number = BigInt(value);
+      if (number < BigInt(self.minimum ?? 0n) || number > BigInt(self.maximum ?? 0n)) {
+        vm.throwException('Ljava/time/DateTimeException;', `Invalid value: ${number}`);
+      }
+      return number;
+    },
+    'checkValidIntValue(J)I': (self, [value], vm) => {
+      const number = BigInt(value);
+      if (number < BigInt(self.minimum ?? 0n) || number > BigInt(self.maximum ?? 0n)
+        || number < -2147483648n || number > 2147483647n) {
+        vm.throwException('Ljava/time/DateTimeException;', `Invalid value: ${number}`);
+      }
+      return Number(number);
+    },
+    'toString()Ljava/lang/String;': (self) => {
+      const minimum = String(self.minimum ?? 0n);
+      const maximum = String(self.maximum ?? 0n);
+      return minimum === maximum ? minimum : `${minimum} - ${maximum}`;
+    },
+  },
+  staticMethods: {
+    'of(JJ)Ljava/time/temporal/ValueRange;': (_self, [minimum, maximum], vm) => {
+      if (BigInt(minimum) > BigInt(maximum)) vm.throwException('Ljava/lang/IllegalArgumentException;', 'minimum > maximum');
+      return makeValueRange(vm, minimum, maximum, minimum, maximum);
+    },
+    'of(JJJJ)Ljava/time/temporal/ValueRange;': (_self, [minimum, largestMinimum, smallestMaximum, maximum], vm) => {
+      if (BigInt(minimum) > BigInt(maximum) || BigInt(largestMinimum) > BigInt(smallestMaximum)) {
+        vm.throwException('Ljava/lang/IllegalArgumentException;', 'invalid range');
+      }
+      return makeValueRange(vm, minimum, maximum, largestMinimum, smallestMaximum);
+    },
+  },
+});
+
+function makeValueRange(vm, minimum, maximum, largestMinimum, smallestMaximum) {
+  const object = vm.allocateRawObject('Ljava/time/temporal/ValueRange;');
+  object.$peer = {
+    minimum: BigInt(minimum),
+    maximum: BigInt(maximum),
+    largestMinimum: BigInt(largestMinimum ?? minimum),
+    smallestMaximum: BigInt(smallestMaximum ?? maximum),
+  };
+  return object;
+}
+
+const INSTANT_METHODS = JAVA_CORE_CLASSES['Ljava/time/Instant;'].methods;
+const INSTANT_STATIC = JAVA_CORE_CLASSES['Ljava/time/Instant;'].staticMethods;
+
+function instantSecondsNanos(self) {
+  if (self.epochSecond !== undefined && self.nano !== undefined) {
+    return { seconds: BigInt(self.epochSecond), nano: BigInt(self.nano) };
+  }
+  const total = BigInt(self.epochMilli ?? 0n) * 1000000n;
+  let seconds = total / 1000000000n;
+  let nano = total % 1000000000n;
+  if (nano < 0n) {
+    nano += 1000000000n;
+    seconds -= 1n;
+  }
+  return { seconds, nano };
+}
+
+function makeInstantFromParts(vm, seconds, nano) {
+  let secondValue = BigInt(seconds);
+  let nanoValue = BigInt(nano);
+  secondValue += nanoValue / 1000000000n;
+  nanoValue %= 1000000000n;
+  if (nanoValue < 0n) {
+    nanoValue += 1000000000n;
+    secondValue -= 1n;
+  }
+  const object = vm.allocateRawObject('Ljava/time/Instant;');
+  object.$peer = {
+    epochSecond: secondValue,
+    nano: nanoValue,
+    epochMilli: secondValue * 1000n + nanoValue / 1000000n,
+  };
+  return object;
+}
+
+const INSTANT_UNIT_NANOS = {
+  NANOS: 1n,
+  MICROS: 1000n,
+  MILLIS: 1000000n,
+  SECONDS: 1000000000n,
+  MINUTES: 60000000000n,
+  HOURS: 3600000000000n,
+  HALF_DAYS: 43200000000000n,
+  DAYS: 86400000000000n,
+};
+
+function temporalUnitId(unit) {
+  const peer = unit?.$peer ?? unit;
+  return String(peer?.id ?? peer?.name ?? peer?.unit ?? peer?.alias ?? '');
+}
+
+function temporalFieldId(field) {
+  const peer = field?.$peer ?? field;
+  return String(peer?.id ?? peer?.name ?? peer?.field ?? peer?.alias ?? '');
+}
+
+function instantFieldValue(self, field) {
+  const id = temporalFieldId(field);
+  const { seconds, nano } = instantSecondsNanos(self);
+  if (id === 'INSTANT_SECONDS') return seconds;
+  if (id === 'NANO_OF_SECOND') return nano;
+  if (id === 'MICRO_OF_SECOND') return nano / 1000n;
+  if (id === 'MILLI_OF_SECOND') return nano / 1000000n;
+  return null;
+}
+
+INSTANT_METHODS.set('isSupported(Ljava/time/temporal/TemporalField;)Z', (self, [field]) =>
+  (instantFieldValue(self, field) === null ? 0 : 1));
+INSTANT_METHODS.set('isSupported(Ljava/time/temporal/TemporalUnit;)Z', (self, [unit]) =>
+  (INSTANT_UNIT_NANOS[temporalUnitId(unit)] === undefined ? 0 : 1));
+INSTANT_METHODS.set('range(Ljava/time/temporal/TemporalField;)Ljava/time/temporal/ValueRange;', (self, [field], vm) => {
+  const id = temporalFieldId(field);
+  if (id === 'INSTANT_SECONDS') return makeValueRange(vm, -31557014167219200n, 31556889864403199n);
+  if (id === 'NANO_OF_SECOND') return makeValueRange(vm, 0n, 999999999n);
+  vm.throwException('Ljava/time/DateTimeException;', `Unsupported field: ${id}`);
+});
+INSTANT_METHODS.set('get(Ljava/time/temporal/TemporalField;)I', (self, [field], vm) => {
+  const value = instantFieldValue(self, field);
+  if (value === null) vm.throwException('Ljava/time/DateTimeException;', `Unsupported field: ${temporalFieldId(field)}`);
+  return Number(BigInt(value) & 0x7fffffffn);
+});
+INSTANT_METHODS.set('getLong(Ljava/time/temporal/TemporalField;)J', (self, [field], vm) => {
+  const value = instantFieldValue(self, field);
+  if (value === null) vm.throwException('Ljava/time/DateTimeException;', `Unsupported field: ${temporalFieldId(field)}`);
+  return BigInt(value);
+});
+INSTANT_METHODS.set('with(Ljava/time/temporal/TemporalAdjuster;)Ljava/time/Instant;', (self, [adjuster], vm) =>
+  vm.invokeInterface(adjuster, 'adjustInto', '(Ljava/time/temporal/Temporal;)Ljava/time/temporal/Temporal;', [self.$object ?? self]));
+INSTANT_METHODS.set('with(Ljava/time/temporal/TemporalField;J)Ljava/time/Instant;', (self, [field, value], vm) => {
+  const id = temporalFieldId(field);
+  const parts = instantSecondsNanos(self);
+  if (id === 'INSTANT_SECONDS') return makeInstantFromParts(vm, value, parts.nano);
+  if (id === 'NANO_OF_SECOND') return makeInstantFromParts(vm, parts.seconds, value);
+  if (id === 'MICRO_OF_SECOND') return makeInstantFromParts(vm, parts.seconds, BigInt(value) * 1000n);
+  if (id === 'MILLI_OF_SECOND') return makeInstantFromParts(vm, parts.seconds, BigInt(value) * 1000000n);
+  vm.throwException('Ljava/time/DateTimeException;', `Unsupported field: ${id}`);
+});
+INSTANT_METHODS.set('truncatedTo(Ljava/time/temporal/TemporalUnit;)Ljava/time/Instant;', (self, [unit], vm) => {
+  const factor = INSTANT_UNIT_NANOS[temporalUnitId(unit)];
+  if (factor === undefined) vm.throwException('Ljava/time/DateTimeException;', `Unsupported unit: ${temporalUnitId(unit)}`);
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, (parts.nano / factor) * factor);
+});
+INSTANT_METHODS.set('plus(Ljava/time/temporal/TemporalAmount;)Ljava/time/Instant;', (self, [amount], vm) => {
+  const peer = amount?.$peer ?? amount;
+  if (!peer || (peer.seconds === undefined && peer.nanos === undefined)) {
+    vm.throwException('Ljava/time/DateTimeException;', 'unsupported amount');
+  }
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds + BigInt(peer.seconds ?? 0), parts.nano + BigInt(peer.nanos ?? 0));
+});
+INSTANT_METHODS.set('plus(JLjava/time/temporal/TemporalUnit;)Ljava/time/Instant;', (self, [amount, unit], vm) => {
+  const factor = INSTANT_UNIT_NANOS[temporalUnitId(unit)];
+  if (factor === undefined) vm.throwException('Ljava/time/DateTimeException;', `Unsupported unit: ${temporalUnitId(unit)}`);
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano + BigInt(amount) * factor);
+});
+INSTANT_METHODS.set('plusSeconds(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds + BigInt(amount), parts.nano);
+});
+INSTANT_METHODS.set('plusNanos(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano + BigInt(amount));
+});
+INSTANT_METHODS.set('plusMillis(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano + BigInt(amount) * 1000000n);
+});
+INSTANT_METHODS.set('minus(Ljava/time/temporal/TemporalAmount;)Ljava/time/Instant;', (self, [amount], vm) => {
+  const peer = amount?.$peer ?? amount;
+  if (!peer || (peer.seconds === undefined && peer.nanos === undefined)) {
+    vm.throwException('Ljava/time/DateTimeException;', 'unsupported amount');
+  }
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds - BigInt(peer.seconds ?? 0), parts.nano - BigInt(peer.nanos ?? 0));
+});
+INSTANT_METHODS.set('minus(JLjava/time/temporal/TemporalUnit;)Ljava/time/Instant;', (self, [amount, unit], vm) => {
+  const factor = INSTANT_UNIT_NANOS[temporalUnitId(unit)];
+  if (factor === undefined) vm.throwException('Ljava/time/DateTimeException;', `Unsupported unit: ${temporalUnitId(unit)}`);
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano - BigInt(amount) * factor);
+});
+INSTANT_METHODS.set('minusSeconds(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds - BigInt(amount), parts.nano);
+});
+INSTANT_METHODS.set('minusNanos(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano - BigInt(amount));
+});
+INSTANT_METHODS.set('minusMillis(J)Ljava/time/Instant;', (self, [amount], vm) => {
+  const parts = instantSecondsNanos(self);
+  return makeInstantFromParts(vm, parts.seconds, parts.nano - BigInt(amount) * 1000000n);
+});
+INSTANT_METHODS.set('query(Ljava/time/temporal/TemporalQuery;)Ljava/lang/Object;', (self, [query], vm) =>
+  vm.invokeInterface(query, 'queryFrom', '(Ljava/time/temporal/TemporalAccessor;)Ljava/lang/Object;', [self.$object ?? self]));
+INSTANT_METHODS.set('adjustInto(Ljava/time/temporal/Temporal;)Ljava/time/temporal/Temporal;', (self, [temporal], vm) => {
+  const peer = temporal?.$peer;
+  if (!peer) vm.throwException('Ljava/time/DateTimeException;', 'unsupported temporal');
+  const parts = instantSecondsNanos(self);
+  peer.epochSecond = parts.seconds;
+  peer.nano = parts.nano;
+  peer.epochMilli = parts.seconds * 1000n + parts.nano / 1000000n;
+  peer.instant = self.$object ?? self;
+  return temporal.$object ?? temporal;
+});
+INSTANT_METHODS.set('until(Ljava/time/temporal/Temporal;Ljava/time/temporal/TemporalUnit;)J', (self, [other, unit], vm) => {
+  const factor = INSTANT_UNIT_NANOS[temporalUnitId(unit)];
+  if (factor === undefined) vm.throwException('Ljava/time/DateTimeException;', `Unsupported unit: ${temporalUnitId(unit)}`);
+  const left = instantSecondsNanos(self);
+  const right = instantSecondsNanos(other?.$peer ?? other);
+  const diff = (right.seconds - left.seconds) * 1000000000n + (right.nano - left.nano);
+  return diff / factor;
+});
+INSTANT_METHODS.set('toEpochMilli()J', (self) => {
+  const parts = instantSecondsNanos(self);
+  return parts.seconds * 1000n + parts.nano / 1000000n;
+});
+INSTANT_METHODS.set('getEpochSecond()J', (self) => instantSecondsNanos(self).seconds);
+INSTANT_METHODS.set('getNano()I', (self) => Number(instantSecondsNanos(self).nano));
+
+INSTANT_STATIC.set('now(Ljava/time/Clock;)Ljava/time/Instant;', (_self, [clock], vm) => {
+  const peer = clock?.$peer ?? clock;
+  if (peer && peer.epochMilli !== undefined) {
+    return makeInstantFromParts(vm, BigInt(peer.epochMilli) / 1000n, (BigInt(peer.epochMilli) % 1000n) * 1000000n);
+  }
+  const now = Date.now();
+  return makeInstantFromParts(vm, BigInt(now) / 1000n, (BigInt(now) % 1000n) * 1000000n);
+});
+INSTANT_STATIC.set('now()Ljava/time/Instant;', (_self, _args, vm) => {
+  const now = Date.now();
+  return makeInstantFromParts(vm, BigInt(now) / 1000n, (BigInt(now) % 1000n) * 1000000n);
+});
+INSTANT_STATIC.set('ofEpochSecond(J)Ljava/time/Instant;', (_self, [seconds], vm) =>
+  makeInstantFromParts(vm, seconds, 0n));
+INSTANT_STATIC.set('ofEpochSecond(JJ)Ljava/time/Instant;', (_self, [seconds, nanoAdjustment], vm) =>
+  makeInstantFromParts(vm, seconds, nanoAdjustment));
+INSTANT_STATIC.set('ofEpochMilli(J)Ljava/time/Instant;', (_self, [milli], vm) =>
+  makeInstantFromParts(vm, BigInt(milli) / 1000n, (BigInt(milli) % 1000n) * 1000000n));
+INSTANT_STATIC.set('from(Ljava/time/temporal/TemporalAccessor;)Ljava/time/Instant;', (_self, [accessor], vm) => {
+  const peer = accessor?.$peer;
+  if (peer && peer.epochSecond !== undefined && peer.nano !== undefined) {
+    return makeInstantFromParts(vm, peer.epochSecond, peer.nano);
+  }
+  if (peer && peer.epochMilli !== undefined) {
+    return makeInstantFromParts(vm, BigInt(peer.epochMilli) / 1000n, (BigInt(peer.epochMilli) % 1000n) * 1000000n);
+  }
+  vm.throwException('Ljava/time/DateTimeException;', 'Unable to obtain Instant');
+});
+INSTANT_STATIC.set('parse(Ljava/lang/CharSequence;)Ljava/time/Instant;', (_self, [text], vm) => {
+  const value = jsString(text).trim();
+  const match = /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:?\d{2})$/.exec(value);
+  if (!match) vm.throwException('Ljava/time/format/DateTimeParseException;', `Text '${value}' could not be parsed`);
+  const [, year, month, day, hour, minute, second = '0', fraction = '', zone] = match;
+  let offsetSeconds = 0;
+  if (zone !== 'Z') {
+    const sign = zone[0] === '-' ? -1 : 1;
+    const digits = zone.slice(1).replace(':', '');
+    offsetSeconds = sign * (parseInt(digits.slice(0, 2), 10) * 3600 + parseInt(digits.slice(2), 10) * 60);
+  }
+  const utc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  const seconds = BigInt(Math.floor(utc / 1000)) - BigInt(offsetSeconds);
+  const nano = BigInt(fraction.padEnd(9, '0') || '0');
+  return makeInstantFromParts(vm, seconds, nano);
+});
+
+const VALUE_RANGE_METHODS = JAVA_CORE_CLASSES['Ljava/time/temporal/ValueRange;'].methods;
+const VALUE_RANGE_STATIC = JAVA_CORE_CLASSES['Ljava/time/temporal/ValueRange;'].staticMethods;
+VALUE_RANGE_STATIC.set('of(JJJ)Ljava/time/temporal/ValueRange;', (_self, [minimum, maximum, smallestMaximum], vm) => {
+  if (BigInt(minimum) > BigInt(maximum)) vm.throwException('Ljava/lang/IllegalArgumentException;', 'minimum > maximum');
+  return makeValueRange(vm, minimum, maximum, minimum, smallestMaximum);
+});
+VALUE_RANGE_METHODS.set('checkValidValue(JLjava/time/temporal/TemporalField;)J', (self, [value, field], vm) => {
+  const number = BigInt(value);
+  if (number < BigInt(self.minimum ?? 0n) || number > BigInt(self.maximum ?? 0n)) {
+    vm.throwException('Ljava/time/DateTimeException;',
+      `Invalid value for ${temporalFieldId(field)}: ${number}`);
+  }
+  return number;
+});
+VALUE_RANGE_METHODS.set('checkValidIntValue(JLjava/time/temporal/TemporalField;)I', (self, [value, field], vm) => {
+  const number = BigInt(value);
+  if (number < BigInt(self.minimum ?? 0n) || number > BigInt(self.maximum ?? 0n)
+    || number < -2147483648n || number > 2147483647n) {
+    vm.throwException('Ljava/time/DateTimeException;',
+      `Invalid value for ${temporalFieldId(field)}: ${number}`);
+  }
+  return Number(number);
+});
+
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;'].methods.set(
+  '<init>(Ljava/util/concurrent/locks/ReentrantReadWriteLock;)V', (self, [parent]) => {
+    self.parent = parent ?? null;
+    self.holdCount = 0;
+    self.held = false;
+  });
+JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;'].methods.set(
+  '<init>(Ljava/util/concurrent/locks/ReentrantReadWriteLock;)V', (self, [parent]) => {
+    self.parent = parent ?? null;
+    self.holdCount = 0;
+    self.held = false;
+  });

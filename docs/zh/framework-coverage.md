@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：462
-- 方法/构造函数键（静态统计）：9683
+- 注册的 native 类：465
+- 方法/构造函数键（静态统计）：9714
 
 ## Native 类清单
 
@@ -403,6 +403,7 @@
 | `Ljava/text/FieldPosition;` | java-core.js |
 | `Ljava/text/ParsePosition;` | java-core.js |
 | `Ljava/time/Instant;` | java-core.js |
+| `Ljava/time/temporal/ValueRange;` | java-core.js |
 | `Ljava/time/ZoneId;` | java-core.js |
 | `Ljava/util/AbstractList;` | java-core.js |
 | `Ljava/util/ArrayDeque;` | java-core.js |
@@ -427,6 +428,8 @@
 | `Ljava/util/concurrent/LinkedBlockingQueue;` | java-core.js |
 | `Ljava/util/concurrent/locks/Lock;` | java-core.js |
 | `Ljava/util/concurrent/locks/ReentrantReadWriteLock;` | java-core.js |
+| `Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;` | java-core.js |
+| `Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;` | java-core.js |
 | `Ljava/util/concurrent/ScheduledExecutorService;` | java-core.js |
 | `Ljava/util/concurrent/ScheduledFuture;` | java-core.js |
 | `Ljava/util/concurrent/ThreadFactory;` | java-core.js |

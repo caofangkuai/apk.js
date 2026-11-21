@@ -225,4 +225,75 @@ call(randomAgain, 'nextBytes([B)V', [bytesB]);
 assert.deepEqual([...bytesA.$data], [...bytesB.$data], '相同种子应产生相同字节');
 assert.ok(bytesA.$data.some((value) => value !== 0), 'nextBytes 应写入真实随机字节');
 
+/* 12. AbstractList：基于真实元素数组的增删改查与哈希 */
+const abstractList = vm.instantiate('Ljava/util/AbstractList;', []);
+assert.equal(call(abstractList, 'add(Ljava/lang/Object;)Z', ['x']), 1);
+call(abstractList, 'add(ILjava/lang/Object;)V', [0, 'y']);
+assert.equal(call(abstractList, 'get(I)Ljava/lang/Object;', [0]), 'y');
+assert.equal(call(abstractList, 'set(ILjava/lang/Object;)Ljava/lang/Object;', [1, 'z']), 'x');
+assert.equal(Number(call(abstractList, 'indexOf(Ljava/lang/Object;)I', ['z'])), 1);
+assert.equal(Number(call(abstractList, 'size()I')), 2);
+assert.equal(Number(call(abstractList, 'hashCode()I')), 31 * (31 + 'y'.charCodeAt(0)) + 'z'.charCodeAt(0));
+assert.equal(call(abstractList, 'remove(I)Ljava/lang/Object;', [0]), 'y');
+assert.equal(Number(call(abstractList, 'size()I')), 1);
+
+/* 13. Arrays.spliterator：区间切分视图与遍历 */
+const intSpliterator = stat('Ljava/util/Arrays;', 'spliterator([III)Ljava/util/Spliterator$OfInt;',
+  [intArray([1, 2, 3, 4, 5]), 1, 4]);
+const seenNumbers = [];
+call(intSpliterator, 'forEachRemaining(Ljava/util/function/Consumer;)V', [
+  { accept: (value) => seenNumbers.push(value) },
+]);
+assert.deepEqual(seenNumbers, [2, 3, 4]);
+assert.equal(Number(call(intSpliterator, 'getExactSizeIfKnown()J')), 0);
+
+/* 14. ThreadLocalRandom：边界内的真实随机值 */
+const tlr = vm.allocateRawObject('Ljava/util/concurrent/ThreadLocalRandom;');
+tlr.$peer = { seed: 987654 };
+const bounded = Number(call(tlr, 'nextInt(II)I', [10, 20]));
+assert.ok(bounded >= 10 && bounded < 20);
+const boundedLong = call(tlr, 'nextLong(J)J', [5n]);
+assert.ok(boundedLong >= 0n && boundedLong < 5n);
+assert.ok(Number(call(tlr, 'nextDouble(DD)D', [1, 2])) >= 1);
+
+/* 15. ReentrantReadWriteLock：读写锁计数与线程持有状态 */
+const rwlock = vm.instantiate('Ljava/util/concurrent/locks/ReentrantReadWriteLock;', []);
+const readLock = call(rwlock, 'readLock()Ljava/util/concurrent/locks/ReentrantReadWriteLock$ReadLock;');
+const writeLock = call(rwlock, 'writeLock()Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;');
+call(readLock, 'lock()V');
+assert.equal(Number(call(readLock, 'getHoldCount()I')), 1);
+assert.equal(Number(call(rwlock, 'getReadLockCount()I')), 1);
+call(readLock, 'unlock()V');
+assert.equal(Number(call(rwlock, 'getReadLockCount()I')), 0);
+call(writeLock, 'lock()V');
+assert.equal(Number(call(rwlock, 'isWriteLocked()Z')), 1);
+assert.equal(Number(call(writeLock, 'isHeldByCurrentThread()Z')), 1);
+assert.equal(Number(call(rwlock, 'getWriteHoldCount()I')), 1);
+call(writeLock, 'unlock()V');
+assert.equal(Number(call(rwlock, 'isWriteLocked()Z')), 0);
+
+/* 16. Instant：纳秒精度运算、截断、解析与周期差 */
+const instant = stat('Ljava/time/Instant;', 'ofEpochSecond(JJ)Ljava/time/Instant;', [1500n, 250000000n]);
+assert.equal(call(instant, 'getEpochSecond()J'), 1500n);
+assert.equal(Number(call(instant, 'getNano()I')), 250000000);
+const plusInstant = call(instant, 'plusNanos(J)Ljava/time/Instant;', [1000000000n]);
+assert.equal(call(plusInstant, 'getEpochSecond()J'), 1501n);
+const truncatedInstant = call(instant, 'truncatedTo(Ljava/time/temporal/TemporalUnit;)Ljava/time/Instant;', [
+  { id: 'MILLIS' },
+]);
+assert.equal(Number(call(truncatedInstant, 'getNano()I')), 250000000);
+const parsed = stat('Ljava/time/Instant;', 'parse(Ljava/lang/CharSequence;)Ljava/time/Instant;',
+  ['2020-01-02T03:04:05.123456789Z']);
+assert.equal(call(parsed, 'getEpochSecond()J'), BigInt(Date.UTC(2020, 0, 2, 3, 4, 5) / 1000));
+assert.equal(Number(call(parsed, 'getNano()I')), 123456789);
+const range = call(instant, 'range(Ljava/time/temporal/TemporalField;)Ljava/time/temporal/ValueRange;', [
+  { id: 'NANO_OF_SECOND' },
+]);
+assert.equal(call(range, 'getMaximum()J'), 999999999n);
+assert.equal(Number(call(instant, 'isSupported(Ljava/time/temporal/TemporalField;)Z', [{ id: 'INSTANT_SECONDS' }])), 1);
+assert.equal(call(instant, 'until(Ljava/time/temporal/Temporal;Ljava/time/temporal/TemporalUnit;)J', [
+  parsed,
+  { id: 'SECONDS' },
+]), ((BigInt(Date.UTC(2020, 0, 2, 3, 4, 5) / 1000) - 1500n) * 1000000000n + 123456789n - 250000000n) / 1000000000n);
+
 console.log('jdk-core OK');
