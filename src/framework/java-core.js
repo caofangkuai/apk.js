@@ -1,9 +1,11 @@
 import { NativeClassDef } from '../runtime/class-registry.js';
 import {
   defaultValueFor,
+  floatBitsToNumber,
   hashCode,
   isJavaArray,
   isJavaObject,
+  numberToFloatBits,
   stringify,
   toInt,
   toLong,
@@ -1872,26 +1874,6 @@ export const JAVA_CORE_CLASSES = {
   'Ljava/util/Map;': nativeDef('Ljava/util/Map;', { super: null }),
 };
 
-JAVA_CORE_CLASSES['Ljava/util/Map$Entry;'] = nativeDef('Ljava/util/Map$Entry;', {
-  super: 'Ljava/lang/Object;',
-  methods: {
-    'getKey()Ljava/lang/Object;': (self) => self.key ?? null,
-    'getValue()Ljava/lang/Object;': (self) => self.value ?? null,
-    'setValue(Ljava/lang/Object;)Ljava/lang/Object;': (self, [value]) => {
-      const previous = self.value;
-      self.value = value;
-      if (self.owner?.map && self.mapKey !== undefined) self.owner.map.set(self.mapKey, value);
-      return previous ?? null;
-    },
-    'toString()Ljava/lang/String;': (self) => `${jsString(self.key)}=${jsString(self.value)}`,
-    'hashCode()I': (self) => hashCode(self.key) ^ hashCode(self.value),
-    'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
-      const peer = other?.$peer ?? other;
-      return !!peer && mapKey(peer.key, vm) === mapKey(self.key, vm) && mapKey(peer.value, vm) === mapKey(self.value, vm);
-    },
-  },
-});
-
 JAVA_CORE_CLASSES['Ljava/util/LinkedList;'] = nativeDef('Ljava/util/LinkedList;', {
   super: 'Ljava/lang/Object;',
   interfaces: ['Ljava/util/List;', 'Ljava/util/Collection;'],
@@ -2688,173 +2670,6 @@ JAVA_CORE_CLASSES['Ljava/nio/charset/StandardCharsets;'] = nativeDef('Ljava/nio/
   ),
 });
 
-function animatorFinish(vm, self) {
-  if (self.running) return;
-  self.running = true;
-  const listeners = self.listeners || [];
-  try { if (typeof self.startAction === 'function') self.startAction(); } catch (_) {}
-  if (!self.listenersTold) {
-    self.listenersTold = true;
-    for (const l of listeners) {
-      try { vm.invokeInterface(l, 'onAnimationStart', '(Landroid/animation/Animator;)V', [self.$object ?? self]); } catch (_) {}
-    }
-  }
-  try { if (typeof self.endAction === 'function') self.endAction(); } catch (_) {}
-  for (const l of listeners) {
-    const target = self.$object ?? self;
-    try { l?.$peer?.onAnimationEnd && l.$peer.onAnimationEnd(); } catch (_) {}
-    try { vm.invokeInterface(l, 'onAnimationEnd', '(Landroid/animation/Animator;)V', [target]); } catch (_) {}
-  }
-}
-
-function animatorDef(descriptor) {
-  return nativeDef(descriptor, {
-    super: 'Ljava/lang/Object;',
-    ctor: peerClass(function () {
-      this.running = false;
-      this.listeners = [];
-      this.listenersTold = false;
-      this.duration = 300;
-      this.startAction = null;
-      this.endAction = null;
-    }, { running: false, listeners: null, listenersTold: false, duration: 300, startAction: null, endAction: null }),
-    methods: {
-      'setDuration(J)Landroid/animation/Animator;': (self, [duration]) => {
-        self.duration = Number(toLong(duration));
-        return self.$object ?? self;
-      },
-      'getDuration()J': (self) => toLong(self.duration ?? 300),
-      'setStartDelay(J)V': () => undefined,
-      'setRepeatCount(I)V': (self, [count]) => { self.repeatCount = count | 0; },
-      'setRepeatMode(I)V': (self, [mode]) => { self.repeatMode = mode | 0; },
-      'getStartDelay()J': () => 0n,
-      'setInterpolator(Landroid/animation/TimeInterpolator;)V': () => undefined,
-      'addListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
-        if (listener) self.listeners.push(listener);
-      },
-      'removeListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
-        const index = self.listeners.indexOf(listener);
-        if (index >= 0) self.listeners.splice(index, 1);
-      },
-      'removeAllListeners()V': (self) => { self.listeners.length = 0; },
-      'addUpdateListener(Landroid/animation/ValueAnimator$AnimatorUpdateListener;)V': () => undefined,
-      'start()V': (self, _args, vm) => animatorFinish(vm, self),
-      'start(J)V': (self, _args, vm) => animatorFinish(vm, self),
-      'cancel()V': (self) => { self.cancelled = true; },
-      'end()V': (self, _args, vm) => animatorFinish(vm, self),
-      'pause()V': () => undefined,
-      'resume()V': () => undefined,
-      'isRunning()Z': (self) => (self.running ? 1 : 0),
-      'isStarted()Z': (self) => (self.running ? 1 : 0),
-      'getListeners()Ljava/util/ArrayList;': (self) => self.listeners,
-      'setupStartValues()V': () => undefined,
-      'setTarget(Ljava/lang/Object;)V': (self, [target]) => { self.target = target; },
-      'getTarget()Ljava/lang/Object;': (self) => self.target ?? null,
-      'setValues([Landroid/animation/PropertyValuesHolder;)V': () => undefined,
-    },
-  });
-}
-
-JAVA_CORE_CLASSES['Landroid/animation/Animator;'] = animatorDef('Landroid/animation/Animator;');
-JAVA_CORE_CLASSES['Landroid/animation/ValueAnimator;'] = nativeDef('Landroid/animation/ValueAnimator;', {
-  super: 'Landroid/animation/Animator;',
-  ctor: peerClass(function () {
-    this.running = false;
-    this.listeners = [];
-    this.duration = 300;
-  }, { running: false, listeners: null, duration: 300 }),
-  staticMethods: {
-    'ofFloat([F)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
-      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
-      object.$peer = { running: false, listeners: [], duration: 300 };
-      return object;
-    },
-    'ofInt([I)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
-      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
-      object.$peer = { running: false, listeners: [], duration: 300 };
-      return object;
-    },
-    'ofPropertyValuesHolder([Landroid/animation/PropertyValuesHolder;)Landroid/animation/ValueAnimator;': (_self, _args, vm) => {
-      const object = vm.allocateRawObject('Landroid/animation/ValueAnimator;');
-      object.$peer = { running: false, listeners: [], duration: 300 };
-      return object;
-    },
-  },
-});
-JAVA_CORE_CLASSES['Landroid/animation/ObjectAnimator;'] = nativeDef('Landroid/animation/ObjectAnimator;', {
-  super: 'Landroid/animation/ValueAnimator;',
-  ctor: peerClass(function () {
-    this.running = false;
-    this.listeners = [];
-    this.duration = 300;
-  }, { running: false, listeners: null, duration: 300 }),
-  staticMethods: {
-    'ofFloat(Ljava/lang/Object;Landroid/util/Property;[F)Landroid/animation/ObjectAnimator;': (_self, _args, vm) => {
-      const object = vm.allocateRawObject('Landroid/animation/ObjectAnimator;');
-      object.$peer = { running: false, listeners: [], duration: 300 };
-      return object;
-    },
-    'ofInt(Ljava/lang/Object;Landroid/util/Property;[I)Landroid/animation/ObjectAnimator;': (_self, _args, vm) => {
-      const object = vm.allocateRawObject('Landroid/animation/ObjectAnimator;');
-      object.$peer = { running: false, listeners: [], duration: 300 };
-      return object;
-    },
-  },
-});
-JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet;'] = nativeDef('Landroid/animation/AnimatorSet;', {
-  super: 'Landroid/animation/Animator;',
-  ctor: peerClass(function () {
-    this.running = false;
-    this.listeners = [];
-    this.duration = 0;
-    this.children = [];
-  }, { running: false, listeners: null, duration: 0, children: null }),
-  methods: {
-    'playTogether([Landroid/animation/Animator;)V': (self, [animators], vm) => {
-      const items = arrayValues(animators) || [];
-      self.children = items;
-    },
-    'playSequentially([Landroid/animation/Animator;)V': (self, [animators]) => {
-      self.children = arrayValues(animators) || [];
-    },
-    'play(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator], vm) => {
-      self.children.push(animator);
-      const builder = vm.allocateRawObject('Landroid/animation/AnimatorSet$Builder;');
-      builder.$peer = { set: self };
-      return builder;
-    },
-    'start()V': (self, _args, vm) => {
-      if (self.running) return;
-      self.running = true;
-      for (const child of self.children || []) {
-        try {
-          const descriptor = vm.registry.classNameOf(child);
-          if (descriptor) vm.invokeByName('start', '()V', child, []);
-        } catch (_) {}
-      }
-      const target = self.$object ?? self;
-      for (const l of self.listeners || []) {
-        try { vm.invokeInterface(l, 'onAnimationEnd', '(Landroid/animation/Animator;)V', [target]); } catch (_) {}
-      }
-      if (typeof self.endAction === 'function') self.endAction();
-    },
-    'setDuration(J)Landroid/animation/AnimatorSet;': (self, [duration]) => {
-      self.duration = Number(toLong(duration));
-      return self.$object ?? self;
-    },
-    'getChildAnimations()Ljava/util/ArrayList;': (self, _args, vm) => makeList(vm, self.children || []),
-  },
-});
-JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet$Builder;'] = nativeDef('Landroid/animation/AnimatorSet$Builder;', {
-  super: 'Ljava/lang/Object;',
-  ctor: peerClass(function () {}, {}),
-  methods: {
-    'with(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
-    'before(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
-    'after(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
-    'after(J)Landroid/animation/AnimatorSet$Builder;': (self) => self.$object ?? self,
-  },
-});
 JAVA_CORE_CLASSES['Landroid/animation/TimeInterpolator;'] = nativeDef('Landroid/animation/TimeInterpolator;', { super: 'Ljava/lang/Object;' });
 JAVA_CORE_CLASSES['Landroid/view/animation/Interpolator;'] = nativeDef('Landroid/view/animation/Interpolator;', { super: 'Ljava/lang/Object;' });
 JAVA_CORE_CLASSES['Landroid/view/animation/LinearInterpolator;'] = nativeDef('Landroid/view/animation/LinearInterpolator;', {
@@ -10170,3 +9985,1572 @@ ACT_STATIC.set('isUserAMonkey()Z', () => 0);
 ACT_STATIC.set('isRunningInTestHarness()Z', () => 0);
 ACT_STATIC.set('isRunningInUserTestHarness()Z', () => 0);
 ACT_STATIC.set('setVrThread(I)V', (_self, [tid]) => { ACT_STATIC.__vrThread = toInt(tid); });
+
+/* ==========================================================================
+ * android.animation：可推进的动画引擎
+ * 宿主维护 Animator 的取值、插值、重复、监听与目标属性写入；浏览器用
+ * requestAnimationFrame 逐帧推进，Node 等无帧回调环境直接落到终态以保证确定性。
+ * ========================================================================== */
+
+const ANIM_REPEAT_INFINITE = -1;
+const ANIM_RESTART = 1;
+const ANIM_REVERSE = 2;
+
+function animationNow() {
+  try {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+  } catch (_) {
+    // 浏览器外没有 performance，退回 Date.now。
+  }
+  return Date.now();
+}
+
+function initAnimationPeer(peer, extra = {}) {
+  peer.vm = peer.vm || null;
+  peer.$object = null;
+  peer.running = false;
+  peer.started = false;
+  peer.paused = false;
+  peer.cancelled = false;
+  peer.listeners = [];
+  peer.pauseListeners = [];
+  peer.updateListeners = [];
+  peer.listenersTold = false;
+  peer.duration = 300;
+  peer.startDelay = 0;
+  peer.repeatCount = 0;
+  peer.repeatMode = ANIM_RESTART;
+  peer.interpolator = null;
+  peer.evaluator = null;
+  peer.values = [];
+  peer.animatedValues = new Map();
+  peer.animatedValue = null;
+  peer.animatedFraction = 0;
+  peer.currentPlayTime = 0;
+  peer.startTime = 0;
+  peer.frameStarted = false;
+  peer.target = null;
+  Object.assign(peer, extra);
+  return peer;
+}
+
+function makeAnimationObject(vm, descriptor, init) {
+  const object = vm.allocateRawObject(descriptor);
+  const peer = initAnimationPeer({ vm });
+  if (typeof init === 'function') init(peer, vm, object);
+  peer.vm = vm;
+  peer.$object = object;
+  object.$peer = peer;
+  return object;
+}
+
+function animationPeerOf(value) {
+  return value?.$peer ?? value;
+}
+
+function readAnimationFloats(array) {
+  const data = array?.$data || (Array.isArray(array) ? array : []);
+  return data.map((item) => {
+    if (typeof item !== 'number') return Number(item) || 0;
+    return Number.isInteger(item) && Math.abs(item) >= 1e6 ? floatBitsToNumber(item) : item;
+  });
+}
+
+function readAnimationInts(array) {
+  const data = array?.$data || (Array.isArray(array) ? array : []);
+  return data.map((item) => toInt(item));
+}
+
+function readAnimationObjects(array) {
+  return Array.from(array?.$data || (Array.isArray(array) ? array : []));
+}
+
+function makeFloatArray(vm, values) {
+  const array = vm.newArray('[F', values.length, 0);
+  for (let i = 0; i < values.length; i++) array.$data[i] = numberToFloatBits(Number(values[i]) || 0);
+  return array;
+}
+
+function makeIntArray(vm, values) {
+  const array = vm.newArray('[I', values.length, 0);
+  for (let i = 0; i < values.length; i++) array.$data[i] = toInt(values[i]);
+  return array;
+}
+
+function makeObjectArray(vm, descriptor, values) {
+  const array = vm.newArray(descriptor, values.length, null);
+  for (let i = 0; i < values.length; i++) array.$data[i] = values[i] ?? null;
+  return array;
+}
+
+function boxAnimationValue(vm, valueType, value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number') return value;
+  const descriptor = valueType === 'int' || valueType === 'argb' ? 'Ljava/lang/Integer;' : 'Ljava/lang/Float;';
+  const object = vm.allocateRawObject(descriptor);
+  object.$nativeClass = descriptor;
+  object.$peer = { value: Number(value), vm };
+  return object;
+}
+
+function unboxAnimationValue(value) {
+  if (isJavaObject(value) && value.$peer && typeof value.$peer.value === 'number') return value.$peer.value;
+  return value;
+}
+
+function lerpNumber(start, end, fraction) {
+  return Number(start) + (Number(end) - Number(start)) * fraction;
+}
+
+function blendArgb(start, end, fraction) {
+  const a = toInt(start);
+  const b = toInt(end);
+  const channel = (shift) => {
+    const from = (a >>> shift) & 0xff;
+    const to = (b >>> shift) & 0xff;
+    return Math.max(0, Math.min(255, Math.round(from + (to - from) * fraction)));
+  };
+  return (((channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0)) >>> 0);
+}
+
+function animationHolderPeer(holder) {
+  return holder?.$peer ?? holder;
+}
+
+function createAnimationHolder(vm, options = {}) {
+  const peer = {
+    vm,
+    $object: null,
+    propertyName: options.propertyName ?? null,
+    property: options.property ?? null,
+    propertyNameX: options.propertyNameX ?? null,
+    propertyNameY: options.propertyNameY ?? null,
+    propertyX: options.propertyX ?? null,
+    propertyY: options.propertyY ?? null,
+    valueType: options.valueType || 'float',
+    values: options.values || [],
+    evaluator: options.evaluator ?? null,
+    converter: options.converter ?? null,
+    keyframes: options.keyframes || null,
+    path: options.path ?? null,
+  };
+  const object = vm.allocateRawObject('Landroid/animation/PropertyValuesHolder;');
+  peer.$object = object;
+  object.$peer = peer;
+  return object;
+}
+
+function evaluateHolderSegment(vm, holder, start, end, fraction) {
+  if (holder.evaluator) {
+    try {
+      const result = vm.invokeInterface(
+        holder.evaluator,
+        'evaluate',
+        '(FLjava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;',
+        [numberToFloatBits(fraction), boxAnimationValue(vm, holder.valueType, start), boxAnimationValue(vm, holder.valueType, end)]
+      );
+      return unboxAnimationValue(result);
+    } catch (_) {
+      // 自定义 Evaluator 抛错时退回线性插值。
+    }
+  }
+  if (holder.valueType === 'argb') return blendArgb(start, end, fraction);
+  if (Array.isArray(start) || Array.isArray(end)) {
+    const from = Array.isArray(start) ? start : [start];
+    const to = Array.isArray(end) ? end : [end];
+    const length = Math.max(from.length, to.length);
+    const result = [];
+    for (let i = 0; i < length; i++) result.push(lerpNumber(from[i] ?? 0, to[i] ?? 0, fraction));
+    return result;
+  }
+  if (holder.valueType === 'object') {
+    if (typeof start === 'number' && typeof end === 'number') return lerpNumber(start, end, fraction);
+    return fraction >= 1 ? end : start;
+  }
+  return lerpNumber(start, end, fraction);
+}
+
+function evaluateKeyframes(vm, holder, fraction) {
+  const frames = (holder.keyframes || [])
+    .map((frame) => animationHolderPeer(frame))
+    .filter((frame) => frame && typeof frame.fraction === 'number')
+    .sort((a, b) => a.fraction - b.fraction);
+  if (!frames.length) return null;
+  if (frames.length === 1 || fraction <= frames[0].fraction) return frames[0].value;
+  if (fraction >= frames[frames.length - 1].fraction) return frames[frames.length - 1].value;
+  let index = 0;
+  while (index < frames.length - 1 && fraction > frames[index + 1].fraction) index++;
+  const from = frames[index];
+  const to = frames[index + 1];
+  const span = to.fraction - from.fraction;
+  let local = span > 0 ? (fraction - from.fraction) / span : 0;
+  if (to.interpolator) {
+    try {
+      local = Number(floatBitsToNumber(vm.invokeInterface(to.interpolator, 'getInterpolation', '(F)F', [numberToFloatBits(local)])));
+    } catch (_) {
+      // 保持线性局部进度。
+    }
+  }
+  return evaluateHolderSegment(vm, holder, from.value, to.value, local);
+}
+
+function evaluateHolder(vm, holder, fraction) {
+  if (holder.keyframes && holder.keyframes.length) return evaluateKeyframes(vm, holder, fraction);
+  const values = holder.values || [];
+  if (!values.length) return null;
+  if (values.length === 1) return values[0];
+  const scaled = Math.max(0, Math.min(1, fraction)) * (values.length - 1);
+  const index = Math.min(values.length - 2, Math.floor(scaled));
+  return evaluateHolderSegment(vm, holder, values[index], values[index + 1], scaled - index);
+}
+
+function collectPathSamples(pathPeer) {
+  const commands = pathPeer?.commands || [];
+  const points = [];
+  let currentX = 0;
+  let currentY = 0;
+  const push = (x, y) => {
+    const px = Number(x) || 0;
+    const py = Number(y) || 0;
+    points.push([px, py]);
+    currentX = px;
+    currentY = py;
+  };
+  const sample = (fromX, fromY, step, steps) => {
+    for (let i = 1; i <= steps; i++) push(step(i / steps, fromX, fromY));
+  };
+  for (const command of commands) {
+    if (!command) continue;
+    switch (command.type) {
+      case 'moveTo':
+        push(command.x, command.y);
+        break;
+      case 'lineTo':
+        push(command.x, command.y);
+        break;
+      case 'rMoveTo':
+      case 'rLineTo':
+        push(currentX + (command.dx ?? command.x ?? 0), currentY + (command.dy ?? command.y ?? 0));
+        break;
+      case 'quadTo': {
+        const x0 = currentX;
+        const y0 = currentY;
+        sample(x0, y0, (t) => {
+          const mt = 1 - t;
+          return [mt * mt * x0 + 2 * mt * t * command.x1 + t * t * command.x2, mt * mt * y0 + 2 * mt * t * command.y1 + t * t * command.y2];
+        }, 12);
+        break;
+      }
+      case 'rQuadTo': {
+        const x0 = currentX;
+        const y0 = currentY;
+        const x1 = x0 + (command.dx1 || 0);
+        const y1 = y0 + (command.dy1 || 0);
+        const x2 = x0 + (command.dx2 || 0);
+        const y2 = y0 + (command.dy2 || 0);
+        sample(x0, y0, (t) => {
+          const mt = 1 - t;
+          return [mt * mt * x0 + 2 * mt * t * x1 + t * t * x2, mt * mt * y0 + 2 * mt * t * y1 + t * t * y2];
+        }, 12);
+        break;
+      }
+      case 'cubicTo': {
+        const x0 = currentX;
+        const y0 = currentY;
+        sample(x0, y0, (t) => {
+          const mt = 1 - t;
+          const a = mt * mt * mt;
+          const b = 3 * mt * mt * t;
+          const c = 3 * mt * t * t;
+          const d = t * t * t;
+          return [a * x0 + b * command.x1 + c * command.x2 + d * command.x3, a * y0 + b * command.y1 + c * command.y2 + d * command.y3];
+        }, 16);
+        break;
+      }
+      case 'rCubicTo': {
+        const x0 = currentX;
+        const y0 = currentY;
+        const x1 = x0 + (command.dx1 || 0);
+        const y1 = y0 + (command.dy1 || 0);
+        const x2 = x0 + (command.dx2 || 0);
+        const y2 = y0 + (command.dy2 || 0);
+        const x3 = x0 + (command.dx3 || 0);
+        const y3 = y0 + (command.dy3 || 0);
+        sample(x0, y0, (t) => {
+          const mt = 1 - t;
+          const a = mt * mt * mt;
+          const b = 3 * mt * mt * t;
+          const c = 3 * mt * t * t;
+          const d = t * t * t;
+          return [a * x0 + b * x1 + c * x2 + d * x3, a * y0 + b * y1 + c * y2 + d * y3];
+        }, 16);
+        break;
+      }
+      case 'arcTo': {
+        const left = Number(command.left) || 0;
+        const top = Number(command.top) || 0;
+        const right = Number(command.right) || 0;
+        const bottom = Number(command.bottom) || 0;
+        const centerX = (left + right) / 2;
+        const centerY = (top + bottom) / 2;
+        const radiusX = Math.abs(right - left) / 2;
+        const radiusY = Math.abs(bottom - top) / 2;
+        const start = (Number(command.startAngle) || 0) * Math.PI / 180;
+        const sweep = (Number(command.sweepAngle) || 0) * Math.PI / 180;
+        if (command.forceMoveTo) push(centerX + radiusX * Math.cos(start), centerY + radiusY * Math.sin(start));
+        for (let i = 1; i <= 16; i++) {
+          const angle = start + sweep * (i / 16);
+          push(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle));
+        }
+        break;
+      }
+      case 'close':
+        break;
+      default:
+        break;
+    }
+  }
+  return points;
+}
+
+function samplePathAt(vm, path, fraction) {
+  const peer = path?.$peer ?? path;
+  const points = collectPathSamples(peer);
+  if (!points.length) return { x: 0, y: 0 };
+  if (points.length === 1) return { x: points[0][0], y: points[0][1] };
+  const lengths = [0];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    lengths.push(total);
+  }
+  if (total <= 0) return { x: points[0][0], y: points[0][1] };
+  const target = Math.max(0, Math.min(1, fraction)) * total;
+  let index = 1;
+  while (index < lengths.length - 1 && lengths[index] < target) index++;
+  const span = lengths[index] - lengths[index - 1];
+  const local = span > 0 ? (target - lengths[index - 1]) / span : 0;
+  return {
+    x: lerpNumber(points[index - 1][0], points[index][0], local),
+    y: lerpNumber(points[index - 1][1], points[index][1], local),
+  };
+}
+
+function makePointFObject(vm, x, y) {
+  const object = vm.allocateRawObject('Landroid/graphics/PointF;');
+  object.$peer = { x: Number(x) || 0, y: Number(y) || 0 };
+  return object;
+}
+
+function setAnimationTargetValue(vm, target, holder, value) {
+  if (target === null || target === undefined) return;
+  const property = holder.property;
+  if (property) {
+    try {
+      const boxed = holder.valueType === 'argb' || holder.valueType === 'int' ? boxAnimationValue(vm, holder.valueType, value) : boxAnimationValue(vm, 'float', value);
+      vm.invokeInterface(property, 'set', '(Ljava/lang/Object;Ljava/lang/Object;)V', [target, Array.isArray(value) ? value : boxed]);
+      return;
+    } catch (_) {
+      // 自定义 Property 不可写时继续尝试按属性名反射 setter。
+    }
+  }
+  const name = holder.propertyName;
+  if (!name) return;
+  const setter = 'set' + name.charAt(0).toUpperCase() + name.slice(1);
+  const attempts = [];
+  if (holder.valueType === 'int' || holder.valueType === 'argb') attempts.push(['(I)V', toInt(value)]);
+  if (holder.valueType === 'float') attempts.push(['(F)V', numberToFloatBits(Number(value) || 0)]);
+  if (Array.isArray(value)) {
+    if (holder.valueType === 'multiInt') attempts.push(['([I)V', makeIntArray(vm, value)]);
+    else attempts.push(['([F)V', makeFloatArray(vm, value)]);
+  }
+  if (holder.valueType === 'object' && typeof value === 'number') attempts.push(['(F)V', numberToFloatBits(value)]);
+  attempts.push(['(Ljava/lang/Object;)V', value]);
+  for (const [proto, argument] of attempts) {
+    try {
+      vm.invokeByName(setter, proto, target, [argument]);
+      return;
+    } catch (_) {
+      // 试下一个候选签名。
+    }
+  }
+  const peer = target?.$peer;
+  if (peer && Object.prototype.hasOwnProperty.call(peer, name)) peer[name] = value;
+  const view = peer?.view;
+  if (view && Object.prototype.hasOwnProperty.call(view, name)) view[name] = value;
+}
+
+function invalidateAnimationTarget(target) {
+  const view = target?.$peer?.view ?? target?.view;
+  if (!view) return;
+  try { view.invalidate?.(); } catch (_) { /* 目标可能已销毁。 */ }
+}
+
+function applyPathAnimationValue(vm, target, holder, fraction) {
+  if (target === null || target === undefined) return;
+  const point = samplePathAt(vm, holder.path, fraction);
+  if (holder.property) {
+    try {
+      vm.invokeInterface(holder.property, 'set', '(Ljava/lang/Object;Ljava/lang/Object;)V', [target, makePointFObject(vm, point.x, point.y)]);
+      return;
+    } catch (_) {
+      // 退回按 X/Y 属性名写入。
+    }
+  }
+  if (holder.propertyX || holder.propertyY) {
+    if (holder.propertyX) {
+      try {
+        vm.invokeInterface(holder.propertyX, 'set', '(Ljava/lang/Object;Ljava/lang/Object;)V', [target, boxAnimationValue(vm, 'float', point.x)]);
+      } catch (_) { /* ignore */ }
+    }
+    if (holder.propertyY) {
+      try {
+        vm.invokeInterface(holder.propertyY, 'set', '(Ljava/lang/Object;Ljava/lang/Object;)V', [target, boxAnimationValue(vm, 'float', point.y)]);
+      } catch (_) { /* ignore */ }
+    }
+    return;
+  }
+  const nameX = holder.propertyNameX || (holder.propertyName ? 'x' : null);
+  const nameY = holder.propertyNameY || (holder.propertyName ? 'y' : null);
+  if (nameX) setAnimationTargetValue(vm, target, { propertyName: nameX, valueType: 'float' }, point.x);
+  if (nameY) setAnimationTargetValue(vm, target, { propertyName: nameY, valueType: 'float' }, point.y);
+}
+
+function notifyAnimationStart(vm, self) {
+  if (self.listenersTold) return;
+  self.listenersTold = true;
+  const target = self.$object ?? self;
+  for (const listener of self.listeners || []) {
+    try { vm.invokeInterface(listener, 'onAnimationStart', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* 监听器自处理。 */ }
+  }
+}
+
+function notifyAnimationEnd(vm, self, cancelled, repeat = false) {
+  const target = self.$object ?? self;
+  for (const listener of self.listeners || []) {
+    if (repeat) {
+      try { vm.invokeInterface(listener, 'onAnimationRepeat', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+      continue;
+    }
+    if (cancelled) {
+      try { vm.invokeInterface(listener, 'onAnimationCancel', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+    }
+    try { vm.invokeInterface(listener, 'onAnimationEnd', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+  }
+}
+
+function interpolateAnimationFraction(vm, self, fraction) {
+  if (!self.interpolator) return fraction;
+  try {
+    return Number(floatBitsToNumber(vm.invokeInterface(self.interpolator, 'getInterpolation', '(F)F', [numberToFloatBits(fraction)])));
+  } catch (_) {
+    return fraction;
+  }
+}
+
+function applyAnimationFraction(vm, self, fraction, playTime) {
+  self.animatedFraction = fraction;
+  self.currentPlayTime = playTime ?? fraction * (Number(self.duration) || 0);
+  const interpolated = interpolateAnimationFraction(vm, self, fraction);
+  const holders = self.values || [];
+  if (!self.animatedValues) self.animatedValues = new Map();
+  let primary = null;
+  let hasPrimary = false;
+  for (const holderObject of holders) {
+    const holder = animationHolderPeer(holderObject);
+    if (!holder) continue;
+    if (holder.path) {
+      applyPathAnimationValue(vm, self.target, holder, interpolated);
+      continue;
+    }
+    const value = evaluateHolder(vm, holder, interpolated);
+    if (!hasPrimary) {
+      primary = value;
+      hasPrimary = true;
+    }
+    if (holder.propertyName) self.animatedValues.set(holder.propertyName, value);
+    setAnimationTargetValue(vm, self.target, holder, value);
+  }
+  if (hasPrimary) self.animatedValue = primary;
+  invalidateAnimationTarget(self.target);
+  const animatorObject = self.$object ?? self;
+  for (const listener of self.updateListeners || []) {
+    try { vm.invokeInterface(listener, 'onAnimationUpdate', '(Landroid/animation/ValueAnimator;)V', [animatorObject]); } catch (_) { /* ignore */ }
+  }
+}
+
+function animationTotalDuration(self) {
+  const repeat = Number(self.repeatCount ?? 0) | 0;
+  if (repeat === ANIM_REPEAT_INFINITE) return -1;
+  return (Number(self.duration) || 0) * (repeat + 1);
+}
+
+function animationStateAt(self, elapsed) {
+  const duration = Math.max(0, Number(self.duration) || 0);
+  const repeat = Number(self.repeatCount ?? 0) | 0;
+  const reverse = (Number(self.repeatMode) | 0) === ANIM_REVERSE;
+  if (duration <= 0) return { fraction: 1, done: true, playTime: 0 };
+  if (repeat === ANIM_REPEAT_INFINITE) {
+    const round = Math.floor(elapsed / duration);
+    let fraction = (elapsed % duration) / duration;
+    if (reverse && (round & 1) === 1) fraction = 1 - fraction;
+    return { fraction, done: false, playTime: elapsed };
+  }
+  const total = duration * (repeat + 1);
+  if (elapsed >= total) {
+    const finalFraction = reverse && (repeat & 1) === 1 ? 0 : 1;
+    return { fraction: finalFraction, done: true, playTime: total };
+  }
+  const round = Math.floor(elapsed / duration);
+  let fraction = (elapsed % duration) / duration;
+  if (reverse && (round & 1) === 1) fraction = 1 - fraction;
+  return { fraction, done: false, playTime: elapsed };
+}
+
+function finishAnimation(vm, self) {
+  self.running = false;
+  self.paused = false;
+  notifyAnimationEnd(vm, self, false);
+}
+
+function startAnimation(vm, self) {
+  if (self.running) return;
+  self.running = true;
+  self.started = true;
+  self.paused = false;
+  self.cancelled = false;
+  self.listenersTold = false;
+  self.frameStarted = false;
+  notifyAnimationStart(vm, self);
+  const hasValues = Array.isArray(self.values) && self.values.length > 0;
+  if (!hasValues) {
+    self.running = false;
+    self.animatedFraction = 1;
+    notifyAnimationEnd(vm, self, false);
+    return;
+  }
+  const duration = Number(self.duration) || 0;
+  const frameSupported = typeof requestAnimationFrame === 'function';
+  if (!frameSupported || duration <= 0) {
+    // Node/测试环境没有帧回调：直接求终态，保证结果可断言且不挂起。
+    applyAnimationFraction(vm, self, 1, duration);
+    finishAnimation(vm, self);
+    return;
+  }
+  const delay = Math.max(0, Number(self.startDelay) || 0);
+  applyAnimationFraction(vm, self, 0, 0);
+  const step = (timestamp) => {
+    if (!self.running || self.paused) return;
+    if (!self.frameStarted) {
+      self.frameStarted = true;
+      self.startTime = timestamp;
+    }
+    const elapsed = Math.max(0, timestamp - self.startTime);
+    const state = animationStateAt(self, elapsed);
+    applyAnimationFraction(vm, self, state.fraction, state.playTime);
+    if (state.done) {
+      finishAnimation(vm, self);
+      return;
+    }
+    const round = Math.floor(elapsed / Math.max(1, duration));
+    if (round > (self.lastNotifiedRound ?? 0)) {
+      self.lastNotifiedRound = round;
+      notifyAnimationEnd(vm, self, false, true);
+    }
+    requestAnimationFrame(step);
+  };
+  self.lastNotifiedRound = 0;
+  const launch = () => {
+    if (!self.running) return;
+    requestAnimationFrame(step);
+  };
+  if (delay > 0) {
+    setTimeout(launch, delay);
+  } else {
+    launch();
+  }
+}
+
+function endAnimation(vm, self) {
+  if (!self.running) {
+    applyAnimationFraction(vm, self, 1, animationTotalDuration(self) >= 0 ? animationTotalDuration(self) : Number(self.duration) || 0);
+    return;
+  }
+  applyAnimationFraction(vm, self, 1, Number(self.duration) || 0);
+  finishAnimation(vm, self);
+}
+
+function cancelAnimation(vm, self) {
+  if (!self.running) return;
+  self.cancelled = true;
+  self.running = false;
+  self.paused = false;
+  notifyAnimationEnd(vm, self, true);
+}
+
+function pauseAnimation(vm, self) {
+  if (!self.running || self.paused) return;
+  self.paused = true;
+  const target = self.$object ?? self;
+  for (const listener of self.pauseListeners || []) {
+    try { vm.invokeInterface(listener, 'onAnimationPause', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+  }
+}
+
+function resumeAnimation(vm, self) {
+  if (!self.running || !self.paused) return;
+  self.paused = false;
+  const target = self.$object ?? self;
+  for (const listener of self.pauseListeners || []) {
+    try { vm.invokeInterface(listener, 'onAnimationResume', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+  }
+  if (typeof requestAnimationFrame === 'function' && Number(self.duration) > 0) {
+    self.frameStarted = false;
+    const elapsed = Number(self.currentPlayTime) || 0;
+    const step = (timestamp) => {
+      if (!self.running || self.paused) return;
+      if (!self.frameStarted) {
+        self.frameStarted = true;
+        self.startTime = timestamp - elapsed;
+      }
+      const current = Math.max(0, timestamp - self.startTime);
+      const state = animationStateAt(self, current);
+      applyAnimationFraction(vm, self, state.fraction, state.playTime);
+      if (state.done) {
+        finishAnimation(vm, self);
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+}
+
+function cloneAnimationObject(vm, self) {
+  const descriptor = self.$object?.$nativeClass || 'Landroid/animation/ValueAnimator;';
+  const values = (self.values || []).map((holderObject) => {
+    const holder = animationHolderPeer(holderObject);
+    return createAnimationHolder(vm, {
+      propertyName: holder.propertyName,
+      property: holder.property,
+      propertyNameX: holder.propertyNameX,
+      propertyNameY: holder.propertyNameY,
+      propertyX: holder.propertyX,
+      propertyY: holder.propertyY,
+      valueType: holder.valueType,
+      values: (holder.values || []).slice(),
+      evaluator: holder.evaluator,
+      converter: holder.converter,
+      keyframes: holder.keyframes ? holder.keyframes.slice() : null,
+      path: holder.path,
+    });
+  });
+  const clone = makeAnimationObject(vm, descriptor, (peer) => {
+    peer.duration = self.duration;
+    peer.startDelay = self.startDelay;
+    peer.repeatCount = self.repeatCount;
+    peer.repeatMode = self.repeatMode;
+    peer.interpolator = self.interpolator;
+    peer.evaluator = self.evaluator;
+    peer.target = self.target;
+    peer.values = values;
+    peer.autocancel = self.autocancel;
+  });
+  return clone;
+}
+
+const ANIMATOR_METHODS = {
+  '<init>()V': (self) => {
+    initAnimationPeer(self);
+  },
+  'setDuration(J)Landroid/animation/Animator;': (self, [duration]) => {
+    self.duration = Number(toLong(duration));
+    return self.$object ?? self;
+  },
+  'getDuration()J': (self) => toLong(self.duration ?? 300),
+  'getTotalDuration()J': (self) => toLong(animationTotalDuration(self)),
+  'setStartDelay(J)V': (self, [delay]) => { self.startDelay = Number(toLong(delay)); },
+  'getStartDelay()J': (self) => toLong(self.startDelay ?? 0),
+  'setRepeatCount(I)V': (self, [count]) => { self.repeatCount = toInt(count); },
+  'getRepeatCount()I': (self) => toInt(self.repeatCount ?? 0),
+  'setRepeatMode(I)V': (self, [mode]) => { self.repeatMode = toInt(mode); },
+  'getRepeatMode()I': (self) => toInt(self.repeatMode ?? ANIM_RESTART),
+  'setInterpolator(Landroid/animation/TimeInterpolator;)V': (self, [interpolator]) => { self.interpolator = interpolator ?? null; },
+  'getInterpolator()Landroid/animation/TimeInterpolator;': (self) => self.interpolator ?? null,
+  'addListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
+    if (listener) self.listeners.push(listener);
+  },
+  'removeListener(Landroid/animation/Animator$AnimatorListener;)V': (self, [listener]) => {
+    const index = self.listeners.indexOf(listener);
+    if (index >= 0) self.listeners.splice(index, 1);
+  },
+  'removeAllListeners()V': (self) => { self.listeners.length = 0; },
+  'addPauseListener(Landroid/animation/Animator$AnimatorPauseListener;)V': (self, [listener]) => {
+    if (listener) self.pauseListeners.push(listener);
+  },
+  'removePauseListener(Landroid/animation/Animator$AnimatorPauseListener;)V': (self, [listener]) => {
+    const index = self.pauseListeners.indexOf(listener);
+    if (index >= 0) self.pauseListeners.splice(index, 1);
+  },
+  'start()V': (self, _args, vm) => startAnimation(vm, self),
+  'start(J)V': (self, _args, vm) => startAnimation(vm, self),
+  'end()V': (self, _args, vm) => endAnimation(vm, self),
+  'cancel()V': (self, _args, vm) => cancelAnimation(vm, self),
+  'pause()V': (self, _args, vm) => pauseAnimation(vm, self),
+  'resume()V': (self, _args, vm) => resumeAnimation(vm, self),
+  'isRunning()Z': (self) => (self.running ? 1 : 0),
+  'isStarted()Z': (self) => (self.started ? 1 : 0),
+  'isPaused()Z': (self) => (self.paused ? 1 : 0),
+  'getListeners()Ljava/util/ArrayList;': (_self, _args, vm) => makeList(vm, _self.listeners || []),
+  'setupStartValues()V': (self, _args, vm) => {
+    if ((self.values || []).length) applyAnimationFraction(vm, self, 0, 0);
+  },
+  'setupEndValues()V': (self, _args, vm) => {
+    if ((self.values || []).length) applyAnimationFraction(vm, self, 1, Number(self.duration) || 0);
+  },
+  'setTarget(Ljava/lang/Object;)V': (self, [target]) => { self.target = target ?? null; },
+  'getTarget()Ljava/lang/Object;': (self) => self.target ?? null,
+  'clone()Landroid/animation/Animator;': (self, _args, vm) => cloneAnimationObject(vm, self),
+};
+
+JAVA_CORE_CLASSES['Landroid/animation/Animator;'] = nativeDef('Landroid/animation/Animator;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () { initAnimationPeer(this); }, {}),
+  methods: ANIMATOR_METHODS,
+});
+
+const VALUE_ANIMATOR_METHODS = {
+  ...ANIMATOR_METHODS,
+  '<init>()V': (self) => { initAnimationPeer(self); },
+  'setDuration(J)Landroid/animation/ValueAnimator;': (self, [duration]) => {
+    self.duration = Number(toLong(duration));
+    return self.$object ?? self;
+  },
+  'setIntValues([I)V': (self, [values], vm) => {
+    const holder = createAnimationHolder(vm, { valueType: 'int', values: readAnimationInts(values) });
+    self.values = [holder];
+  },
+  'setFloatValues([F)V': (self, [values], vm) => {
+    const holder = createAnimationHolder(vm, { valueType: 'float', values: readAnimationFloats(values) });
+    self.values = [holder];
+  },
+  'setObjectValues([Ljava/lang/Object;)V': (self, [values], vm) => {
+    const holder = createAnimationHolder(vm, { valueType: 'object', values: readAnimationObjects(values) });
+    self.values = [holder];
+  },
+  'setValues([Landroid/animation/PropertyValuesHolder;)V': (self, [values]) => {
+    self.values = readAnimationObjects(values);
+  },
+  'getValues()[Landroid/animation/PropertyValuesHolder;': (self, _args, vm) =>
+    makeObjectArray(vm, '[Landroid/animation/PropertyValuesHolder;', self.values || []),
+  'setCurrentPlayTime(J)V': (self, [playTime], vm) => {
+    const time = Number(toLong(playTime));
+    const duration = Math.max(1, Number(self.duration) || 1);
+    const repeat = Number(self.repeatCount) | 0;
+    const total = repeat === ANIM_REPEAT_INFINITE ? duration : duration * (repeat + 1);
+    const fraction = Math.max(0, Math.min(1, repeat === ANIM_REPEAT_INFINITE ? (time % duration) / duration : time / total));
+    self.currentPlayTime = time;
+    applyAnimationFraction(vm, self, fraction, time);
+  },
+  'getCurrentPlayTime()J': (self) => toLong(self.currentPlayTime ?? 0),
+  'setCurrentFraction(F)V': (self, [fraction], vm) => {
+    const value = Math.max(0, Math.min(1, Number(fraction) || 0));
+    self.currentPlayTime = value * (Number(self.duration) || 0);
+    applyAnimationFraction(vm, self, value, self.currentPlayTime);
+  },
+  'getAnimatedFraction()F': (self) => Number(self.animatedFraction) || 0,
+  'getAnimatedValue()Ljava/lang/Object;': (self, _args, vm) => {
+    const holder = animationHolderPeer((self.values || [])[0]);
+    if (!holder) return null;
+    return boxAnimationValue(vm, holder.valueType, self.animatedValue);
+  },
+  'getAnimatedValue(Ljava/lang/String;)Ljava/lang/Object;': (self, [name], vm) => {
+    const key = jsString(name);
+    if (!self.animatedValues?.has(key)) return null;
+    const holder = animationHolderPeer((self.values || []).find((item) => animationHolderPeer(item)?.propertyName === key));
+    return boxAnimationValue(vm, holder?.valueType || 'float', self.animatedValues.get(key));
+  },
+  'addUpdateListener(Landroid/animation/ValueAnimator$AnimatorUpdateListener;)V': (self, [listener]) => {
+    if (listener) self.updateListeners.push(listener);
+  },
+  'removeUpdateListener(Landroid/animation/ValueAnimator$AnimatorUpdateListener;)V': (self, [listener]) => {
+    const index = self.updateListeners.indexOf(listener);
+    if (index >= 0) self.updateListeners.splice(index, 1);
+  },
+  'removeAllUpdateListeners()V': (self) => { self.updateListeners.length = 0; },
+  'getInterpolator()Landroid/animation/TimeInterpolator;': (self) => self.interpolator ?? null,
+  'setEvaluator(Landroid/animation/TypeEvaluator;)V': (self, [evaluator]) => { self.evaluator = evaluator ?? null; },
+  'getEvaluator()Landroid/animation/TypeEvaluator;': (self) => self.evaluator ?? null,
+  'reverse()V': (self, _args, vm) => {
+    for (const holderObject of self.values || []) {
+      const holder = animationHolderPeer(holderObject);
+      if (holder) {
+        holder.values = (holder.values || []).slice().reverse();
+        if (holder.keyframes) holder.keyframes = holder.keyframes.slice().reverse();
+      }
+    }
+    if (self.running) {
+      const total = animationTotalDuration(self);
+      const current = Number(self.currentPlayTime) || 0;
+      self.currentPlayTime = total >= 0 ? Math.max(0, total - current) : current;
+    }
+    if ((self.values || []).length) {
+      const duration = Math.max(1, Number(self.duration) || 1);
+      applyAnimationFraction(vm, self, self.running ? Math.max(0, Math.min(1, Number(self.currentPlayTime) / duration)) : 0, self.currentPlayTime);
+    }
+  },
+  'clone()Landroid/animation/ValueAnimator;': (self, _args, vm) => cloneAnimationObject(vm, self),
+};
+
+JAVA_CORE_CLASSES['Landroid/animation/ValueAnimator;'] = nativeDef('Landroid/animation/ValueAnimator;', {
+  super: 'Landroid/animation/Animator;',
+  ctor: peerClass(function () { initAnimationPeer(this); }, {}),
+  methods: VALUE_ANIMATOR_METHODS,
+  staticMethods: {
+    'ofFloat([F)Landroid/animation/ValueAnimator;': (_self, [values], vm) => {
+      const object = makeAnimationObject(vm, 'Landroid/animation/ValueAnimator;');
+      object.$peer.values = [createAnimationHolder(vm, { valueType: 'float', values: readAnimationFloats(values) })];
+      return object;
+    },
+    'ofInt([I)Landroid/animation/ValueAnimator;': (_self, [values], vm) => {
+      const object = makeAnimationObject(vm, 'Landroid/animation/ValueAnimator;');
+      object.$peer.values = [createAnimationHolder(vm, { valueType: 'int', values: readAnimationInts(values) })];
+      return object;
+    },
+    'ofArgb([I)Landroid/animation/ValueAnimator;': (_self, [values], vm) => {
+      const object = makeAnimationObject(vm, 'Landroid/animation/ValueAnimator;');
+      object.$peer.values = [createAnimationHolder(vm, { valueType: 'argb', values: readAnimationInts(values) })];
+      return object;
+    },
+    'ofObject(Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ValueAnimator;': (_self, [evaluator, values], vm) => {
+      const object = makeAnimationObject(vm, 'Landroid/animation/ValueAnimator;');
+      object.$peer.values = [createAnimationHolder(vm, { valueType: 'object', evaluator, values: readAnimationObjects(values) })];
+      return object;
+    },
+    'ofPropertyValuesHolder([Landroid/animation/PropertyValuesHolder;)Landroid/animation/ValueAnimator;': (_self, [values], vm) => {
+      const object = makeAnimationObject(vm, 'Landroid/animation/ValueAnimator;');
+      object.$peer.values = readAnimationObjects(values);
+      return object;
+    },
+    'areAnimatorsEnabled()Z': () => 1,
+    'getFrameDelay()J': () => 10n,
+    'setFrameDelay(J)V': () => undefined,
+  },
+});
+
+function objectAnimatorTarget(peer, target) {
+  peer.target = target ?? null;
+  return peer;
+}
+
+function createPathHolder(vm, options) {
+  return createAnimationHolder(vm, {
+    propertyName: options.propertyName ?? null,
+    property: options.property ?? null,
+    propertyNameX: options.propertyNameX ?? null,
+    propertyNameY: options.propertyNameY ?? null,
+    propertyX: options.propertyX ?? null,
+    propertyY: options.propertyY ?? null,
+    valueType: 'float',
+    path: options.path,
+  });
+}
+
+const OBJECT_ANIMATOR_METHODS = {
+  ...VALUE_ANIMATOR_METHODS,
+  'setPropertyName(Ljava/lang/String;)V': (self, [name]) => {
+    self.propertyName = jsString(name);
+    const holder = animationHolderPeer((self.values || [])[0]);
+    if (holder) holder.propertyName = self.propertyName;
+  },
+  'getPropertyName()Ljava/lang/String;': (self) => self.propertyName ?? animationHolderPeer((self.values || [])[0])?.propertyName ?? null,
+  'setProperty(Landroid/util/Property;)V': (self, [property]) => {
+    self.property = property ?? null;
+    const holder = animationHolderPeer((self.values || [])[0]);
+    if (holder) holder.property = self.property;
+  },
+  'getProperty()Landroid/util/Property;': (self) => self.property ?? animationHolderPeer((self.values || [])[0])?.property ?? null,
+  'setIntValues([I)V': (self, [values], vm) => {
+    const holder = animationHolderPeer((self.values || [])[0]);
+    const next = createAnimationHolder(vm, {
+      propertyName: holder?.propertyName ?? self.propertyName ?? null,
+      property: holder?.property ?? self.property ?? null,
+      valueType: 'int',
+      values: readAnimationInts(values),
+    });
+    self.values = [next];
+  },
+  'setFloatValues([F)V': (self, [values], vm) => {
+    const holder = animationHolderPeer((self.values || [])[0]);
+    const next = createAnimationHolder(vm, {
+      propertyName: holder?.propertyName ?? self.propertyName ?? null,
+      property: holder?.property ?? self.property ?? null,
+      valueType: 'float',
+      values: readAnimationFloats(values),
+    });
+    self.values = [next];
+  },
+  'setObjectValues([Ljava/lang/Object;)V': (self, [values], vm) => {
+    const holder = animationHolderPeer((self.values || [])[0]);
+    const next = createAnimationHolder(vm, {
+      propertyName: holder?.propertyName ?? self.propertyName ?? null,
+      property: holder?.property ?? self.property ?? null,
+      valueType: 'object',
+      evaluator: holder?.evaluator ?? null,
+      values: readAnimationObjects(values),
+    });
+    self.values = [next];
+  },
+  'setAutoCancel(Z)V': (self, [autoCancel]) => { self.autoCancel = !!autoCancel; },
+  'setDuration(J)Landroid/animation/ObjectAnimator;': (self, [duration]) => {
+    self.duration = Number(toLong(duration));
+    return self.$object ?? self;
+  },
+  'setupEndValues()V': (self, _args, vm) => {
+    if ((self.values || []).length) applyAnimationFraction(vm, self, 1, Number(self.duration) || 0);
+  },
+  'clone()Landroid/animation/ObjectAnimator;': (self, _args, vm) => cloneAnimationObject(vm, self),
+};
+
+function buildObjectAnimator(vm, descriptor, target, holders) {
+  const object = makeAnimationObject(vm, descriptor, (peer) => {
+    peer.target = target ?? null;
+    peer.values = holders;
+  });
+  return object;
+}
+
+const OBJECT_ANIMATOR_STATIC = {
+  'ofFloat(Ljava/lang/Object;Ljava/lang/String;[F)Landroid/animation/ObjectAnimator;': (_self, [target, name, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'float', values: readAnimationFloats(values) }),
+    ]),
+  'ofFloat(Ljava/lang/Object;Landroid/util/Property;[F)Landroid/animation/ObjectAnimator;': (_self, [target, property, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { property, valueType: 'float', values: readAnimationFloats(values) }),
+    ]),
+  'ofFloat(Ljava/lang/Object;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyName: 'x', path }),
+    ]),
+  'ofFloat(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, nameX, nameY, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyNameX: jsString(nameX), propertyNameY: jsString(nameY), path }),
+    ]),
+  'ofFloat(Ljava/lang/Object;Landroid/util/Property;Landroid/util/Property;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, propertyX, propertyY, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyX, propertyY, path }),
+    ]),
+  'ofInt(Ljava/lang/Object;Ljava/lang/String;[I)Landroid/animation/ObjectAnimator;': (_self, [target, name, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'int', values: readAnimationInts(values) }),
+    ]),
+  'ofInt(Ljava/lang/Object;Landroid/util/Property;[I)Landroid/animation/ObjectAnimator;': (_self, [target, property, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { property, valueType: 'int', values: readAnimationInts(values) }),
+    ]),
+  'ofInt(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, nameX, nameY, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyNameX: jsString(nameX), propertyNameY: jsString(nameY), path }),
+    ]),
+  'ofInt(Ljava/lang/Object;Landroid/util/Property;Landroid/util/Property;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, propertyX, propertyY, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyX, propertyY, path }),
+    ]),
+  'ofArgb(Ljava/lang/Object;Ljava/lang/String;[I)Landroid/animation/ObjectAnimator;': (_self, [target, name, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'argb', values: readAnimationInts(values) }),
+    ]),
+  'ofArgb(Ljava/lang/Object;Landroid/util/Property;[I)Landroid/animation/ObjectAnimator;': (_self, [target, property, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { property, valueType: 'argb', values: readAnimationInts(values) }),
+    ]),
+  'ofObject(Ljava/lang/Object;Ljava/lang/String;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ObjectAnimator;': (_self, [target, name, evaluator, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'object', evaluator, values: readAnimationObjects(values) }),
+    ]),
+  'ofObject(Ljava/lang/Object;Landroid/util/Property;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ObjectAnimator;': (_self, [target, property, evaluator, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { property, valueType: 'object', evaluator, values: readAnimationObjects(values) }),
+    ]),
+  'ofObject(Ljava/lang/Object;Landroid/util/Property;Landroid/animation/TypeConverter;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ObjectAnimator;': (_self, [target, property, converter, evaluator, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { property, valueType: 'object', converter, evaluator, values: readAnimationObjects(values) }),
+    ]),
+  'ofObject(Ljava/lang/Object;Ljava/lang/String;Landroid/animation/TypeConverter;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, name, _converter, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyName: jsString(name), path }),
+    ]),
+  'ofObject(Ljava/lang/Object;Landroid/util/Property;Landroid/animation/TypeConverter;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, property, _converter, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { property, path }),
+    ]),
+  'ofPropertyValuesHolder(Ljava/lang/Object;[Landroid/animation/PropertyValuesHolder;)Landroid/animation/ObjectAnimator;': (_self, [target, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, readAnimationObjects(values)),
+  'ofMultiInt(Ljava/lang/Object;Ljava/lang/String;[[I)Landroid/animation/ObjectAnimator;': (_self, [target, name, values], vm) => {
+    const groups = (values?.$data || []).map((entry) => readAnimationInts(entry));
+    return buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiInt', values: groups }),
+    ]);
+  },
+  'ofMultiInt(Ljava/lang/Object;Ljava/lang/String;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, name, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyName: jsString(name), path }),
+    ]),
+  'ofMultiInt(Ljava/lang/Object;Ljava/lang/String;Landroid/animation/TypeConverter;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ObjectAnimator;': (_self, [target, name, converter, evaluator, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiInt', converter, evaluator, values: readAnimationObjects(values) }),
+    ]),
+  'ofMultiFloat(Ljava/lang/Object;Ljava/lang/String;[[F)Landroid/animation/ObjectAnimator;': (_self, [target, name, values], vm) => {
+    const groups = (values?.$data || []).map((entry) => readAnimationFloats(entry));
+    return buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiFloat', values: groups }),
+    ]);
+  },
+  'ofMultiFloat(Ljava/lang/Object;Ljava/lang/String;Landroid/graphics/Path;)Landroid/animation/ObjectAnimator;': (_self, [target, name, path], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createPathHolder(vm, { propertyName: jsString(name), path }),
+    ]),
+  'ofMultiFloat(Ljava/lang/Object;Ljava/lang/String;Landroid/animation/TypeConverter;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/ObjectAnimator;': (_self, [target, name, converter, evaluator, values], vm) =>
+    buildObjectAnimator(vm, 'Landroid/animation/ObjectAnimator;', target, [
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiFloat', converter, evaluator, values: readAnimationObjects(values) }),
+    ]),
+};
+
+JAVA_CORE_CLASSES['Landroid/animation/ObjectAnimator;'] = nativeDef('Landroid/animation/ObjectAnimator;', {
+  super: 'Landroid/animation/ValueAnimator;',
+  ctor: peerClass(function () { initAnimationPeer(this); }, {}),
+  methods: OBJECT_ANIMATOR_METHODS,
+  staticMethods: OBJECT_ANIMATOR_STATIC,
+});
+
+/* ---- AnimatorSet：真实依赖调度 ---- */
+
+function setNodeFor(peer, animator) {
+  const nodes = peer.nodes || (peer.nodes = []);
+  let node = nodes.find((item) => item.animator === animator);
+  if (!node) {
+    node = { animator, after: [], before: [], with: [], delay: 0 };
+    nodes.push(node);
+  }
+  return node;
+}
+
+function setDurationOf(vm, animator) {
+  try {
+    const value = Number(vm.invokeByName('getTotalDuration', '()J', animator, []));
+    return value >= 0 ? value : 300;
+  } catch (_) {
+    return 300;
+  }
+}
+
+function computeSetSchedule(vm, peer) {
+  const nodes = peer.nodes || [];
+  const starts = nodes.map(() => 0);
+  const indexOf = (node) => nodes.indexOf(node);
+  for (let pass = 0; pass < nodes.length + 1; pass++) {
+    let changed = false;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const ownDuration = setDurationOf(vm, node.animator);
+      for (const dependency of node.after) {
+        const index = indexOf(dependency);
+        if (index < 0) continue;
+        const candidate = starts[index] + setDurationOf(vm, dependency.animator);
+        if (starts[i] < candidate) { starts[i] = candidate; changed = true; }
+      }
+      for (const dependency of node.before) {
+        const index = indexOf(dependency);
+        if (index < 0) continue;
+        const candidate = starts[i] + ownDuration;
+        if (starts[index] < candidate) { starts[index] = candidate; changed = true; }
+      }
+      for (const dependency of node.with) {
+        const index = indexOf(dependency);
+        if (index < 0) continue;
+        const shared = Math.max(starts[i], starts[index]);
+        if (starts[i] !== shared) { starts[i] = shared; changed = true; }
+        if (starts[index] !== shared) { starts[index] = shared; changed = true; }
+      }
+    }
+    if (!changed) break;
+  }
+  let total = 0;
+  nodes.forEach((node, index) => {
+    total = Math.max(total, starts[index] + setDurationOf(vm, node.animator) + (node.delay || 0));
+  });
+  return { starts, total };
+}
+
+const ANIMATOR_SET_METHODS = {
+  ...ANIMATOR_METHODS,
+  '<init>()V': (self) => { initAnimationPeer(self); self.children = []; self.nodes = []; },
+  'playTogether([Landroid/animation/Animator;)V': (self, [animators], vm) => {
+    self.children = readAnimationObjects(animators);
+    self.nodes = [];
+    for (const child of self.children) setNodeFor(self, child);
+    self.mode = 'together';
+    void vm;
+  },
+  'playTogether(Ljava/util/Collection;)V': (self, [collection]) => {
+    const items = collectionItems(collection) || [];
+    self.children = items;
+    self.nodes = [];
+    for (const child of items) {
+      const node = setNodeFor(self, child);
+      node.with.push(...self.nodes.filter((item) => item !== node));
+    }
+    self.mode = 'together';
+  },
+  'playSequentially([Landroid/animation/Animator;)V': (self, [animators]) => {
+    self.children = readAnimationObjects(animators);
+    self.nodes = [];
+    let previous = null;
+    for (const child of self.children) {
+      const node = setNodeFor(self, child);
+      if (previous) node.after.push(previous);
+      previous = node;
+    }
+    self.mode = 'sequentially';
+  },
+  'playSequentially(Ljava/util/List;)V': (self, [list]) => {
+    const items = collectionItems(list) || [];
+    self.children = items;
+    self.nodes = [];
+    let previous = null;
+    for (const child of items) {
+      const node = setNodeFor(self, child);
+      if (previous) node.after.push(previous);
+      previous = node;
+    }
+    self.mode = 'sequentially';
+  },
+  'play(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator], vm) => {
+    const node = setNodeFor(self, animator);
+    if (!self.children.includes(animator)) self.children.push(animator);
+    const builder = vm.allocateRawObject('Landroid/animation/AnimatorSet$Builder;');
+    builder.$peer = { vm, set: self, node };
+    return builder;
+  },
+  'start()V': (self, _args, vm) => {
+    if (self.running) return;
+    self.running = true;
+    self.started = true;
+    self.paused = false;
+    self.listenersTold = false;
+    notifyAnimationStart(vm, self);
+    if (!self.nodes || !self.nodes.length) self.nodes = (self.children || []).map((child) => setNodeFor(self, child));
+    const { starts } = computeSetSchedule(vm, self);
+    const frameSupported = typeof requestAnimationFrame === 'function';
+    (self.nodes || []).forEach((node, index) => {
+      const child = node.animator;
+      if (!child) return;
+      const startAt = Math.max(0, starts[index] + (node.delay || 0));
+      try {
+        if (frameSupported && startAt > 0) vm.invokeByName('setStartDelay', '(J)V', child, [BigInt(Math.round(startAt))]);
+        vm.invokeByName('start', '()V', child, []);
+      } catch (_) {
+        // 子动画启动失败不应拖垮整组。
+      }
+    });
+    if (!frameSupported) {
+      self.running = false;
+      notifyAnimationEnd(vm, self, false);
+    } else {
+      const total = Math.max(0, computeSetSchedule(vm, self).total);
+      setTimeout(() => {
+        if (!self.running) return;
+        self.running = false;
+        notifyAnimationEnd(vm, self, false);
+      }, total + 16);
+    }
+  },
+  'cancel()V': (self, _args, vm) => {
+    if (!self.running) return;
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('cancel', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+    self.running = false;
+    self.paused = false;
+    notifyAnimationEnd(vm, self, true);
+  },
+  'end()V': (self, _args, vm) => {
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('end', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+    if (self.running) {
+      self.running = false;
+      notifyAnimationEnd(vm, self, false);
+    }
+  },
+  'pause()V': (self, _args, vm) => {
+    if (!self.running || self.paused) return;
+    self.paused = true;
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('pause', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+    const target = self.$object ?? self;
+    for (const listener of self.pauseListeners || []) {
+      try { vm.invokeInterface(listener, 'onAnimationPause', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+    }
+  },
+  'resume()V': (self, _args, vm) => {
+    if (!self.running || !self.paused) return;
+    self.paused = false;
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('resume', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+    const target = self.$object ?? self;
+    for (const listener of self.pauseListeners || []) {
+      try { vm.invokeInterface(listener, 'onAnimationResume', '(Landroid/animation/Animator;)V', [target]); } catch (_) { /* ignore */ }
+    }
+  },
+  'isRunning()Z': (self) => (self.running ? 1 : 0),
+  'isStarted()Z': (self) => (self.started ? 1 : 0),
+  'isPaused()Z': (self) => (self.paused ? 1 : 0),
+  'getTotalDuration()J': (self, _args, vm) => toLong(computeSetSchedule(vm, self).total),
+  'getDuration()J': (self) => toLong(self.duration ?? 0),
+  'setDuration(J)Landroid/animation/AnimatorSet;': (self, [duration]) => {
+    self.duration = Number(toLong(duration));
+    return self.$object ?? self;
+  },
+  'setCurrentPlayTime(J)V': (self, [playTime], vm) => {
+    const time = Number(toLong(playTime));
+    self.currentPlayTime = time;
+    const { starts } = computeSetSchedule(vm, self);
+    (self.nodes || []).forEach((node, index) => {
+      try { vm.invokeByName('setCurrentPlayTime', '(J)V', node.animator, [BigInt(Math.max(0, Math.round(time - starts[index])))]); } catch (_) { /* ignore */ }
+    });
+  },
+  'getCurrentPlayTime()J': (self, _args, vm) => {
+    let current = 0;
+    for (const node of self.nodes || []) {
+      try { current = Math.max(current, Number(vm.invokeByName('getCurrentPlayTime', '()J', node.animator, []))); } catch (_) { /* ignore */ }
+    }
+    return toLong(current);
+  },
+  'getChildAnimations()Ljava/util/ArrayList;': (self, _args, vm) => makeList(vm, self.children || []),
+  'getInterpolator()Landroid/animation/TimeInterpolator;': (self) => self.interpolator ?? null,
+  'reverse()V': (self, _args, vm) => {
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('reverse', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+  },
+  'setupEndValues()V': (self, _args, vm) => {
+    for (const node of self.nodes || []) {
+      try { vm.invokeByName('setupEndValues', '()V', node.animator, []); } catch (_) { /* ignore */ }
+    }
+  },
+  'clone()Landroid/animation/AnimatorSet;': (self, _args, vm) => {
+    const clone = makeAnimationObject(vm, 'Landroid/animation/AnimatorSet;', (peer) => {
+      peer.duration = self.duration;
+      peer.children = [];
+      peer.nodes = [];
+      for (const child of self.children || []) {
+        const childClone = vm.invokeByName('clone', descriptorForClone(vm, child), child, []);
+        peer.children.push(childClone);
+        setNodeFor(peer, childClone);
+      }
+    });
+    return clone;
+  },
+};
+
+function descriptorForClone(vm, animator) {
+  const descriptor = vm.registry.classNameOf?.(animator) || animator?.$nativeClass || 'Landroid/animation/Animator;';
+  if (descriptor === 'Landroid/animation/ObjectAnimator;') return '()Landroid/animation/ObjectAnimator;';
+  if (descriptor === 'Landroid/animation/AnimatorSet;') return '()Landroid/animation/AnimatorSet;';
+  return '()Landroid/animation/Animator;';
+}
+
+JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet;'] = nativeDef('Landroid/animation/AnimatorSet;', {
+  super: 'Landroid/animation/Animator;',
+  ctor: peerClass(function () {
+    initAnimationPeer(this);
+    this.children = [];
+    this.nodes = [];
+  }, {}),
+  methods: ANIMATOR_SET_METHODS,
+});
+
+JAVA_CORE_CLASSES['Landroid/animation/AnimatorSet$Builder;'] = nativeDef('Landroid/animation/AnimatorSet$Builder;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () { this.node = null; this.set = null; }, {}),
+  methods: {
+    '<init>()V': (self) => { self.node = null; self.set = null; },
+    'with(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator]) => {
+      if (self.set && animator) {
+        const node = setNodeFor(self.set, animator);
+        if (self.node && !self.node.with.includes(node)) self.node.with.push(node);
+        self.set.children = self.set.children || [];
+        if (!self.set.children.includes(animator)) self.set.children.push(animator);
+      }
+      return self.$object ?? self;
+    },
+    'before(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator]) => {
+      if (self.set && animator && self.node) {
+        const node = setNodeFor(self.set, animator);
+        self.node.before.push(node);
+        self.set.children = self.set.children || [];
+        if (!self.set.children.includes(animator)) self.set.children.push(animator);
+      }
+      return self.$object ?? self;
+    },
+    'after(Landroid/animation/Animator;)Landroid/animation/AnimatorSet$Builder;': (self, [animator]) => {
+      if (self.set && animator && self.node) {
+        const node = setNodeFor(self.set, animator);
+        self.node.after.push(node);
+        self.set.children = self.set.children || [];
+        if (!self.set.children.includes(animator)) self.set.children.push(animator);
+      }
+      return self.$object ?? self;
+    },
+    'after(J)Landroid/animation/AnimatorSet$Builder;': (self, [delay]) => {
+      if (self.node) self.node.delay = Number(toLong(delay));
+      return self.$object ?? self;
+    },
+  },
+});
+
+/* ---- PropertyValuesHolder / Keyframe ---- */
+
+const KEYFRAME_METHODS = {
+  '<init>()V': (self) => { self.fraction = 0; self.value = null; self.interpolator = null; self.hasValue = false; },
+  'getFraction()F': (self) => Number(self.fraction) || 0,
+  'setFraction(F)V': (self, [fraction]) => { self.fraction = Number(fraction) || 0; },
+  'getValue()Ljava/lang/Object;': (self, _args, vm) => boxAnimationValue(vm, self.valueType || 'float', self.value),
+  'setValue(Ljava/lang/Object;)V': (self, [value]) => { self.value = unboxAnimationValue(value); self.hasValue = true; },
+  'hasValue()Z': (self) => (self.hasValue ? 1 : 0),
+  'getInterpolator()Landroid/animation/TimeInterpolator;': (self) => self.interpolator ?? null,
+  'setInterpolator(Landroid/animation/TimeInterpolator;)V': (self, [interpolator]) => { self.interpolator = interpolator ?? null; },
+  'clone()Landroid/animation/Keyframe;': (self, _args, vm) => {
+    const object = vm.allocateRawObject('Landroid/animation/Keyframe;');
+    object.$peer = { fraction: self.fraction, value: self.value, interpolator: self.interpolator, hasValue: self.hasValue, valueType: self.valueType };
+    return object;
+  },
+};
+
+function makeKeyframe(vm, fraction, value, hasValue, valueType) {
+  const object = vm.allocateRawObject('Landroid/animation/Keyframe;');
+  object.$peer = { vm, fraction: Number(fraction) || 0, value, interpolator: null, hasValue, valueType };
+  return object;
+}
+
+JAVA_CORE_CLASSES['Landroid/animation/Keyframe;'] = nativeDef('Landroid/animation/Keyframe;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () { this.fraction = 0; this.value = null; this.interpolator = null; this.hasValue = false; }, {}),
+  methods: KEYFRAME_METHODS,
+  staticMethods: {
+    'ofInt(F)Landroid/animation/Keyframe;': (_self, [fraction], vm) => makeKeyframe(vm, fraction, null, false, 'int'),
+    'ofInt(FF)Landroid/animation/Keyframe;': (_self, [fraction, value], vm) => makeKeyframe(vm, fraction, toInt(value), true, 'int'),
+    'ofFloat(F)Landroid/animation/Keyframe;': (_self, [fraction], vm) => makeKeyframe(vm, fraction, null, false, 'float'),
+    'ofFloat(FF)Landroid/animation/Keyframe;': (_self, [fraction, value], vm) => makeKeyframe(vm, fraction, Number(value) || 0, true, 'float'),
+    'ofObject(F)Landroid/animation/Keyframe;': (_self, [fraction], vm) => makeKeyframe(vm, fraction, null, false, 'object'),
+    'ofObject(FLjava/lang/Object;)Landroid/animation/Keyframe;': (_self, [fraction, value], vm) => makeKeyframe(vm, fraction, unboxAnimationValue(value), true, 'object'),
+    'ofObject(FLandroid/animation/TimeInterpolator;Ljava/lang/Object;)Landroid/animation/Keyframe;': (_self, [fraction, interpolator, value], vm) => {
+      const frame = makeKeyframe(vm, fraction, unboxAnimationValue(value), true, 'object');
+      frame.$peer.interpolator = interpolator ?? null;
+      return frame;
+    },
+  },
+});
+
+const PVH_METHODS = {
+  '<init>()V': (self) => { self.values = []; self.valueType = 'float'; },
+  'setPropertyName(Ljava/lang/String;)V': (self, [name]) => { self.propertyName = jsString(name); },
+  'getPropertyName()Ljava/lang/String;': (self) => self.propertyName ?? null,
+  'setProperty(Landroid/util/Property;)V': (self, [property]) => { self.property = property ?? null; },
+  'getProperty()Landroid/util/Property;': (self) => self.property ?? null,
+  'setFloatValues([F)V': (self, [values]) => { self.valueType = 'float'; self.values = readAnimationFloats(values); self.keyframes = null; },
+  'getFloatValues()[F': (self, _args, vm) => makeFloatArray(vm, (self.values || []).map((value) => Number(value) || 0)),
+  'setIntValues([I)V': (self, [values]) => { self.valueType = 'int'; self.values = readAnimationInts(values); self.keyframes = null; },
+  'getIntValues()[I': (self, _args, vm) => makeIntArray(vm, (self.values || []).map((value) => toInt(value))),
+  'setObjectValues([Ljava/lang/Object;)V': (self, [values]) => { self.valueType = 'object'; self.values = readAnimationObjects(values); self.keyframes = null; },
+  'getObjectValues()[Ljava/lang/Object;': (self, _args, vm) => makeObjectArray(vm, '[Ljava/lang/Object;', self.values || []),
+  'setEvaluator(Landroid/animation/TypeEvaluator;)V': (self, [evaluator]) => { self.evaluator = evaluator ?? null; },
+  'getEvaluator()Landroid/animation/TypeEvaluator;': (self) => self.evaluator ?? null,
+  'setConverter(Landroid/animation/TypeConverter;)V': (self, [converter]) => { self.converter = converter ?? null; },
+  'getConverter()Landroid/animation/TypeConverter;': (self) => self.converter ?? null,
+  'getValueType()Ljava/lang/Class;': (self) => (self.valueType === 'int' || self.valueType === 'argb' ? 'int' : (self.valueType === 'object' ? 'object' : 'float')),
+  'getPropertyName()Ljava/lang/String;': (self) => self.propertyName ?? null,
+  'clone()Landroid/animation/PropertyValuesHolder;': (self, _args, vm) => createAnimationHolder(vm, {
+    propertyName: self.propertyName,
+    property: self.property,
+    valueType: self.valueType,
+    values: (self.values || []).slice(),
+    evaluator: self.evaluator,
+    converter: self.converter,
+    keyframes: self.keyframes ? self.keyframes.slice() : null,
+  }),
+  'toString()Ljava/lang/String;': (self) => `PropertyValuesHolder: ${self.propertyName ?? ''}`,
+};
+
+function readKeyframeArray(array) {
+  return Array.from(array?.$data || []).filter(Boolean);
+}
+
+JAVA_CORE_CLASSES['Landroid/animation/PropertyValuesHolder;'] = nativeDef('Landroid/animation/PropertyValuesHolder;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () { this.values = []; this.valueType = 'float'; }, {}),
+  methods: PVH_METHODS,
+  staticMethods: {
+    'ofFloat(Ljava/lang/String;[F)Landroid/animation/PropertyValuesHolder;': (_self, [name, values], vm) =>
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'float', values: readAnimationFloats(values) }),
+    'ofFloat(Landroid/util/Property;[F)Landroid/animation/PropertyValuesHolder;': (_self, [property, values], vm) =>
+      createAnimationHolder(vm, { property, valueType: 'float', values: readAnimationFloats(values) }),
+    'ofInt(Ljava/lang/String;[I)Landroid/animation/PropertyValuesHolder;': (_self, [name, values], vm) =>
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'int', values: readAnimationInts(values) }),
+    'ofInt(Landroid/util/Property;[I)Landroid/animation/PropertyValuesHolder;': (_self, [property, values], vm) =>
+      createAnimationHolder(vm, { property, valueType: 'int', values: readAnimationInts(values) }),
+    'ofArgb(Ljava/lang/String;[I)Landroid/animation/PropertyValuesHolder;': (_self, [name, values], vm) =>
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'argb', values: readAnimationInts(values) }),
+    'ofObject(Ljava/lang/String;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/PropertyValuesHolder;': (_self, [name, evaluator, values], vm) =>
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'object', evaluator, values: readAnimationObjects(values) }),
+    'ofObject(Landroid/util/Property;Landroid/animation/TypeEvaluator;[Ljava/lang/Object;)Landroid/animation/PropertyValuesHolder;': (_self, [property, evaluator, values], vm) =>
+      createAnimationHolder(vm, { property, valueType: 'object', evaluator, values: readAnimationObjects(values) }),
+    'ofKeyframe(Ljava/lang/String;[Landroid/animation/Keyframe;)Landroid/animation/PropertyValuesHolder;': (_self, [name, frames], vm) =>
+      createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'float', keyframes: readKeyframeArray(frames) }),
+    'ofKeyframe(Landroid/util/Property;[Landroid/animation/Keyframe;)Landroid/animation/PropertyValuesHolder;': (_self, [property, frames], vm) =>
+      createAnimationHolder(vm, { property, valueType: 'float', keyframes: readKeyframeArray(frames) }),
+    'ofMultiFloat(Ljava/lang/String;[[F)Landroid/animation/PropertyValuesHolder;': (_self, [name, values], vm) => {
+      const groups = (values?.$data || []).map((entry) => readAnimationFloats(entry));
+      return createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiFloat', values: groups });
+    },
+    'ofMultiInt(Ljava/lang/String;[[I)Landroid/animation/PropertyValuesHolder;': (_self, [name, values], vm) => {
+      const groups = (values?.$data || []).map((entry) => readAnimationInts(entry));
+      return createAnimationHolder(vm, { propertyName: jsString(name), valueType: 'multiInt', values: groups });
+    },
+  },
+});
+
+/* ---- Evaluator / Property / 插值器 ---- */
+
+JAVA_CORE_CLASSES['Landroid/animation/TypeEvaluator;'] = nativeDef('Landroid/animation/TypeEvaluator;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Landroid/animation/TypeConverter;'] = nativeDef('Landroid/animation/TypeConverter;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Landroid/animation/ValueAnimator$AnimatorUpdateListener;'] = nativeDef('Landroid/animation/ValueAnimator$AnimatorUpdateListener;', { super: 'Ljava/lang/Object;' });
+JAVA_CORE_CLASSES['Landroid/animation/Animator$AnimatorPauseListener;'] = nativeDef('Landroid/animation/Animator$AnimatorPauseListener;', { super: 'Ljava/lang/Object;' });
+
+function animationNumber(value, fallback = 0) {
+  if (isJavaObject(value) && value.$peer && typeof value.$peer.value === 'number') return value.$peer.value;
+  return typeof value === 'number' ? value : fallback;
+}
+
+JAVA_CORE_CLASSES['Landroid/animation/FloatEvaluator;'] = nativeDef('Landroid/animation/FloatEvaluator;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {}, {}),
+  methods: {
+    '<init>()V': () => undefined,
+    'evaluate(FLjava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (_self, [fraction, start, end], vm) =>
+      boxAnimationValue(vm, 'float', lerpNumber(animationNumber(start), animationNumber(end), Number(fraction) || 0)),
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/animation/IntEvaluator;'] = nativeDef('Landroid/animation/IntEvaluator;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {}, {}),
+  methods: {
+    '<init>()V': () => undefined,
+    'evaluate(FLjava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (_self, [fraction, start, end], vm) =>
+      boxAnimationValue(vm, 'int', Math.round(lerpNumber(animationNumber(start), animationNumber(end), Number(fraction) || 0))),
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/animation/ArgbEvaluator;'] = nativeDef('Landroid/animation/ArgbEvaluator;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {}, {}),
+  methods: {
+    '<init>()V': () => undefined,
+    'evaluate(FLjava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (_self, [fraction, start, end], vm) =>
+      boxAnimationValue(vm, 'int', blendArgb(animationNumber(start), animationNumber(end), Number(fraction) || 0)),
+  },
+});
+
+JAVA_CORE_CLASSES['Landroid/util/Property;'] = nativeDef('Landroid/util/Property;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (_vm, _object, type, name) {
+    this.propertyType = type ?? null;
+    this.name = jsString(name);
+    this.readOnly = false;
+  }, { name: '' }),
+  methods: {
+    '<init>(Ljava/lang/Class;Ljava/lang/String;)V': (self, [type, name]) => {
+      self.propertyType = type ?? null;
+      self.name = jsString(name);
+    },
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': () => null,
+    'set(Ljava/lang/Object;Ljava/lang/Object;)V': (self, [target, value]) => {
+      if (self.name) setAnimationTargetValue(self.vm, target, { propertyName: self.name, valueType: typeof value === 'number' ? 'float' : 'object' }, unboxAnimationValue(value));
+    },
+    'getName()Ljava/lang/String;': (self) => self.name ?? '',
+    'getType()Ljava/lang/Class;': (self) => self.propertyType ?? null,
+    'isReadOnly()Z': (self) => (self.readOnly ? 1 : 0),
+    'toString()Ljava/lang/String;': (self) => `Property{${self.name ?? ''}}`,
+  },
+  staticMethods: {
+    'of(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/String;)Landroid/util/Property;': (_self, [type, name], vm) => {
+      const object = vm.allocateRawObject('Landroid/util/Property;');
+      object.$peer = { vm, propertyType: type ?? null, name: jsString(name), readOnly: false };
+      return object;
+    },
+  },
+});
+
+function interpolatorDef(descriptor, evaluator) {
+  return nativeDef(descriptor, {
+    super: 'Ljava/lang/Object;',
+    interfaces: ['Landroid/view/animation/Interpolator;', 'Landroid/animation/TimeInterpolator;'],
+    ctor: peerClass(function () {}, {}),
+    methods: {
+      '<init>()V': () => undefined,
+      '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
+      'getInterpolation(F)F': (_self, [input]) => evaluator(Number(input) || 0),
+    },
+  });
+}
+
+JAVA_CORE_CLASSES['Landroid/view/animation/LinearInterpolator;'] = interpolatorDef('Landroid/view/animation/LinearInterpolator;', (input) => input);
+JAVA_CORE_CLASSES['Landroid/view/animation/AccelerateInterpolator;'] = interpolatorDef('Landroid/view/animation/AccelerateInterpolator;', (input) => {
+  const value = Math.max(0, Math.min(1, input));
+  return value * value;
+});
+JAVA_CORE_CLASSES['Landroid/view/animation/AccelerateDecelerateInterpolator;'] = interpolatorDef('Landroid/view/animation/AccelerateDecelerateInterpolator;', (input) => {
+  const value = Math.max(0, Math.min(1, input));
+  return (Math.cos((value + 1) * Math.PI) / 2) + 0.5;
+});
+JAVA_CORE_CLASSES['Landroid/view/animation/OvershootInterpolator;'] = interpolatorDef('Landroid/view/animation/OvershootInterpolator;', (input) => {
+  const tension = 2;
+  const value = Math.max(0, Math.min(1, input)) - 1;
+  return value * value * ((tension + 1) * value + tension) + 1;
+});
+JAVA_CORE_CLASSES['Landroid/view/animation/AnticipateInterpolator;'] = interpolatorDef('Landroid/view/animation/AnticipateInterpolator;', (input) => {
+  const tension = 2;
+  const value = Math.max(0, Math.min(1, input));
+  return value * value * ((tension + 1) * value - tension);
+});
+JAVA_CORE_CLASSES['Landroid/view/animation/BounceInterpolator;'] = interpolatorDef('Landroid/view/animation/BounceInterpolator;', (input) => {
+  const value = Math.max(0, Math.min(1, input));
+  if (value < 1 / 2.75) return 7.5625 * value * value;
+  if (value < 2 / 2.75) {
+    const t = value - 1.5 / 2.75;
+    return 7.5625 * t * t + 0.75;
+  }
+  if (value < 2.5 / 2.75) {
+    const t = value - 2.25 / 2.75;
+    return 7.5625 * t * t + 0.9375;
+  }
+  const t = value - 2.625 / 2.75;
+  return 7.5625 * t * t + 0.984375;
+});
+JAVA_CORE_CLASSES['Landroid/view/animation/CycleInterpolator;'] = nativeDef('Landroid/view/animation/CycleInterpolator;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Landroid/view/animation/Interpolator;', 'Landroid/animation/TimeInterpolator;'],
+  ctor: peerClass(function (_vm, _object, cycles) { this.cycles = Number(cycles) || 1; }, { cycles: 1 }),
+  methods: {
+    '<init>(F)V': (self, [cycles]) => { self.cycles = Number(cycles) || 1; },
+    'getInterpolation(F)F': (self, [input]) => {
+      const value = Math.max(0, Math.min(1, Number(input) || 0));
+      return Math.sin(2 * Math.PI * (Number(self.cycles) || 1) * value);
+    },
+  },
+});

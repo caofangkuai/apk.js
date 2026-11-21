@@ -3,19 +3,29 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：447
-- 方法/构造函数键（静态统计）：9406
+- 注册的 native 类：459
+- 方法/构造函数键（静态统计）：9550
 
 ## Native 类清单
 
 | Descriptor | 源文件 |
 | --- | --- |
+| `Landroid/animation/Animator;` | java-core.js |
 | `Landroid/animation/Animator$AnimatorListener;` | java-core.js |
+| `Landroid/animation/Animator$AnimatorPauseListener;` | java-core.js |
 | `Landroid/animation/AnimatorSet;` | java-core.js |
 | `Landroid/animation/AnimatorSet$Builder;` | java-core.js |
+| `Landroid/animation/ArgbEvaluator;` | java-core.js |
+| `Landroid/animation/FloatEvaluator;` | java-core.js |
+| `Landroid/animation/IntEvaluator;` | java-core.js |
+| `Landroid/animation/Keyframe;` | java-core.js |
 | `Landroid/animation/ObjectAnimator;` | java-core.js |
+| `Landroid/animation/PropertyValuesHolder;` | java-core.js |
 | `Landroid/animation/TimeInterpolator;` | java-core.js |
+| `Landroid/animation/TypeConverter;` | java-core.js |
+| `Landroid/animation/TypeEvaluator;` | java-core.js |
 | `Landroid/animation/ValueAnimator;` | java-core.js |
+| `Landroid/animation/ValueAnimator$AnimatorUpdateListener;` | java-core.js |
 | `Landroid/app/Activity;` | registry.js |
 | `Landroid/app/ActivityManager;` | java-core.js |
 | `Landroid/app/ActivityManager$MemoryInfo;` | java-core.js |
@@ -166,6 +176,7 @@
 | `Landroid/util/DisplayMetrics;` | registry.js |
 | `Landroid/util/Log;` | registry.js |
 | `Landroid/util/LongSparseArray;` | java-core.js |
+| `Landroid/util/Property;` | java-core.js |
 | `Landroid/util/Range;` | registry.js |
 | `Landroid/util/Size;` | registry.js |
 | `Landroid/util/SizeF;` | registry.js |
@@ -176,6 +187,7 @@
 | `Landroid/util/Xml;` | registry.js |
 | `Landroid/view/accessibility/AccessibilityManager;` | registry.js |
 | `Landroid/view/accessibility/AccessibilityNodeInfo$AccessibilityAction;` | registry.js |
+| `Landroid/view/animation/CycleInterpolator;` | java-core.js |
 | `Landroid/view/animation/DecelerateInterpolator;` | registry.js |
 | `Landroid/view/animation/Interpolator;` | java-core.js |
 | `Landroid/view/animation/LinearInterpolator;` | java-core.js |
