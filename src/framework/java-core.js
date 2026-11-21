@@ -1056,8 +1056,12 @@ export const JAVA_CORE_CLASSES = {
       '<init>(Ljava/lang/String;)V': (self, [value]) => {
         self.parts = [jsString(value)];
       },
-      '<init>(I)V': (self) => {
+      '<init>(I)V': (self, [capacity]) => {
         self.parts = [];
+        self.capacityValue = Math.max(0, toInt(capacity));
+      },
+      '<init>(Ljava/lang/CharSequence;)V': (self, [value]) => {
+        self.parts = [jsString(value)];
       },
       'append(Ljava/lang/String;)Ljava/lang/StringBuilder;': (self, [value]) => {
         self.parts.push(jsString(value));
@@ -1102,7 +1106,9 @@ export const JAVA_CORE_CLASSES = {
         return self.object || self;
       },
       'setLength(I)V': (self, [length]) => {
-        self.parts = [self.parts.join('').slice(0, toInt(length))];
+        const size = Math.max(0, toInt(length));
+        const text = self.parts.join('');
+        self.parts = [size <= text.length ? text.slice(0, size) : text + '\u0000'.repeat(size - text.length)];
       },
       'charAt(I)C': (self, [index]) => self.parts.join('').charCodeAt(toInt(index)),
       'insert(ILjava/lang/String;)Ljava/lang/StringBuilder;': (self, [index, value]) => {
@@ -1110,6 +1116,147 @@ export const JAVA_CORE_CLASSES = {
         self.parts = [text.slice(0, toInt(index)) + jsString(value) + text.slice(toInt(index))];
         return self.object || self;
       },
+      'append(Ljava/lang/StringBuffer;)Ljava/lang/StringBuilder;': (self, [value]) => {
+        self.parts.push(jsString(value));
+        return self.object || self;
+      },
+      'append([C)Ljava/lang/StringBuilder;': (self, [chars]) => {
+        self.parts.push(charArrayText(chars, 0, charArrayLength(chars)));
+        return self.object || self;
+      },
+      'append([CII)Ljava/lang/StringBuilder;': (self, [chars, offset, length]) => {
+        const start = toInt(offset);
+        self.parts.push(charArrayText(chars, start, start + toInt(length)));
+        return self.object || self;
+      },
+      'append(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;': (self, [value, start, end]) => {
+        self.parts.push(jsString(value).slice(toInt(start), toInt(end)));
+        return self.object || self;
+      },
+      'appendCodePoint(I)Ljava/lang/StringBuilder;': (self, [value]) => {
+        self.parts.push(String.fromCodePoint(toInt(value)));
+        return self.object || self;
+      },
+      'delete(II)Ljava/lang/StringBuilder;': (self, [start, end]) => {
+        const text = self.parts.join('');
+        const from = Math.max(0, toInt(start));
+        const to = Math.min(text.length, toInt(end));
+        self.parts = [from >= to ? text : text.slice(0, from) + text.slice(to)];
+        return self.object || self;
+      },
+      'deleteCharAt(I)Ljava/lang/StringBuilder;': (self, [index]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [at < 0 || at >= text.length ? text : text.slice(0, at) + text.slice(at + 1)];
+        return self.object || self;
+      },
+      'replace(IILjava/lang/String;)Ljava/lang/StringBuilder;': (self, [start, end, value]) => {
+        const text = self.parts.join('');
+        const from = Math.max(0, toInt(start));
+        const to = Math.min(text.length, toInt(end));
+        self.parts = [text.slice(0, from) + jsString(value) + text.slice(to)];
+        return self.object || self;
+      },
+      'insert(I[C)Ljava/lang/StringBuilder;': (self, [index, chars]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + charArrayText(chars, 0, charArrayLength(chars)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(I[CII)Ljava/lang/StringBuilder;': (self, [index, chars, offset, length]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        const from = toInt(offset);
+        self.parts = [text.slice(0, at) + charArrayText(chars, from, from + toInt(length)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(ILjava/lang/CharSequence;)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + jsString(value) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(ILjava/lang/CharSequence;II)Ljava/lang/StringBuilder;': (self, [index, value, start, end]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + jsString(value).slice(toInt(start), toInt(end)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(ILjava/lang/Object;)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + (value === null ? 'null' : jsString(value)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(IZ)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + (value ? 'true' : 'false') + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(IC)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + String.fromCharCode(toInt(value)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(II)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + String(toInt(value)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(IJ)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + toLong(value).toString() + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(IF)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + String(Number(value)) + text.slice(at)];
+        return self.object || self;
+      },
+      'insert(ID)Ljava/lang/StringBuilder;': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        self.parts = [text.slice(0, at) + String(Number(value)) + text.slice(at)];
+        return self.object || self;
+      },
+      'indexOf(Ljava/lang/String;)I': (self, [value]) => self.parts.join('').indexOf(jsString(value)),
+      'indexOf(Ljava/lang/String;I)I': (self, [value, from]) => self.parts.join('').indexOf(jsString(value), Math.max(0, toInt(from))),
+      'lastIndexOf(Ljava/lang/String;)I': (self, [value]) => self.parts.join('').lastIndexOf(jsString(value)),
+      'lastIndexOf(Ljava/lang/String;I)I': (self, [value, from]) => self.parts.join('').lastIndexOf(jsString(value), Math.max(0, toInt(from))),
+      'capacity()I': (self) => Math.max(self.capacityValue || 16, self.parts.join('').length),
+      'ensureCapacity(I)V': (self, [capacity]) => {
+        self.capacityValue = Math.max(self.capacityValue || 16, toInt(capacity), self.parts.join('').length);
+      },
+      'trimToSize()V': (self) => {
+        self.capacityValue = self.parts.join('').length;
+      },
+      'codePointAt(I)I': (self, [index]) => codePointAtText(self.parts.join(''), toInt(index)),
+      'codePointBefore(I)I': (self, [index]) => codePointBeforeText(self.parts.join(''), toInt(index)),
+      'codePointCount(II)I': (self, [begin, end]) => countCodePointsText(self.parts.join(''), toInt(begin), toInt(end)),
+      'offsetByCodePoints(II)I': (self, [index, offset]) => offsetByCodePoint(self.parts.join(''), toInt(index), toInt(offset)),
+      'getChars(II[CI)V': (self, [start, end, target, targetStart]) => {
+        const data = charArrayData(target);
+        const text = self.parts.join('');
+        const from = Math.max(0, toInt(start));
+        const to = Math.min(text.length, toInt(end));
+        let cursor = toInt(targetStart);
+        for (let index = from; index < to; index++) data[cursor++] = text.charCodeAt(index);
+      },
+      'setCharAt(IC)V': (self, [index, value]) => {
+        const text = self.parts.join('');
+        const at = toInt(index);
+        if (at < 0 || at >= text.length) return undefined;
+        self.parts = [text.slice(0, at) + String.fromCharCode(toInt(value)) + text.slice(at + 1)];
+        return undefined;
+      },
+      'subSequence(II)Ljava/lang/CharSequence;': (self, [start, end]) => self.parts.join('').slice(toInt(start), toInt(end)),
+      'substring(I)Ljava/lang/String;': (self, [start]) => self.parts.join('').slice(toInt(start)),
+      'substring(II)Ljava/lang/String;': (self, [start, end]) => self.parts.join('').slice(toInt(start), toInt(end)),
     },
   }),
 
@@ -1147,13 +1294,154 @@ export const JAVA_CORE_CLASSES = {
   'Ljava/lang/Double;': floatDef('Ljava/lang/Double;', 'D'),
   'Ljava/lang/Character;': nativeDef('Ljava/lang/Character;', {
     super: 'Ljava/lang/Object;',
+    ctor: peerClass(function () {
+      this.value = 0;
+    }, { value: 0 }),
+    methods: {
+      '<init>(C)V': (self, [value]) => {
+        self.value = toInt(value) & 0xffff;
+      },
+      'charValue()C': (self) => (self.value | 0) & 0xffff,
+      'toString()Ljava/lang/String;': (self) => String.fromCharCode((self.value | 0) & 0xffff),
+      'hashCode()I': (self) => (self.value | 0) & 0xffff,
+      'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+        const peer = other?.$peer ?? other;
+        return peer && typeof peer.value === 'number' && (peer.value | 0) === (self.value | 0) ? 1 : 0;
+      },
+      'compareTo(Ljava/lang/Character;)I': (self, [other]) => {
+        const peer = other?.$peer ?? other;
+        return ((self.value | 0) - (Number(peer?.value) | 0)) | 0;
+      },
+    },
     staticMethods: {
-      'isDigit(C)Z': (_self, [value]) => /\d/.test(String.fromCharCode(toInt(value))),
-      'isLetter(C)Z': (_self, [value]) => /[a-zA-Z]/.test(String.fromCharCode(toInt(value))),
-      'toString(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value)),
+      'valueOf(C)Ljava/lang/Character;': (_self, [value], vm) =>
+        vm.wrapPeer({ value: toInt(value) & 0xffff, constructor: { $descriptor: 'Ljava/lang/Character;' } }),
+      'toString(C)Ljava/lang/String;': (_self, [value]) => String.fromCharCode(toInt(value) & 0xffff),
+      'hashCode(C)I': (_self, [value]) => toInt(value) & 0xffff,
+      'compare(CC)I': (_self, [left, right]) => ((toInt(left) & 0xffff) - (toInt(right) & 0xffff)) | 0,
+      'reverseBytes(C)C': (_self, [value]) => (((toInt(value) & 0xff) << 8) | ((toInt(value) >> 8) & 0xff)) & 0xffff,
+      'isValidCodePoint(I)Z': (_self, [value]) => (toInt(value) >= 0 && toInt(value) <= 0x10ffff ? 1 : 0),
+      'isBmpCodePoint(I)Z': (_self, [value]) => (toInt(value) >>> 16 === 0 && toInt(value) >= 0 ? 1 : 0),
+      'isSupplementaryCodePoint(I)Z': (_self, [value]) => (toInt(value) >= 0x10000 && toInt(value) <= 0x10ffff ? 1 : 0),
+      'isHighSurrogate(C)Z': (_self, [value]) => ((toInt(value) & 0xffff) >= 0xd800 && (toInt(value) & 0xffff) <= 0xdbff ? 1 : 0),
+      'isLowSurrogate(C)Z': (_self, [value]) => ((toInt(value) & 0xffff) >= 0xdc00 && (toInt(value) & 0xffff) <= 0xdfff ? 1 : 0),
+      'isSurrogate(C)Z': (_self, [value]) => ((toInt(value) & 0xffff) >= 0xd800 && (toInt(value) & 0xffff) <= 0xdfff ? 1 : 0),
+      'isSurrogatePair(CC)Z': (_self, [high, low]) =>
+        ((toInt(high) & 0xffff) >= 0xd800 && (toInt(high) & 0xffff) <= 0xdbff
+          && (toInt(low) & 0xffff) >= 0xdc00 && (toInt(low) & 0xffff) <= 0xdfff ? 1 : 0),
+      'charCount(I)I': (_self, [value]) => (toInt(value) >= 0x10000 ? 2 : 1),
+      'toCodePoint(CC)I': (_self, [high, low]) =>
+        ((((toInt(high) & 0xffff) - 0xd800) << 10) + ((toInt(low) & 0xffff) - 0xdc00) + 0x10000) | 0,
+      'highSurrogate(I)C': (_self, [value]) => (((toInt(value) >>> 10) + 0xd7c0) & 0xffff),
+      'lowSurrogate(I)C': (_self, [value]) => (((toInt(value) & 0x3ff) + 0xdc00) & 0xffff),
+      'toChars(I[CI)I': (_self, [value, target, index]) => {
+        const code = toInt(value);
+        const data = Array.isArray(target?.$data) ? target.$data : [];
+        const at = toInt(index);
+        if (code >= 0x10000) {
+          data[at] = (code >>> 10) + 0xd7c0;
+          data[at + 1] = (code & 0x3ff) + 0xdc00;
+          return 2;
+        }
+        data[at] = code & 0xffff;
+        return 1;
+      },
+      'toChars(I)[C': (_self, [value], vm) => {
+        const code = toInt(value);
+        const chars = code >= 0x10000
+          ? [(code >>> 10) + 0xd7c0, (code & 0x3ff) + 0xdc00]
+          : [code & 0xffff];
+        return vm.newArray('[C', chars.length, chars);
+      },
+      'codePointAt(Ljava/lang/CharSequence;I)I': (_self, [text, index]) => codePointAtText(jsString(text), toInt(index)),
+      'codePointAt([CI)I': (_self, [chars, index]) => codePointAtChars(chars, toInt(index), charArrayLength(chars)),
+      'codePointAt([CII)I': (_self, [chars, index, limit]) => codePointAtChars(chars, toInt(index), toInt(limit)),
+      'codePointBefore(Ljava/lang/CharSequence;I)I': (_self, [text, index]) => codePointBeforeText(jsString(text), toInt(index)),
+      'codePointBefore([CI)I': (_self, [chars, index]) => codePointBeforeChars(chars, toInt(index)),
+      'codePointBefore([CII)I': (_self, [chars, index, start]) => codePointBeforeChars(chars, toInt(index), toInt(start)),
+      'codePointCount(Ljava/lang/CharSequence;II)I': (_self, [text, begin, end]) =>
+        countCodePointsText(jsString(text), toInt(begin), toInt(end)),
+      'codePointCount([CII)I': (_self, [chars, begin, end]) => countCodePointsChars(chars, toInt(begin), toInt(end)),
+      'offsetByCodePoints(Ljava/lang/CharSequence;II)I': (_self, [text, index, offset]) =>
+        offsetByCodePoint(jsString(text), toInt(index), toInt(offset)),
+      'offsetByCodePoints([CIIII)I': (_self, [chars, start, count, index, offset]) =>
+        offsetByCodePoint(charArrayText(chars, toInt(start), toInt(start) + toInt(count)), toInt(index) - toInt(start), toInt(offset)) + toInt(start),
+      'isLowerCase(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{Ll}/u),
+      'isLowerCase(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{Ll}/u),
+      'isUpperCase(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{Lu}/u),
+      'isUpperCase(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{Lu}/u),
+      'isTitleCase(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{Lt}/u),
+      'isTitleCase(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{Lt}/u),
+      'isDigit(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{Nd}/u),
+      'isDigit(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{Nd}/u),
+      'isDefined(C)Z': (_self, [value]) => (isDefinedCodePoint(toInt(value)) ? 1 : 0),
+      'isDefined(I)Z': (_self, [value]) => (isDefinedCodePoint(toInt(value)) ? 1 : 0),
+      'isLetter(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{L}/u),
+      'isLetter(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{L}/u),
+      'isLetterOrDigit(C)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nd}]/u),
+      'isLetterOrDigit(I)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nd}]/u),
+      'isJavaLetter(C)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}$_]/u),
+      'isJavaLetterOrDigit(C)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}$_\p{Nd}\p{Mn}\p{Mc}\p{Pc}\p{Cf}]/u),
+      'isAlphabetic(I)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}]/u),
+      'isIdeographic(I)Z': (_self, [value]) => (isIdeographicCodePoint(toInt(value)) ? 1 : 0),
+      'isJavaIdentifierStart(C)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}$_]/u),
+      'isJavaIdentifierStart(I)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}$_]/u),
+      'isJavaIdentifierPart(C)Z': (_self, [value]) => (isJavaIdentifierPartCodePoint(toInt(value)) ? 1 : 0),
+      'isJavaIdentifierPart(I)Z': (_self, [value]) => (isJavaIdentifierPartCodePoint(toInt(value)) ? 1 : 0),
+      'isUnicodeIdentifierStart(C)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}]/u),
+      'isUnicodeIdentifierStart(I)Z': (_self, [value]) => charMatches(toInt(value), /[\p{L}\p{Nl}]/u),
+      'isUnicodeIdentifierPart(C)Z': (_self, [value]) => (isUnicodeIdentifierPartCodePoint(toInt(value)) ? 1 : 0),
+      'isUnicodeIdentifierPart(I)Z': (_self, [value]) => (isUnicodeIdentifierPartCodePoint(toInt(value)) ? 1 : 0),
+      'isIdentifierIgnorable(C)Z': (_self, [value]) => (isIdentifierIgnorableCodePoint(toInt(value)) ? 1 : 0),
+      'isIdentifierIgnorable(I)Z': (_self, [value]) => (isIdentifierIgnorableCodePoint(toInt(value)) ? 1 : 0),
+      'toLowerCase(C)C': (_self, [value]) => charTransform(toInt(value), (text) => text.toLowerCase()),
+      'toLowerCase(I)I': (_self, [value]) => charTransform(toInt(value), (text) => text.toLowerCase()),
+      'toUpperCase(C)C': (_self, [value]) => charTransform(toInt(value), (text) => text.toUpperCase()),
+      'toUpperCase(I)I': (_self, [value]) => charTransform(toInt(value), (text) => text.toUpperCase()),
+      'toTitleCase(C)C': (_self, [value]) => charTransform(toInt(value), (text) => text.toUpperCase()),
+      'toTitleCase(I)I': (_self, [value]) => charTransform(toInt(value), (text) => text.toUpperCase()),
+      'digit(CI)I': (_self, [value, radix]) => digitValueOf(toInt(value) & 0xffff, toInt(radix)),
+      'digit(II)I': (_self, [value, radix]) => digitValueOf(toInt(value), toInt(radix)),
+      'getNumericValue(C)I': (_self, [value]) => numericValueOf(toInt(value) & 0xffff),
+      'getNumericValue(I)I': (_self, [value]) => numericValueOf(toInt(value)),
+      'isSpace(C)Z': (_self, [value]) => (toInt(value) === 0x20 ? 1 : 0),
+      'isSpaceChar(C)Z': (_self, [value]) => charMatches(toInt(value), /\p{Z}/u),
+      'isSpaceChar(I)Z': (_self, [value]) => charMatches(toInt(value), /\p{Z}/u),
+      'isWhitespace(C)Z': (_self, [value]) => (isWhitespaceCodePoint(toInt(value)) ? 1 : 0),
+      'isWhitespace(I)Z': (_self, [value]) => (isWhitespaceCodePoint(toInt(value)) ? 1 : 0),
+      'isISOControl(C)Z': (_self, [value]) => (isIsoControl(toInt(value)) ? 1 : 0),
+      'isISOControl(I)Z': (_self, [value]) => (isIsoControl(toInt(value)) ? 1 : 0),
+      'getType(C)I': (_self, [value]) => charTypeOf(toInt(value) & 0xffff),
+      'getType(I)I': (_self, [value]) => charTypeOf(toInt(value)),
+      'forDigit(II)C': (_self, [digit, radix]) => {
+        const value = toInt(digit);
+        const base = toInt(radix);
+        if (base < 2 || base > 36 || value < 0 || value >= base) return 0;
+        return (value < 10 ? 0x30 + value : 0x61 + value - 10) & 0xffff;
+      },
+      'getDirectionality(C)B': (_self, [value]) => directionalityOf(toInt(value) & 0xffff),
+      'getDirectionality(I)B': (_self, [value]) => directionalityOf(toInt(value)),
+      'isMirrored(C)Z': (_self, [value]) => (isMirroredCodePoint(toInt(value) & 0xffff) ? 1 : 0),
+      'isMirrored(I)Z': (_self, [value]) => (isMirroredCodePoint(toInt(value)) ? 1 : 0),
+      'getName(I)Ljava/lang/String;': (_self, [value]) => characterName(toInt(value)),
     },
     staticFields: new Map([
       ['TYPE:Ljava/lang/Class;', { lazy: (vm) => vm.getClassObject('C') }],
+      ['MIN_VALUE:C', 0],
+      ['MAX_VALUE:C', 0xffff],
+      ['MIN_RADIX:I', 2],
+      ['MAX_RADIX:I', 36],
+      ['SIZE:B', 16],
+      ['BYTES:B', 2],
+      ['MIN_CODE_POINT:I', 0],
+      ['MAX_CODE_POINT:I', 0x10ffff],
+      ['MIN_SUPPLEMENTARY_CODE_POINT:I', 0x10000],
+      ['MIN_HIGH_SURROGATE:C', 0xd800],
+      ['MAX_HIGH_SURROGATE:C', 0xdbff],
+      ['MIN_LOW_SURROGATE:C', 0xdc00],
+      ['MAX_LOW_SURROGATE:C', 0xdfff],
+      ['MIN_SURROGATE:C', 0xd800],
+      ['MAX_SURROGATE:C', 0xdfff],
     ]),
   }),
 
@@ -1255,6 +1543,60 @@ export const JAVA_CORE_CLASSES = {
       'hypot(DD)D': (_self, [a, b]) => Math.hypot(Number(a), Number(b)),
       'cbrt(D)D': (_self, [v]) => Math.cbrt(Number(v)),
       'signum(D)D': (_self, [v]) => Math.sign(Number(v)),
+      'signum(F)F': (_self, [v]) => Math.sign(Number(v)),
+      'IEEEremainder(DD)D': (_self, [a, b]) => ieeeRemainder(Number(a), Number(b)),
+      'rint(D)D': (_self, [v]) => roundHalfEven(Number(v)),
+      'sinh(D)D': (_self, [v]) => Math.sinh(Number(v)),
+      'cosh(D)D': (_self, [v]) => Math.cosh(Number(v)),
+      'tanh(D)D': (_self, [v]) => Math.tanh(Number(v)),
+      'expm1(D)D': (_self, [v]) => Math.expm1(Number(v)),
+      'log1p(D)D': (_self, [v]) => Math.log1p(Number(v)),
+      'addExact(II)I': (_self, [a, b], vm) => exactInt(vm, toInt(a) + toInt(b)),
+      'addExact(JJ)J': (_self, [a, b]) => BigInt.asIntN(64, toLong(a) + toLong(b)),
+      'subtractExact(II)I': (_self, [a, b], vm) => exactInt(vm, toInt(a) - toInt(b)),
+      'subtractExact(JJ)J': (_self, [a, b]) => BigInt.asIntN(64, toLong(a) - toLong(b)),
+      'multiplyExact(II)I': (_self, [a, b], vm) => exactInt(vm, toInt(a) * toInt(b)),
+      'multiplyExact(JI)J': (_self, [a, b]) => BigInt.asIntN(64, toLong(a) * BigInt(toInt(b))),
+      'multiplyExact(JJ)J': (_self, [a, b]) => BigInt.asIntN(64, toLong(a) * toLong(b)),
+      'incrementExact(I)I': (_self, [a], vm) => exactInt(vm, toInt(a) + 1),
+      'incrementExact(J)J': (_self, [a]) => BigInt.asIntN(64, toLong(a) + 1n),
+      'decrementExact(I)I': (_self, [a], vm) => exactInt(vm, toInt(a) - 1),
+      'decrementExact(J)J': (_self, [a]) => BigInt.asIntN(64, toLong(a) - 1n),
+      'negateExact(I)I': (_self, [a], vm) => exactInt(vm, -toInt(a)),
+      'negateExact(J)J': (_self, [a]) => BigInt.asIntN(64, -toLong(a)),
+      'toIntExact(J)I': (_self, [a], vm) => {
+        const value = toLong(a);
+        if (value < -2147483648n || value > 2147483647n) {
+          vm.throwException?.('Ljava/lang/ArithmeticException;', 'integer overflow');
+          return 0;
+        }
+        return Number(value);
+      },
+      'multiplyFull(II)J': (_self, [a, b]) => toLong(toInt(a)) * toLong(toInt(b)),
+      'multiplyHigh(JJ)J': (_self, [a, b]) => BigInt.asIntN(64, (toLong(a) * toLong(b)) >> 64n),
+      'floorDiv(II)I': (_self, [a, b]) => Math.floor(toInt(a) / toInt(b)),
+      'floorDiv(JI)J': (_self, [a, b]) => floorDivLong(toLong(a), toLong(toInt(b))),
+      'floorDiv(JJ)J': (_self, [a, b]) => floorDivLong(toLong(a), toLong(b)),
+      'floorMod(II)I': (_self, [a, b]) => {
+        const divisor = toInt(b);
+        return ((toInt(a) % divisor) + divisor) % divisor;
+      },
+      'floorMod(JI)I': (_self, [a, b]) => Number(floorModLong(toLong(a), toLong(toInt(b)))),
+      'floorMod(JJ)J': (_self, [a, b]) => floorModLong(toLong(a), toLong(b)),
+      'ulp(D)D': (_self, [v]) => ulpDouble(Number(v)),
+      'ulp(F)F': (_self, [v]) => ulpFloat(Number(v)),
+      'copySign(DD)D': (_self, [magnitude, sign]) => Math.abs(Number(magnitude)) * (Number(sign) < 0 || Object.is(Number(sign), -0) ? -1 : 1),
+      'copySign(FF)F': (_self, [magnitude, sign]) => Math.abs(Number(magnitude)) * (Number(sign) < 0 || Object.is(Number(sign), -0) ? -1 : 1),
+      'getExponent(F)I': (_self, [v]) => exponentOf(Number(v), 23, 8),
+      'getExponent(D)I': (_self, [v]) => exponentOf(Number(v), 52, 11),
+      'nextAfter(DD)D': (_self, [start, direction]) => nextAfterNumber(Number(start), Number(direction), false),
+      'nextAfter(FD)F': (_self, [start, direction]) => nextAfterNumber(Number(start), Number(direction), true),
+      'nextUp(D)D': (_self, [v]) => nextAfterNumber(Number(v), Infinity, false),
+      'nextUp(F)F': (_self, [v]) => nextAfterNumber(Number(v), Infinity, true),
+      'nextDown(D)D': (_self, [v]) => nextAfterNumber(Number(v), -Infinity, false),
+      'nextDown(F)F': (_self, [v]) => nextAfterNumber(Number(v), -Infinity, true),
+      'scalb(DI)D': (_self, [value, scale]) => Number(value) * Math.pow(2, toInt(scale)),
+      'scalb(FI)F': (_self, [value, scale]) => Number(value) * Math.pow(2, toInt(scale)),
     },
     staticFields: new Map([['PI:D', Math.PI], ['E:D', Math.E]]),
   }),
@@ -2889,6 +3231,29 @@ JAVA_CORE_CLASSES['Landroid/graphics/drawable/RippleDrawable;'] = nativeDef('Lan
   },
 });
 
+const ARRAY_PRIMITIVE_TYPES = ['I', 'J', 'S', 'C', 'B', 'F', 'D', 'Z'];
+const ARRAYS_SORT_METHODS = {};
+const ARRAYS_BINARY_SEARCH_METHODS = {};
+const ARRAYS_EQUALS_METHODS = {};
+const ARRAYS_FILL_METHODS = {};
+const ARRAYS_COPY_RANGE_METHODS = {};
+const ARRAYS_HASH_METHODS = {};
+const ARRAYS_TO_STRING_METHODS = {};
+for (const type of ARRAY_PRIMITIVE_TYPES) {
+  ARRAYS_SORT_METHODS[`sort([${type})V`] = (_self, [array]) => sortArrayRange(array, 0, undefined, defaultArrayCompare);
+  ARRAYS_SORT_METHODS[`sort([${type}II)V`] = (_self, [array, from, to]) => sortArrayRange(array, from, to, defaultArrayCompare);
+  ARRAYS_SORT_METHODS[`parallelSort([${type})V`] = (_self, [array]) => sortArrayRange(array, 0, undefined, defaultArrayCompare);
+  ARRAYS_SORT_METHODS[`parallelSort([${type}II)V`] = (_self, [array, from, to]) => sortArrayRange(array, from, to, defaultArrayCompare);
+  ARRAYS_BINARY_SEARCH_METHODS[`binarySearch([${type}${type})I`] = (_self, [array, key]) => binarySearchRange(array, 0, undefined, normalizeArrayValue(type, key), defaultArrayCompare);
+  ARRAYS_BINARY_SEARCH_METHODS[`binarySearch([${type}II${type})I`] = (_self, [array, from, to, key]) => binarySearchRange(array, from, to, normalizeArrayValue(type, key), defaultArrayCompare);
+  ARRAYS_EQUALS_METHODS[`equals([${type}[${type})Z`] = (_self, [left, right]) => arraysEqual(left, right, false);
+  ARRAYS_FILL_METHODS[`fill([${type}${type})V`] = (_self, [array, value]) => fillArrayRange(array, 0, undefined, normalizeArrayValue(type, value));
+  ARRAYS_FILL_METHODS[`fill([${type}II${type})V`] = (_self, [array, from, to, value]) => fillArrayRange(array, from, to, normalizeArrayValue(type, value));
+  ARRAYS_COPY_RANGE_METHODS[`copyOfRange([${type}II)[${type}`] = (_self, [source, from, to], vm) => copyArrayRange(vm, source, from, to);
+  ARRAYS_HASH_METHODS[`hashCode([${type})I`] = (_self, [array]) => arraysHashCode(array, type);
+  ARRAYS_TO_STRING_METHODS[`toString([${type})Ljava/lang/String;`] = (_self, [array]) => arraysToString(array, type);
+}
+
 JAVA_CORE_CLASSES['Ljava/util/Arrays;'] = nativeDef('Ljava/util/Arrays;', {
   super: 'Ljava/lang/Object;',
   staticMethods: {
@@ -2901,38 +3266,276 @@ JAVA_CORE_CLASSES['Ljava/util/Arrays;'] = nativeDef('Ljava/util/Arrays;', {
     'copyOf([ZI)[Z': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
     'copyOf([FI)[F': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
     'copyOf([DI)[D': (_self, [source, length], vm) => copyArrayOf(vm, source, length),
+    'copyOf([Ljava/lang/Object;ILjava/lang/Class;)[Ljava/lang/Object;': (_self, [source, length, newType], vm) =>
+      copyArrayOfTyped(vm, source, length, newType),
     'copyOfRange([Ljava/lang/Object;II)[Ljava/lang/Object;': (_self, [source, from, to], vm) => copyArrayRange(vm, source, from, to),
-    'toString([Ljava/lang/Object;)Ljava/lang/String;': (_self, [source]) => `[${arrayValues(source).join(', ')}]`,
-    'equals([Ljava/lang/Object;[Ljava/lang/Object;)Z': (_self, [a, b]) => {
-      const left = arrayValues(a);
-      const right = arrayValues(b);
-      if (left.length !== right.length) return 0;
-      return left.every((value, index) => value === right[index]) ? 1 : 0;
-    },
+    'copyOfRange([Ljava/lang/Object;IILjava/lang/Class;)[Ljava/lang/Object;': (_self, [source, from, to, newType], vm) =>
+      copyArrayRangeTyped(vm, source, from, to, newType),
+    ...ARRAYS_COPY_RANGE_METHODS,
+    'toString([Ljava/lang/Object;)Ljava/lang/String;': (_self, [source]) => `[${arrayValues(source).map((value) => (value === null || value === undefined ? 'null' : jsString(value))).join(', ')}]`,
+    'deepToString([Ljava/lang/Object;)Ljava/lang/String;': (_self, [source]) => deepArrayToString(source),
+    ...ARRAYS_TO_STRING_METHODS,
+    'equals([Ljava/lang/Object;[Ljava/lang/Object;)Z': (_self, [a, b], vm) => arraysEqual(a, b, false, vm),
+    'deepEquals([Ljava/lang/Object;[Ljava/lang/Object;)Z': (_self, [a, b], vm) => arraysEqual(a, b, true, vm),
+    ...ARRAYS_EQUALS_METHODS,
     'hashCode([Ljava/lang/Object;)I': (_self, [source]) => {
       let result = 1;
-      for (const value of arrayValues(source)) result = ((31 * result) + (value === null ? 0 : 1)) | 0;
+      for (const value of arrayValues(source)) result = ((31 * result) + (value === null ? 0 : (hashCode(value) | 0))) | 0;
       return result;
     },
+    'deepHashCode([Ljava/lang/Object;)I': (_self, [source]) => deepArraysHashCode(source),
+    ...ARRAYS_HASH_METHODS,
     'asList([Ljava/lang/Object;)Ljava/util/List;': (_self, [source], vm) => makeList(vm, arrayValues(source).slice()),
-    'fill([II)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(toInt(value)); },
-    'fill([JJ)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(toLong(value)); },
-    'fill([FF)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(Number(value)); },
-    'fill([DD)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(Number(value)); },
-    'fill([ZZ)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(!!value); },
-    'fill([Ljava/lang/Object;Ljava/lang/Object;)V': (_self, [array, value]) => { if (array?.$data) array.$data.fill(value); },
-    'sort([Ljava/lang/Object;)V': (_self, [source]) => {
-      if (!source || !Array.isArray(source.$data)) return undefined;
-      source.$data.sort((a, b) => (a === null ? -1 : b === null ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
-      return undefined;
-    },
+    ...ARRAYS_FILL_METHODS,
+    'fill([Ljava/lang/Object;Ljava/lang/Object;)V': (_self, [array, value]) => fillArrayRange(array, 0, undefined, value),
+    'fill([Ljava/lang/Object;IILjava/lang/Object;)V': (_self, [array, from, to, value]) => fillArrayRange(array, from, to, value),
+    'sort([Ljava/lang/Object;)V': (_self, [source]) => sortArrayRange(source, 0, undefined, defaultArrayCompare),
+    'sort([Ljava/lang/Object;II)V': (_self, [source, from, to]) => sortArrayRange(source, from, to, defaultArrayCompare),
+    'sort([Ljava/lang/Comparable;)V': (_self, [source]) => sortArrayRange(source, 0, undefined, defaultArrayCompare),
+    'sort([Ljava/lang/Comparable;II)V': (_self, [source, from, to]) => sortArrayRange(source, from, to, defaultArrayCompare),
+    'sort([Ljava/lang/Object;Ljava/util/Comparator;)V': (_self, [source, comparator], vm) =>
+      sortArrayRange(source, 0, undefined, comparatorFor(comparator, vm)),
+    'sort([Ljava/lang/Object;IILjava/util/Comparator;)V': (_self, [source, from, to, comparator], vm) =>
+      sortArrayRange(source, from, to, comparatorFor(comparator, vm)),
+    'parallelSort([Ljava/lang/Comparable;)V': (_self, [source]) => sortArrayRange(source, 0, undefined, defaultArrayCompare),
+    'parallelSort([Ljava/lang/Comparable;II)V': (_self, [source, from, to]) => sortArrayRange(source, from, to, defaultArrayCompare),
+    'parallelSort([Ljava/lang/Object;Ljava/util/Comparator;)V': (_self, [source, comparator], vm) =>
+      sortArrayRange(source, 0, undefined, comparatorFor(comparator, vm)),
+    'parallelSort([Ljava/lang/Object;IILjava/util/Comparator;)V': (_self, [source, from, to, comparator], vm) =>
+      sortArrayRange(source, from, to, comparatorFor(comparator, vm)),
+    ...ARRAYS_SORT_METHODS,
+    'binarySearch([Ljava/lang/Object;Ljava/lang/Object;)I': (_self, [array, key]) => binarySearchRange(array, 0, undefined, key, defaultArrayCompare),
+    'binarySearch([Ljava/lang/Object;IILjava/lang/Object;)I': (_self, [array, from, to, key]) => binarySearchRange(array, from, to, key, defaultArrayCompare),
+    'binarySearch([Ljava/lang/Object;Ljava/lang/Object;Ljava/util/Comparator;)I': (_self, [array, key, comparator], vm) =>
+      binarySearchRange(array, 0, undefined, key, comparatorFor(comparator, vm)),
+    'binarySearch([Ljava/lang/Object;IILjava/lang/Object;Ljava/util/Comparator;)I': (_self, [array, from, to, key, comparator], vm) =>
+      binarySearchRange(array, from, to, key, comparatorFor(comparator, vm)),
+    ...ARRAYS_BINARY_SEARCH_METHODS,
+    'parallelPrefix([Ljava/lang/Object;Ljava/util/function/BinaryOperator;)V': (_self, [array, operator], vm) =>
+      parallelPrefixRange(array, 0, undefined, operator, vm, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;'),
+    'parallelPrefix([Ljava/lang/Object;IILjava/util/function/BinaryOperator;)V': (_self, [array, from, to, operator], vm) =>
+      parallelPrefixRange(array, from, to, operator, vm, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;'),
+    'parallelPrefix([JLjava/util/function/LongBinaryOperator;)V': (_self, [array, operator], vm) =>
+      parallelPrefixRange(array, 0, undefined, operator, vm, 'applyAsLong', '(JJ)J'),
+    'parallelPrefix([JIILjava/util/function/LongBinaryOperator;)V': (_self, [array, from, to, operator], vm) =>
+      parallelPrefixRange(array, from, to, operator, vm, 'applyAsLong', '(JJ)J'),
+    'parallelPrefix([DLjava/util/function/DoubleBinaryOperator;)V': (_self, [array, operator], vm) =>
+      parallelPrefixRange(array, 0, undefined, operator, vm, 'applyAsDouble', '(DD)D'),
+    'parallelPrefix([DIILjava/util/function/DoubleBinaryOperator;)V': (_self, [array, from, to, operator], vm) =>
+      parallelPrefixRange(array, from, to, operator, vm, 'applyAsDouble', '(DD)D'),
+    'parallelPrefix([ILjava/util/function/IntBinaryOperator;)V': (_self, [array, operator], vm) =>
+      parallelPrefixRange(array, 0, undefined, operator, vm, 'applyAsInt', '(II)I'),
+    'parallelPrefix([IIILjava/util/function/IntBinaryOperator;)V': (_self, [array, from, to, operator], vm) =>
+      parallelPrefixRange(array, from, to, operator, vm, 'applyAsInt', '(II)I'),
+    'setAll([Ljava/lang/Object;Ljava/util/function/IntFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'apply', '(I)Ljava/lang/Object;'),
+    'parallelSetAll([Ljava/lang/Object;Ljava/util/function/IntFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'apply', '(I)Ljava/lang/Object;'),
+    'setAll([ILjava/util/function/IntUnaryOperator;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsInt', '(I)I'),
+    'parallelSetAll([ILjava/util/function/IntUnaryOperator;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsInt', '(I)I'),
+    'setAll([JLjava/util/function/IntToLongFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsLong', '(I)J'),
+    'parallelSetAll([JLjava/util/function/IntToLongFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsLong', '(I)J'),
+    'setAll([DLjava/util/function/IntToDoubleFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsDouble', '(I)D'),
+    'parallelSetAll([DLjava/util/function/IntToDoubleFunction;)V': (_self, [array, generator], vm) =>
+      setAllArray(array, generator, vm, 'applyAsDouble', '(I)D'),
   },
 });
 
-function arrayValues(array) {
-  if (!array) return [];
+function arrayData(array) {
+  if (!array) return null;
   if (Array.isArray(array.$data)) return array.$data;
-  return [];
+  const peer = array.$peer ?? array;
+  if (Array.isArray(peer.items)) return peer.items;
+  if (Array.isArray(peer.setItems)) return peer.setItems;
+  return null;
+}
+
+function arrayValues(array) {
+  return arrayData(array) ?? [];
+}
+
+function normalizeArrayValue(type, value) {
+  switch (type) {
+    case 'J': return toLong(value);
+    case 'F':
+    case 'D': return Number(value) || 0;
+    case 'Z': return !!value;
+    default: return toInt(value);
+  }
+}
+
+function defaultArrayCompare(a, b) {
+  if (a === null || a === undefined) return (b === null || b === undefined) ? 0 : -1;
+  if (b === null || b === undefined) return 1;
+  if (typeof a === 'bigint' || typeof b === 'bigint') {
+    const left = BigInt(a);
+    const right = BigInt(b);
+    return left < right ? -1 : (left > right ? 1 : 0);
+  }
+  if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : (a > b ? 1 : 0);
+  const left = jsString(a);
+  const right = jsString(b);
+  return left < right ? -1 : (left > right ? 1 : 0);
+}
+
+function comparatorFor(comparator, vm) {
+  if (!comparator) return defaultArrayCompare;
+  return (a, b) => Number(vm.invokeInterface(comparator, 'compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', [a, b])) | 0;
+}
+
+function sortArrayRange(array, from, to, compare) {
+  const data = arrayData(array);
+  if (!data) return undefined;
+  const start = Math.max(0, toInt(from) | 0);
+  const end = to === undefined ? data.length : Math.min(data.length, toInt(to) | 0);
+  if (end - start < 2) return undefined;
+  const slice = data.slice(start, end).sort(compare);
+  for (let i = 0; i < slice.length; i++) data[start + i] = slice[i];
+  return undefined;
+}
+
+function binarySearchRange(array, from, to, key, compare) {
+  const data = arrayData(array);
+  if (!data) return -1;
+  let low = Math.max(0, toInt(from) | 0);
+  let high = (to === undefined ? data.length : Math.min(data.length, toInt(to) | 0)) - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const order = compare(data[mid], key);
+    if (order < 0) low = mid + 1;
+    else if (order > 0) high = mid - 1;
+    else return mid;
+  }
+  return -(low + 1);
+}
+
+function arraysEqual(left, right, deep, vm) {
+  if (left === right) return 1;
+  const a = arrayData(left);
+  const b = arrayData(right);
+  if (!a || !b || a.length !== b.length) return 0;
+  for (let i = 0; i < a.length; i++) {
+    if (isJavaArray(a[i]) && isJavaArray(b[i])) {
+      if (deep) {
+        if (!arraysEqual(a[i], b[i], true, vm)) return 0;
+        continue;
+      }
+    }
+    if (!valuesEqual(a[i], b[i], vm)) return 0;
+  }
+  return 1;
+}
+
+function valuesEqual(left, right, vm) {
+  if (left === right) return true;
+  if (left && right && typeof left === 'object' && typeof right === 'object' && typeof vm?.invokeByName === 'function') {
+    try {
+      return !!vm.invokeByName('equals', '(Ljava/lang/Object;)Z', left, [right]);
+    } catch (_error) {
+      return false;
+    }
+  }
+  return Object.is(left, right);
+}
+
+function fillArrayRange(array, from, to, value) {
+  const data = arrayData(array);
+  if (!data) return undefined;
+  const start = Math.max(0, toInt(from) | 0);
+  const end = to === undefined ? data.length : Math.min(data.length, toInt(to) | 0);
+  for (let i = start; i < end; i++) data[i] = value;
+  return undefined;
+}
+
+const ARRAY_FLOAT_SCRATCH = new Float32Array(1);
+const ARRAY_INT_SCRATCH = new Int32Array(ARRAY_FLOAT_SCRATCH.buffer);
+const ARRAY_DOUBLE_SCRATCH = new Float64Array(1);
+const ARRAY_DOUBLE_WORDS = new Uint32Array(ARRAY_DOUBLE_SCRATCH.buffer);
+
+function arraysHashCode(array, type) {
+  const data = arrayData(array);
+  if (!data) return 0;
+  let result = 1;
+  for (const value of data) {
+    let element;
+    switch (type) {
+      case 'J': {
+        const wide = BigInt(value ?? 0);
+        element = Number(BigInt.asIntN(32, wide ^ (wide >> 32n)));
+        break;
+      }
+      case 'F':
+        ARRAY_FLOAT_SCRATCH[0] = Number(value) || 0;
+        element = ARRAY_INT_SCRATCH[0];
+        break;
+      case 'D':
+        ARRAY_DOUBLE_SCRATCH[0] = Number(value) || 0;
+        element = (ARRAY_DOUBLE_WORDS[0] ^ ARRAY_DOUBLE_WORDS[1]) | 0;
+        break;
+      case 'Z': element = value ? 1231 : 1237; break;
+      default: element = toInt(value) | 0; break;
+    }
+    result = ((31 * result) + element) | 0;
+  }
+  return result;
+}
+
+function deepArraysHashCode(value) {
+  if (value === null || value === undefined) return 0;
+  if (isJavaArray(value)) {
+    let result = 1;
+    for (const item of arrayValues(value)) result = ((31 * result) + deepArraysHashCode(item)) | 0;
+    return result;
+  }
+  return hashCode(value) | 0;
+}
+
+function arraysToString(array, type) {
+  const data = arrayData(array);
+  if (!data) return 'null';
+  const parts = data.map((value) => {
+    if (type === 'C') return String.fromCharCode(toInt(value) & 0xffff);
+    if (typeof value === 'bigint') return value.toString();
+    if (value === null || value === undefined) return 'null';
+    return String(value);
+  });
+  return `[${parts.join(', ')}]`;
+}
+
+function deepArrayToString(value, seen = new Set()) {
+  if (value === null || value === undefined) return 'null';
+  if (!isJavaArray(value)) return jsString(value);
+  if (seen.has(value)) return '[...]';
+  seen.add(value);
+  const text = `[${arrayValues(value).map((item) => deepArrayToString(item, seen)).join(', ')}]`;
+  seen.delete(value);
+  return text;
+}
+
+function parallelPrefixRange(array, from, to, operator, vm, method, proto) {
+  const data = arrayData(array);
+  if (!data) return undefined;
+  const start = Math.max(0, toInt(from) | 0);
+  const end = to === undefined ? data.length : Math.min(data.length, toInt(to) | 0);
+  if (end - start < 2) return undefined;
+  let accumulator = data[start];
+  for (let i = start + 1; i < end; i++) {
+    accumulator = vm.invokeInterface(operator, method, proto, [accumulator, data[i]]);
+    data[i] = accumulator;
+  }
+  return undefined;
+}
+
+function setAllArray(array, generator, vm, method, proto) {
+  const data = arrayData(array);
+  if (!data || !generator) return undefined;
+  for (let i = 0; i < data.length; i++) data[i] = vm.invokeInterface(generator, method, proto, [i]);
+  return undefined;
 }
 
 function copyArrayOf(vm, source, length) {
@@ -2955,6 +3558,122 @@ function copyArrayRange(vm, source, from, to) {
   return result;
 }
 
+function componentDescriptorFor(newType) {
+  const descriptor = typeDescriptorOf(newType);
+  return descriptor ? `[${descriptor}` : null;
+}
+
+function copyArrayOfTyped(vm, source, length, newType) {
+  const values = arrayValues(source);
+  const size = Math.max(0, toInt(length));
+  const descriptor = componentDescriptorFor(newType) || source?.$type || '[Ljava/lang/Object;';
+  const result = vm.newArray(descriptor, size);
+  for (let i = 0; i < size && i < values.length; i++) result.$data[i] = values[i];
+  return result;
+}
+
+function copyArrayRangeTyped(vm, source, from, to, newType) {
+  const values = arrayValues(source);
+  const start = Math.max(0, toInt(from));
+  const end = Math.min(values.length, toInt(to));
+  const size = Math.max(0, end - start);
+  const descriptor = componentDescriptorFor(newType) || source?.$type || '[Ljava/lang/Object;';
+  const result = vm.newArray(descriptor, size);
+  for (let i = 0; i < size; i++) result.$data[i] = values[start + i];
+  return result;
+}
+
+function shuffleList(list, vm, random) {
+  const items = arrayData(list);
+  if (!items || items.length < 2) return undefined;
+  for (let i = items.length - 1; i > 0; i--) {
+    const bound = i + 1;
+    let index = -1;
+    if (random) {
+      try {
+        index = Number(vm.invokeByName('nextInt', '(I)I', random, [bound])) | 0;
+      } catch (_error) {
+        index = -1;
+      }
+    }
+    if (index < 0 || index >= bound) index = Math.floor(Math.random() * bound);
+    const swap = items[i];
+    items[i] = items[index];
+    items[index] = swap;
+  }
+  return undefined;
+}
+
+function extremumOf(collection, compare) {
+  const items = arrayValues(collection);
+  if (!items.length) return null;
+  let best = items[0];
+  for (let i = 1; i < items.length; i++) {
+    if (compare(items[i], best) < 0) best = items[i];
+  }
+  return best;
+}
+
+function rotateList(list, distance) {
+  const items = arrayData(list);
+  if (!items || items.length < 2) return undefined;
+  const size = items.length;
+  const shift = ((toInt(distance) % size) + size) % size;
+  if (!shift) return undefined;
+  const tail = items.splice(size - shift, shift);
+  items.unshift(...tail);
+  return undefined;
+}
+
+function subListIndex(source, target, fromEnd, vm) {
+  const outer = arrayValues(source);
+  const inner = arrayValues(target);
+  if (!inner.length) return fromEnd ? outer.length : 0;
+  const last = outer.length - inner.length;
+  if (last < 0) return -1;
+  const matches = (start) => {
+    for (let i = 0; i < inner.length; i++) if (!valuesEqual(outer[start + i], inner[i], vm)) return false;
+    return true;
+  };
+  if (fromEnd) {
+    for (let start = last; start >= 0; start--) if (matches(start)) return start;
+  } else {
+    for (let start = 0; start <= last; start++) if (matches(start)) return start;
+  }
+  return -1;
+}
+
+JAVA_CORE_CLASSES['Ljava/util/Comparator;'] = nativeDef('Ljava/util/Comparator;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'compare(Ljava/lang/Object;Ljava/lang/Object;)I': (self, [left, right]) => {
+      const peer = self.compare ? self : (self.$peer ?? self);
+      return typeof peer.compare === 'function' ? Number(peer.compare(left, right)) | 0 : 0;
+    },
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => (self === other || self.$peer === other?.$peer ? 1 : 0),
+    'reversed()Ljava/util/Comparator;': (self, _args, vm) => {
+      const peer = self.compare ? self : (self.$peer ?? self);
+      return makeComparator(vm, (left, right) => -Number(peer.compare(left, right)));
+    },
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/Enumeration;'] = nativeDef('Ljava/util/Enumeration;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'hasMoreElements()Z': (self) => {
+      const peer = self.$peer ?? self;
+      return (peer.cursor | 0) < (peer.items?.length || 0) ? 1 : 0;
+    },
+    'nextElement()Ljava/lang/Object;': (self) => {
+      const peer = self.$peer ?? self;
+      const items = peer.items || [];
+      if ((peer.cursor | 0) >= items.length) return null;
+      return items[peer.cursor++] ?? null;
+    },
+  },
+});
+
 JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections;', {
   super: 'Ljava/lang/Object;',
   staticFields: new Map([
@@ -2971,21 +3690,125 @@ JAVA_CORE_CLASSES['Ljava/util/Collections;'] = nativeDef('Ljava/util/Collections
     'unmodifiableList(Ljava/util/List;)Ljava/util/List;': (_self, [list]) => list,
     'unmodifiableSet(Ljava/util/Set;)Ljava/util/Set;': (_self, [set]) => set,
     'unmodifiableMap(Ljava/util/Map;)Ljava/util/Map;': (_self, [map]) => map,
-    'sort(Ljava/util/List;)V': (self, [list]) => {
-      const items = list?.items;
-      if (Array.isArray(items)) items.sort((a, b) => String(jsString(a)).localeCompare(String(jsString(b))));
+    'sort(Ljava/util/List;)V': (_self, [list]) => sortArrayRange(list, 0, undefined, defaultArrayCompare),
+    'reverse(Ljava/util/List;)V': (_self, [list]) => {
+      arrayData(list)?.reverse?.();
     },
-    'reverse(Ljava/util/List;)V': (self, [list]) => {
-      list?.items?.reverse?.();
+    'sort(Ljava/util/List;Ljava/util/Comparator;)V': (_self, [list, comparator], vm) => {
+      if (!comparator) return sortArrayRange(list, 0, undefined, defaultArrayCompare);
+      return sortArrayRange(list, 0, undefined, comparatorFor(comparator, vm));
     },
-    'sort(Ljava/util/List;Ljava/util/Comparator;)V': (self, [list, comparator], vm) => {
-      const items = list?.items;
-      if (!Array.isArray(items) || items.length < 2) return;
-      const compare = comparator && typeof comparator === 'object'
-        ? (a, b) => Number(vm.invokeInterface(comparator, 'compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', [a, b])) | 0
-        : (a, b) => String(jsString(a)).localeCompare(String(jsString(b)));
-      items.sort(compare);
+    'binarySearch(Ljava/util/List;Ljava/lang/Object;)I': (_self, [list, key]) => binarySearchRange(list, 0, undefined, key, defaultArrayCompare),
+    'binarySearch(Ljava/util/List;Ljava/lang/Object;Ljava/util/Comparator;)I': (_self, [list, key, comparator], vm) =>
+      binarySearchRange(list, 0, undefined, key, comparatorFor(comparator, vm)),
+    'shuffle(Ljava/util/List;)V': (_self, [list], vm) => shuffleList(list, vm, null),
+    'shuffle(Ljava/util/List;Ljava/util/Random;)V': (_self, [list, random], vm) => shuffleList(list, vm, random),
+    'swap(Ljava/util/List;II)V': (_self, [list, first, second]) => {
+      const items = arrayData(list);
+      if (!items) return undefined;
+      const a = toInt(first);
+      const b = toInt(second);
+      if (a < 0 || b < 0 || a >= items.length || b >= items.length) return undefined;
+      const swap = items[a];
+      items[a] = items[b];
+      items[b] = swap;
+      return undefined;
     },
+    'fill(Ljava/util/List;Ljava/lang/Object;)V': (_self, [list, value]) => fillArrayRange(list, 0, undefined, value),
+    'copy(Ljava/util/List;Ljava/util/List;)V': (_self, [destination, source]) => {
+      const from = arrayValues(source);
+      const to = arrayData(destination);
+      if (!to || to.length < from.length) return undefined;
+      for (let i = 0; i < from.length; i++) to[i] = from[i];
+      return undefined;
+    },
+    'min(Ljava/util/Collection;)Ljava/lang/Object;': (_self, [collection]) => extremumOf(collection, defaultArrayCompare),
+    'min(Ljava/util/Collection;Ljava/util/Comparator;)Ljava/lang/Object;': (_self, [collection, comparator], vm) =>
+      extremumOf(collection, comparatorFor(comparator, vm)),
+    'max(Ljava/util/Collection;)Ljava/lang/Object;': (_self, [collection]) => extremumOf(collection, (a, b) => defaultArrayCompare(b, a)),
+    'max(Ljava/util/Collection;Ljava/util/Comparator;)Ljava/lang/Object;': (_self, [collection, comparator], vm) =>
+      extremumOf(collection, (a, b) => comparatorFor(comparator, vm)(b, a)),
+    'rotate(Ljava/util/List;I)V': (_self, [list, distance]) => rotateList(list, distance),
+    'replaceAll(Ljava/util/List;Ljava/lang/Object;Ljava/lang/Object;)Z': (_self, [list, oldValue, newValue], vm) => {
+      const items = arrayData(list);
+      if (!items) return false;
+      let replaced = false;
+      for (let i = 0; i < items.length; i++) {
+        if (!valuesEqual(items[i], oldValue, vm)) continue;
+        items[i] = newValue;
+        replaced = true;
+      }
+      return replaced;
+    },
+    'indexOfSubList(Ljava/util/List;Ljava/util/List;)I': (_self, [source, target], vm) => subListIndex(source, target, false, vm),
+    'lastIndexOfSubList(Ljava/util/List;Ljava/util/List;)I': (_self, [source, target], vm) => subListIndex(source, target, true, vm),
+    'unmodifiableSortedSet(Ljava/util/SortedSet;)Ljava/util/SortedSet;': (_self, [set]) => set ?? null,
+    'unmodifiableNavigableSet(Ljava/util/NavigableSet;)Ljava/util/NavigableSet;': (_self, [set]) => set ?? null,
+    'unmodifiableSortedMap(Ljava/util/SortedMap;)Ljava/util/SortedMap;': (_self, [map]) => map ?? null,
+    'unmodifiableNavigableMap(Ljava/util/NavigableMap;)Ljava/util/NavigableMap;': (_self, [map]) => map ?? null,
+    'synchronizedSortedSet(Ljava/util/SortedSet;)Ljava/util/SortedSet;': (_self, [set]) => set ?? null,
+    'synchronizedNavigableSet(Ljava/util/NavigableSet;)Ljava/util/NavigableSet;': (_self, [set]) => set ?? null,
+    'synchronizedSortedMap(Ljava/util/SortedMap;)Ljava/util/SortedMap;': (_self, [map]) => map ?? null,
+    'synchronizedNavigableMap(Ljava/util/NavigableMap;)Ljava/util/NavigableMap;': (_self, [map]) => map ?? null,
+    'unmodifiableCollection(Ljava/util/Collection;)Ljava/util/Collection;': (_self, [collection]) => collection ?? null,
+    'checkedCollection(Ljava/util/Collection;Ljava/lang/Class;)Ljava/util/Collection;': (_self, [collection]) => collection ?? null,
+    'checkedQueue(Ljava/util/Queue;Ljava/lang/Class;)Ljava/util/Queue;': (_self, [queue]) => queue ?? null,
+    'checkedSet(Ljava/util/Set;Ljava/lang/Class;)Ljava/util/Set;': (_self, [set]) => set ?? null,
+    'checkedList(Ljava/util/List;Ljava/lang/Class;)Ljava/util/List;': (_self, [list]) => list ?? null,
+    'checkedSortedSet(Ljava/util/SortedSet;Ljava/lang/Class;)Ljava/util/SortedSet;': (_self, [set]) => set ?? null,
+    'checkedNavigableSet(Ljava/util/NavigableSet;Ljava/lang/Class;)Ljava/util/NavigableSet;': (_self, [set]) => set ?? null,
+    'checkedMap(Ljava/util/Map;Ljava/lang/Class;Ljava/lang/Class;)Ljava/util/Map;': (_self, [map]) => map ?? null,
+    'checkedSortedMap(Ljava/util/SortedMap;Ljava/lang/Class;Ljava/lang/Class;)Ljava/util/SortedMap;': (_self, [map]) => map ?? null,
+    'checkedNavigableMap(Ljava/util/NavigableMap;Ljava/lang/Class;Ljava/lang/Class;)Ljava/util/NavigableMap;': (_self, [map]) => map ?? null,
+    'emptyIterator()Ljava/util/Iterator;': (_self, _args, vm) => makeIterator(vm, []),
+    'emptyListIterator()Ljava/util/ListIterator;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+      object.$peer = { cursor: 0, snapshot: [], abstractList: makeList(vm, []) };
+      return object;
+    },
+    'emptyEnumeration()Ljava/util/Enumeration;': (_self, _args, vm) => makeEnumeration(vm, []),
+    'emptySortedSet()Ljava/util/SortedSet;': (_self, _args, vm) => makeSet(vm, []),
+    'emptyNavigableSet()Ljava/util/NavigableSet;': (_self, _args, vm) => makeSet(vm, []),
+    'emptySortedMap()Ljava/util/SortedMap;': (_self, _args, vm) => makeMap(vm),
+    'emptyNavigableMap()Ljava/util/NavigableMap;': (_self, _args, vm) => makeMap(vm),
+    'singletonMap(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;': (_self, [key, value], vm) => {
+      const map = makeMap(vm);
+      map.$peer.map.set(key, value);
+      return map;
+    },
+    'nCopies(ILjava/lang/Object;)Ljava/util/List;': (_self, [count, value], vm) => makeList(vm, new Array(Math.max(0, toInt(count))).fill(value)),
+    'reverseOrder()Ljava/util/Comparator;': (_self, _args, vm) => makeComparator(vm, (left, right) => defaultArrayCompare(right, left)),
+    'reverseOrder(Ljava/util/Comparator;)Ljava/util/Comparator;': (_self, [comparator], vm) => {
+      const forward = comparatorFor(comparator, vm);
+      return makeComparator(vm, (left, right) => forward(right, left));
+    },
+    'enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;': (_self, [collection], vm) => makeEnumeration(vm, arrayValues(collection).slice()),
+    'list(Ljava/util/Enumeration;)Ljava/util/ArrayList;': (_self, [enumeration], vm) => {
+      const items = [];
+      let guard = 0;
+      while (guard++ < 1000000 && Number(vm.invokeByName('hasMoreElements', '()Z', enumeration, [])) === 1) {
+        items.push(vm.invokeByName('nextElement', '()Ljava/lang/Object;', enumeration, []));
+      }
+      const list = makeList(vm, items);
+      const object = vm.allocateRawObject('Ljava/util/ArrayList;');
+      object.$peer = list.$peer;
+      return object;
+    },
+    'frequency(Ljava/util/Collection;Ljava/lang/Object;)I': (_self, [collection, value], vm) => {
+      let count = 0;
+      for (const item of arrayValues(collection)) if (valuesEqual(item, value, vm)) count += 1;
+      return count;
+    },
+    'disjoint(Ljava/util/Collection;Ljava/util/Collection;)Z': (_self, [left, right], vm) => {
+      const other = arrayValues(right);
+      for (const item of arrayValues(left)) {
+        for (const candidate of other) {
+          if (valuesEqual(item, candidate, vm)) return 0;
+        }
+      }
+      return 1;
+    },
+    'asLifoQueue(Ljava/util/Deque;)Ljava/util/Queue;': (_self, [deque]) => deque ?? null,
     'synchronizedMap(Ljava/util/Map;)Ljava/util/Map;': (_self, [map]) => map ?? null,
     // Set 视图以 Map 的键为内容；这里返回独立副本，调用方（Firebase 的
     // ComponentRuntime）只把返回的 Set 当作容器使用，不再回读原 Map。
@@ -4022,7 +4845,257 @@ JAVA_CORE_CLASSES['Ljava/util/concurrent/CopyOnWriteArraySet;'] = nativeDef('Lja
     },
   },
 });
-JAVA_CORE_CLASSES['Ljava/util/Map;'] = nativeDef('Ljava/util/Map;', { super: null });
+JAVA_CORE_CLASSES['Ljava/util/Map$Entry;'] = nativeDef('Ljava/util/Map$Entry;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'getKey()Ljava/lang/Object;': (self) => mapEntryPeer(self)?.key ?? null,
+    'getValue()Ljava/lang/Object;': (self) => mapEntryPeer(self)?.value ?? null,
+    'setValue(Ljava/lang/Object;)Ljava/lang/Object;': (self, [value]) => {
+      const peer = mapEntryPeer(self);
+      if (!peer) return null;
+      const previous = peer.value ?? null;
+      peer.value = value ?? null;
+      if (peer.map instanceof Map) peer.map.set(peer.key, peer.value);
+      return previous;
+    },
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+      const left = mapEntryPeer(self);
+      const right = mapEntryPeer(other);
+      if (!left || !right) return self === other ? 1 : 0;
+      return Object.is(left.key, right.key) && Object.is(left.value, right.value) ? 1 : 0;
+    },
+    'hashCode()I': (self) => {
+      const peer = mapEntryPeer(self);
+      if (!peer) return 0;
+      return ((peer.key === null ? 0 : hashCode(peer.key)) ^ (peer.value === null ? 0 : hashCode(peer.value))) | 0;
+    },
+    'comparingByKey()Ljava/util/Comparator;': (_self, _args, vm) => makeComparator(vm, (a, b) => defaultArrayCompare(mapEntryPeer(a)?.key, mapEntryPeer(b)?.key)),
+    'comparingByValue()Ljava/util/Comparator;': (_self, _args, vm) => makeComparator(vm, (a, b) => defaultArrayCompare(mapEntryPeer(a)?.value, mapEntryPeer(b)?.value)),
+    'comparingByKey(Ljava/util/Comparator;)Ljava/util/Comparator;': (_self, [comparator], vm) => {
+      const compare = comparatorFor(comparator, vm);
+      return makeComparator(vm, (a, b) => compare(mapEntryPeer(a)?.key, mapEntryPeer(b)?.key));
+    },
+    'comparingByValue(Ljava/util/Comparator;)Ljava/util/Comparator;': (_self, [comparator], vm) => {
+      const compare = comparatorFor(comparator, vm);
+      return makeComparator(vm, (a, b) => compare(mapEntryPeer(a)?.value, mapEntryPeer(b)?.value));
+    },
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/util/Map;'] = nativeDef('Ljava/util/Map;', {
+  super: null,
+  methods: {
+    'size()I': (self) => mapPeer(self)?.size ?? 0,
+    'isEmpty()Z': (self) => ((mapPeer(self)?.size ?? 0) === 0 ? 1 : 0),
+    'containsKey(Ljava/lang/Object;)Z': (self, [key]) => (mapPeer(self)?.has(key) ? 1 : 0),
+    'containsValue(Ljava/lang/Object;)Z': (self, [value], vm) => {
+      for (const current of mapPeer(self)?.values() ?? []) if (valuesEqual(current, value, vm)) return 1;
+      return 0;
+    },
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => mapPeer(self)?.get(key) ?? null,
+    'getOrDefault(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, fallback]) => {
+      const map = mapPeer(self);
+      return map?.has(key) ? map.get(key) : (fallback ?? null);
+    },
+    'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      const previous = map.has(key) ? map.get(key) : null;
+      map.set(key, value ?? null);
+      return previous;
+    },
+    'putAll(Ljava/util/Map;)V': (self, [source]) => {
+      const target = mapPeer(self);
+      const other = mapPeer(source);
+      if (!target || !other) return undefined;
+      for (const [key, value] of other) target.set(key, value);
+      return undefined;
+    },
+    'remove(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      const previous = map.has(key) ? map.get(key) : null;
+      map.delete(key);
+      return previous;
+    },
+    'remove(Ljava/lang/Object;Ljava/lang/Object;)Z': (self, [key, value], vm) => {
+      const map = mapPeer(self);
+      if (!map?.has(key) || !valuesEqual(map.get(key), value, vm)) return 0;
+      map.delete(key);
+      return 1;
+    },
+    'clear()V': (self) => {
+      mapPeer(self)?.clear();
+      return undefined;
+    },
+    'keySet()Ljava/util/Set;': (self, _args, vm) => makeSet(vm, [...(mapPeer(self)?.keys() ?? [])]),
+    'values()Ljava/util/Collection;': (self, _args, vm) => makeList(vm, [...(mapPeer(self)?.values() ?? [])]),
+    'entrySet()Ljava/util/Set;': (self, _args, vm) => {
+      const map = mapPeer(self);
+      if (!map) return makeSet(vm, []);
+      const entries = [];
+      for (const [key, value] of map) {
+        const entry = vm.allocateRawObject('Ljava/util/Map$Entry;');
+        entry.$peer = { key, value, map };
+        entries.push(entry);
+      }
+      return makeSet(vm, entries);
+    },
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+      const left = mapPeer(self);
+      const right = mapPeer(other);
+      if (!left || !right) return self === other ? 1 : 0;
+      if (left.size !== right.size) return 0;
+      for (const [key, value] of left) {
+        if (!right.has(key) || !Object.is(right.get(key), value)) return 0;
+      }
+      return 1;
+    },
+    'hashCode()I': (self) => {
+      let result = 0;
+      for (const [key, value] of mapPeer(self) ?? []) {
+        result = (result + ((key === null ? 0 : hashCode(key)) ^ (value === null ? 0 : hashCode(value)))) | 0;
+      }
+      return result;
+    },
+    'forEach(Ljava/util/function/BiConsumer;)V': (self, [consumer], vm) => {
+      for (const [key, value] of mapPeer(self) ?? []) {
+        vm.invokeInterface(consumer, 'accept', '(Ljava/lang/Object;Ljava/lang/Object;)V', [key, value]);
+      }
+      return undefined;
+    },
+    'replaceAll(Ljava/util/function/BiFunction;)V': (self, [fn], vm) => {
+      const map = mapPeer(self);
+      if (!map) return undefined;
+      for (const [key, value] of [...map]) {
+        map.set(key, vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, value]));
+      }
+      return undefined;
+    },
+    'putIfAbsent(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      if (map.has(key) && map.get(key) !== null) return map.get(key);
+      const previous = map.has(key) ? map.get(key) : null;
+      map.set(key, value ?? null);
+      return previous;
+    },
+    'replace(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
+      const map = mapPeer(self);
+      if (!map?.has(key)) return null;
+      const previous = map.get(key);
+      map.set(key, value ?? null);
+      return previous;
+    },
+    'replace(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Z': (self, [key, oldValue, newValue], vm) => {
+      const map = mapPeer(self);
+      if (!map?.has(key) || !valuesEqual(map.get(key), oldValue, vm)) return 0;
+      map.set(key, newValue ?? null);
+      return 1;
+    },
+    'computeIfAbsent(Ljava/lang/Object;Ljava/util/function/Function;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      const current = map.get(key);
+      if (current !== null && current !== undefined) return current;
+      const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;)Ljava/lang/Object;', [key]);
+      if (computed !== null && computed !== undefined) map.set(key, computed);
+      return computed ?? null;
+    },
+    'computeIfPresent(Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+      const map = mapPeer(self);
+      if (!map?.has(key) || map.get(key) === null) return null;
+      const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, map.get(key)]);
+      if (computed === null || computed === undefined) map.delete(key);
+      else map.set(key, computed);
+      return computed ?? null;
+    },
+    'compute(Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      const current = map.has(key) ? map.get(key) : null;
+      const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, current]);
+      if (computed === null || computed === undefined) map.delete(key);
+      else map.set(key, computed);
+      return computed ?? null;
+    },
+    'merge(Ljava/lang/Object;Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, value, fn], vm) => {
+      const map = mapPeer(self);
+      if (!map) return null;
+      const current = map.get(key);
+      let merged;
+      if (current === null || current === undefined) merged = value;
+      else if (value === null || value === undefined) merged = current;
+      else merged = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [current, value]);
+      if (merged === null || merged === undefined) map.delete(key);
+      else map.set(key, merged);
+      return merged ?? null;
+    },
+  },
+  staticMethods: {
+    'of()Ljava/util/Map;': (_self, _args, vm) => makeMap(vm),
+    'of(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;': (_self, [key, value], vm) => {
+      const map = makeMap(vm);
+      map.$peer.map.set(key, value);
+      return map;
+    },
+    'of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;': (_self, [k1, v1, k2, v2], vm) => {
+      const map = makeMap(vm);
+      map.$peer.map.set(k1, v1);
+      map.$peer.map.set(k2, v2);
+      return map;
+    },
+    'of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;': (_self, [k1, v1, k2, v2, k3, v3], vm) => {
+      const map = makeMap(vm);
+      map.$peer.map.set(k1, v1);
+      map.$peer.map.set(k2, v2);
+      map.$peer.map.set(k3, v3);
+      return map;
+    },
+    'of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;': (
+      _self, [k1, v1, k2, v2, k3, v3, k4, v4], vm,
+    ) => {
+      const map = makeMap(vm);
+      map.$peer.map.set(k1, v1);
+      map.$peer.map.set(k2, v2);
+      map.$peer.map.set(k3, v3);
+      map.$peer.map.set(k4, v4);
+      return map;
+    },
+    'ofEntries([Ljava/util/Map$Entry;)Ljava/util/Map;': (_self, [entries], vm) => {
+      const map = makeMap(vm);
+      for (const entry of arrayValues(entries)) {
+        const peer = mapEntryPeer(entry);
+        if (peer) map.$peer.map.set(peer.key, peer.value);
+      }
+      return map;
+    },
+    'entry(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map$Entry;': (_self, [key, value], vm) => {
+      const entry = vm.allocateRawObject('Ljava/util/Map$Entry;');
+      entry.$peer = { key, value };
+      return entry;
+    },
+    'copyOf(Ljava/util/Map;)Ljava/util/Map;': (_self, [source], vm) => {
+      const map = makeMap(vm);
+      const other = mapPeer(source);
+      if (other) for (const [key, value] of other) map.$peer.map.set(key, value);
+      return map;
+    },
+  },
+});
+
+function mapPeer(self) {
+  if (!self) return null;
+  if (self.map instanceof Map) return self.map;
+  if (self.$peer?.map instanceof Map) return self.$peer.map;
+  return null;
+}
+
+function mapEntryPeer(self) {
+  if (!self) return null;
+  if (typeof self === 'object' && 'key' in self && 'value' in self && !self.$peer) return self;
+  return self.$peer ?? null;
+}
 
 JAVA_CORE_CLASSES['Landroid/content/res/ColorStateList;'] = nativeDef('Landroid/content/res/ColorStateList;', {
   super: 'Ljava/lang/Object;',
@@ -4247,6 +5320,18 @@ JAVA_CORE_CLASSES['Landroid/util/LongSparseArray;'] = nativeDef('Landroid/util/L
 function makeIterator(vm, source) {
   const object = vm.allocateRawObject('Ljava/util/Iterator;');
   object.$peer = { cursor: 0, snapshot: [...source] };
+  return object;
+}
+
+function makeComparator(vm, compare) {
+  const object = vm.allocateRawObject('Ljava/util/Comparator;');
+  object.$peer = { compare };
+  return object;
+}
+
+function makeEnumeration(vm, items) {
+  const object = vm.allocateRawObject('Ljava/util/Enumeration;');
+  object.$peer = { cursor: 0, items: [...items] };
   return object;
 }
 
@@ -6177,3 +7262,1200 @@ function javaValueToString(value, vm) {
 }
 
 export { formatJavaString };
+
+// ---- java.lang.Long 扩展（真实 64 位语义，全部基于 BigInt） ----
+Object.assign(JAVA_CORE_CLASSES['Ljava/lang/Long;'].staticMethods, {});
+const LONG_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Long;'].staticMethods;
+const LONG_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Long;'].methods;
+LONG_STATIC.set('toString(JI)Ljava/lang/String;', (_self, [value, radix]) => toLong(value).toString(toInt(radix) || 10));
+LONG_STATIC.set('toUnsignedString(JI)Ljava/lang/String;', (_self, [value, radix]) => BigInt.asUintN(64, toLong(value)).toString(toInt(radix) || 10));
+LONG_STATIC.set('toUnsignedString(J)Ljava/lang/String;', (_self, [value]) => BigInt.asUintN(64, toLong(value)).toString(10));
+LONG_STATIC.set('toHexString(J)Ljava/lang/String;', (_self, [value]) => BigInt.asUintN(64, toLong(value)).toString(16));
+LONG_STATIC.set('toOctalString(J)Ljava/lang/String;', (_self, [value]) => BigInt.asUintN(64, toLong(value)).toString(8));
+LONG_STATIC.set('toBinaryString(J)Ljava/lang/String;', (_self, [value]) => BigInt.asUintN(64, toLong(value)).toString(2));
+LONG_STATIC.set('parseLong(Ljava/lang/String;I)J', (_self, [text, radix], vm) => parseIntegerText(vm, jsString(text), toInt(radix), false, 64));
+LONG_STATIC.set('parseUnsignedLong(Ljava/lang/String;I)J', (_self, [text, radix], vm) => parseIntegerText(vm, jsString(text), toInt(radix), true, 64));
+LONG_STATIC.set('parseUnsignedLong(Ljava/lang/String;)J', (_self, [text], vm) => parseIntegerText(vm, jsString(text), 10, true, 64));
+LONG_STATIC.set('valueOf(Ljava/lang/String;I)Ljava/lang/Long;', (_self, [text, radix], vm) =>
+  vm.wrapPeer({ value: parseIntegerText(vm, jsString(text), toInt(radix), false, 64), constructor: { $descriptor: 'Ljava/lang/Long;' } }));
+LONG_STATIC.set('valueOf(Ljava/lang/String;)Ljava/lang/Long;', (_self, [text], vm) =>
+  vm.wrapPeer({ value: parseIntegerText(vm, jsString(text), 10, false, 64), constructor: { $descriptor: 'Ljava/lang/Long;' } }));
+LONG_STATIC.set('decode(Ljava/lang/String;)Ljava/lang/Long;', (_self, [text], vm) => {
+  const raw = String(jsString(text) ?? '').trim();
+  let radix = 10;
+  let digits = raw;
+  if (/^[+-]?0[xX]/.test(raw)) {
+    radix = 16;
+    digits = raw.replace(/^([+-]?)0[xX]/, '$1');
+  } else if (/^[+-]?#/.test(raw)) {
+    radix = 16;
+    digits = raw.replace(/^([+-]?)#/, '$1');
+  } else if (/^[+-]?0[0-7]+$/.test(raw)) {
+    radix = 8;
+    digits = raw.replace(/^([+-]?)0/, '$1');
+  }
+  const value = parseIntegerText(vm, digits, radix, false, 64);
+  return vm.wrapPeer({ value, constructor: { $descriptor: 'Ljava/lang/Long;' } });
+});
+LONG_STATIC.set('hashCode(J)I', (_self, [value]) => Number(BigInt.asIntN(32, toLong(value) ^ (toLong(value) >> 32n))));
+LONG_STATIC.set('compare(JJ)I', (_self, [left, right]) => compareLong(toLong(left), toLong(right)));
+LONG_STATIC.set('compareUnsigned(JJ)I', (_self, [left, right]) => compareLong(BigInt.asUintN(64, toLong(left)), BigInt.asUintN(64, toLong(right))));
+LONG_STATIC.set('divideUnsigned(JJ)J', (_self, [left, right]) => (toLong(right) === 0n ? 0n : BigInt.asUintN(64, toLong(left)) / BigInt.asUintN(64, toLong(right))));
+LONG_STATIC.set('remainderUnsigned(JJ)J', (_self, [left, right]) => (toLong(right) === 0n ? 0n : BigInt.asUintN(64, toLong(left)) % BigInt.asUintN(64, toLong(right))));
+LONG_STATIC.set('highestOneBit(J)J', (_self, [value]) => {
+  let bits = BigInt.asUintN(64, toLong(value));
+  if (bits === 0n) return 0n;
+  let shift = 0n;
+  while ((bits >> 1n) > 0n) {
+    bits >>= 1n;
+    shift += 1n;
+  }
+  return 1n << shift;
+});
+LONG_STATIC.set('lowestOneBit(J)J', (_self, [value]) => {
+  const bits = BigInt.asUintN(64, toLong(value));
+  return bits === 0n ? 0n : bits & -bits;
+});
+LONG_STATIC.set('numberOfLeadingZeros(J)I', (_self, [value]) => {
+  const bits = BigInt.asUintN(64, toLong(value));
+  if (bits === 0n) return 64;
+  return 64 - (bits.toString(2).length);
+});
+LONG_STATIC.set('numberOfTrailingZeros(J)I', (_self, [value]) => {
+  const bits = BigInt.asUintN(64, toLong(value));
+  if (bits === 0n) return 64;
+  return bits.toString(2).replace(/0+$/, '').length === 64 ? 0 : 64 - bits.toString(2).replace(/0+$/, '').length;
+});
+LONG_STATIC.set('reverse(J)J', (_self, [value]) => {
+  let bits = BigInt.asUintN(64, toLong(value));
+  let result = 0n;
+  for (let index = 0; index < 64; index++) {
+    result = (result << 1n) | (bits & 1n);
+    bits >>= 1n;
+  }
+  return BigInt.asIntN(64, result);
+});
+LONG_STATIC.set('reverseBytes(J)J', (_self, [value]) => {
+  let bits = BigInt.asUintN(64, toLong(value));
+  let result = 0n;
+  for (let index = 0; index < 8; index++) {
+    result = (result << 8n) | (bits & 0xffn);
+    bits >>= 8n;
+  }
+  return BigInt.asIntN(64, result);
+});
+LONG_STATIC.set('signum(J)I', (_self, [value]) => (toLong(value) === 0n ? 0 : (toLong(value) > 0n ? 1 : -1)));
+LONG_STATIC.set('sum(JJ)J', (_self, [left, right]) => BigInt.asIntN(64, toLong(left) + toLong(right)));
+LONG_STATIC.set('max(JJ)J', (_self, [left, right]) => (toLong(left) >= toLong(right) ? toLong(left) : toLong(right)));
+LONG_STATIC.set('min(JJ)J', (_self, [left, right]) => (toLong(left) <= toLong(right) ? toLong(left) : toLong(right)));
+LONG_METHODS.set('byteValue()B', (self) => Number(BigInt.asIntN(8, toLong(self.value))));
+LONG_METHODS.set('shortValue()S', (self) => Number(BigInt.asIntN(16, toLong(self.value))));
+LONG_METHODS.set('floatValue()F', (self) => Number(toLong(self.value)));
+LONG_METHODS.set('doubleValue()D', (self) => Number(toLong(self.value)));
+LONG_METHODS.set('compareTo(Ljava/lang/Long;)I', (self, [other]) => {
+  const peer = other?.$peer ?? other;
+  return compareLong(toLong(self.value), toLong(peer?.value ?? 0));
+});
+
+function compareLong(left, right) {
+  return left < right ? -1 : (left > right ? 1 : 0);
+}
+
+function parseIntegerText(vm, text, radix, unsigned, bits) {
+  const base = radix === 0 ? 10 : radix;
+  if (base < 2 || base > 36) {
+    vm?.throwException?.('Ljava/lang/NumberFormatException;', `radix ${radix}`);
+    return 0n;
+  }
+  const raw = String(text ?? '').trim();
+  if (!raw.length) {
+    vm?.throwException?.('Ljava/lang/NumberFormatException;', 'empty string');
+    return 0n;
+  }
+  let sign = 1n;
+  let digits = raw;
+  if (digits[0] === '-' || digits[0] === '+') {
+    if (digits[0] === '-') sign = -1n;
+    digits = digits.slice(1);
+  }
+  if (!digits.length) {
+    vm?.throwException?.('Ljava/lang/NumberFormatException;', raw);
+    return 0n;
+  }
+  let value = 0n;
+  const radixBig = BigInt(base);
+  for (const ch of digits) {
+    const code = ch.codePointAt(0);
+    const digit = digitValueOf(code, base);
+    if (digit < 0) {
+      vm?.throwException?.('Ljava/lang/NumberFormatException;', raw);
+      return 0n;
+    }
+    value = value * radixBig + BigInt(digit);
+  }
+  value *= sign;
+  if (unsigned) return BigInt.asUintN(bits, value);
+  return BigInt.asIntN(bits, value);
+}
+
+// ---- java.lang.String 扩展 ----
+const STRING_METHODS = JAVA_CORE_CLASSES['Ljava/lang/String;'].methods;
+const STRING_STATIC = JAVA_CORE_CLASSES['Ljava/lang/String;'].staticMethods;
+STRING_METHODS.set('<init>([C)V', (self, [chars]) => {
+  self.value = charArrayText(chars, 0, charArrayLength(chars));
+});
+STRING_METHODS.set('<init>([CII)V', (self, [chars, offset, count]) => {
+  const start = toInt(offset);
+  self.value = charArrayText(chars, start, start + toInt(count));
+});
+STRING_METHODS.set('<init>([III)V', (self, [points, offset, count]) => {
+  const data = Array.isArray(points?.$data) ? points.$data : [];
+  const start = toInt(offset);
+  self.value = data.slice(start, start + toInt(count)).map((code) => String.fromCodePoint(toInt(code))).join('');
+});
+STRING_METHODS.set('<init>([BII)V', (self, [bytes, offset, length]) => {
+  self.value = decodeUtf8Bytes({ $data: sliceBytes(bytes, toInt(offset), toInt(length)) });
+});
+STRING_METHODS.set('<init>([BIII)V', (self, [bytes, high, offset, length]) => {
+  self.value = decodeUtf8Bytes({ $data: sliceBytes(bytes, toInt(offset), toInt(length)) });
+});
+STRING_METHODS.set('<init>([BI)V', (self, [bytes, high]) => {
+  self.value = decodeUtf8Bytes({ $data: sliceBytes(bytes, 0, toInt(high)) });
+});
+STRING_METHODS.set('<init>([BIILjava/lang/String;)V', (self, [bytes, offset, length, charset]) => {
+  self.value = decodeUtf8Bytes({ $data: sliceBytes(bytes, toInt(offset), toInt(length)) }, charset);
+});
+STRING_METHODS.set('<init>([BLjava/nio/charset/Charset;)V', (self, [bytes, charset]) => {
+  self.value = decodeUtf8Bytes(bytes, charset);
+});
+STRING_METHODS.set('<init>([BIILjava/nio/charset/Charset;)V', (self, [bytes, offset, length, charset]) => {
+  self.value = decodeUtf8Bytes({ $data: sliceBytes(bytes, toInt(offset), toInt(length)) }, charset);
+});
+STRING_METHODS.set('<init>(Ljava/lang/StringBuffer;)V', (self, [buffer]) => {
+  self.value = jsString(buffer);
+});
+STRING_METHODS.set('<init>(Ljava/lang/StringBuilder;)V', (self, [builder]) => {
+  self.value = jsString(builder);
+});
+STRING_METHODS.set('codePointAt(I)I', (self, [index]) => codePointAtText(jsString(self), toInt(index)));
+STRING_METHODS.set('codePointBefore(I)I', (self, [index]) => codePointBeforeText(jsString(self), toInt(index)));
+STRING_METHODS.set('codePointCount(II)I', (self, [begin, end]) => countCodePointsText(jsString(self), toInt(begin), toInt(end)));
+STRING_METHODS.set('offsetByCodePoints(II)I', (self, [index, offset]) => offsetByCodePoint(jsString(self), toInt(index), toInt(offset)));
+STRING_METHODS.set('getChars(II[CI)V', (self, [start, end, target, targetStart]) => {
+  const data = charArrayData(target);
+  const text = jsString(self);
+  const from = Math.max(0, toInt(start));
+  const to = Math.min(text.length, toInt(end));
+  let cursor = toInt(targetStart);
+  for (let index = from; index < to; index++) data[cursor++] = text.charCodeAt(index);
+});
+STRING_METHODS.set('getBytes(II[BI)V', (self, [start, end, target, targetStart]) => {
+  const data = Array.isArray(target?.$data) ? target.$data : [];
+  const bytes = utf8EncodeBytes(jsString(self).slice(toInt(start), toInt(end)));
+  let cursor = toInt(targetStart);
+  for (const byte of bytes) data[cursor++] = byte;
+});
+STRING_METHODS.set('getBytes(Ljava/lang/String;)[B', (self, [charset], vm) => vm.newArray('[B', ...bytesArray(jsString(self), charset)));
+STRING_METHODS.set('getBytes(Ljava/nio/charset/Charset;)[B', (self, [charset], vm) => vm.newArray('[B', ...bytesArray(jsString(self), charset)));
+STRING_METHODS.set('contentEquals(Ljava/lang/StringBuffer;)Z', (self, [buffer]) => (jsString(self) === jsString(buffer) ? 1 : 0));
+STRING_METHODS.set('contentEquals(Ljava/lang/CharSequence;)Z', (self, [value]) => (jsString(self) === jsString(value) ? 1 : 0));
+STRING_METHODS.set('compareToIgnoreCase(Ljava/lang/String;)I', (self, [other]) => {
+  const left = jsString(self).toLowerCase();
+  const right = jsString(other).toLowerCase();
+  return compareLong(BigInt(left.length), BigInt(right.length)) === 0
+    ? (left < right ? -1 : (left > right ? 1 : 0))
+    : (left < right ? -1 : 1);
+});
+STRING_METHODS.set('regionMatches(ILjava/lang/String;II)Z', (self, [offset, other, otherOffset, length]) =>
+  regionMatchesText(jsString(self), toInt(offset), jsString(other), toInt(otherOffset), toInt(length), false));
+STRING_METHODS.set('regionMatches(ZILjava/lang/String;II)Z', (self, [ignoreCase, offset, other, otherOffset, length]) =>
+  regionMatchesText(jsString(self), toInt(offset), jsString(other), toInt(otherOffset), toInt(length), !!ignoreCase));
+STRING_METHODS.set('subSequence(II)Ljava/lang/CharSequence;', (self, [start, end]) => jsString(self).slice(toInt(start), toInt(end)));
+STRING_STATIC.set('join(Ljava/lang/CharSequence;Ljava/lang/Iterable;)Ljava/lang/String;', (_self, [delimiter, values], vm) =>
+  iterableItemList(vm, values).map((item) => jsString(item)).join(jsString(delimiter)));
+STRING_STATIC.set('valueOf([C)Ljava/lang/String;', (_self, [chars]) => charArrayText(chars, 0, charArrayLength(chars)));
+STRING_STATIC.set('valueOf([CII)Ljava/lang/String;', (_self, [chars, offset, count]) => {
+  const start = toInt(offset);
+  return charArrayText(chars, start, start + toInt(count));
+});
+STRING_STATIC.set('copyValueOf([CII)Ljava/lang/String;', (_self, [chars, offset, count]) => {
+  const start = toInt(offset);
+  return charArrayText(chars, start, start + toInt(count));
+});
+STRING_STATIC.set('copyValueOf([C)Ljava/lang/String;', (_self, [chars]) => charArrayText(chars, 0, charArrayLength(chars)));
+
+function sliceBytes(bytes, offset, length) {
+  const data = Array.isArray(bytes?.$data) ? bytes.$data : [];
+  return data.slice(offset, offset + length).map((value) => toInt(value) & 0xff);
+}
+
+function utf8EncodeBytes(text) {
+  if (typeof TextEncoder !== 'undefined') return Array.from(new TextEncoder().encode(String(text ?? '')));
+  return Array.from(String(text ?? '')).map((ch) => ch.codePointAt(0) & 0xff);
+}
+
+function bytesArray(text, charset) {
+  const bytes = utf8EncodeBytes(text);
+  return [bytes, bytes.length];
+}
+
+function regionMatchesText(source, offset, other, otherOffset, length, ignoreCase) {
+  if (offset < 0 || otherOffset < 0 || length < 0) return 0;
+  if (offset + length > source.length || otherOffset + length > other.length) return 0;
+  const left = source.slice(offset, offset + length);
+  const right = other.slice(otherOffset, otherOffset + length);
+  return (ignoreCase ? left.toLowerCase() === right.toLowerCase() : left === right) ? 1 : 0;
+}
+
+function iterableItemList(vm, iterable) {
+  const direct = arrayData(iterable);
+  if (direct) return direct;
+  if (!iterable) return [];
+  try {
+    const iterator = vm.invokeByName('iterator', '()Ljava/util/Iterator;', iterable, []);
+    const items = [];
+    let guard = 0;
+    while (guard++ < 1000000 && Number(vm.invokeByName('hasNext', '()Z', iterator, [])) === 1) {
+      items.push(vm.invokeByName('next', 'Ljava/lang/Object;', iterator, []));
+    }
+    return items;
+  } catch (_error) {
+    return [];
+  }
+}
+
+// ---- java.math.BigDecimal 真实运算（返回新对象，保留标度） ----
+const BIGDECIMAL_METHODS = JAVA_CORE_CLASSES['Ljava/math/BigDecimal;'].methods;
+const BIGDECIMAL_STATIC = JAVA_CORE_CLASSES['Ljava/math/BigDecimal;'].staticMethods;
+function bigDecimalPeer(self) {
+  return self?.$peer ?? self ?? {};
+}
+function bigDecimalNumber(self) {
+  return Number(bigDecimalPeer(self).value) || 0;
+}
+function bigDecimalScale(self) {
+  return Math.max(0, Number(bigDecimalPeer(self).scale) | 0);
+}
+function makeBigDecimal(vm, value, scale = 0) {
+  const object = vm.allocateRawObject('Ljava/math/BigDecimal;');
+  object.$peer = { value: Number(value) || 0, scale: Math.max(0, Number(scale) | 0) };
+  return object;
+}
+function scaleOfText(text) {
+  const dot = String(text).indexOf('.');
+  return dot < 0 ? 0 : String(text).length - dot - 1;
+}
+function decimalPrecision(value, scale) {
+  const text = Math.abs(Number(value)).toFixed(Math.max(0, scale));
+  const digits = text.replace(/[^0-9]/g, '').replace(/^0+/, '');
+  return Math.max(1, digits.length);
+}
+function mathContextPrecision(context) {
+  const peer = context?.$peer ?? context;
+  return Math.max(0, Number(peer?.precision) | 0);
+}
+function roundToPrecision(value, precision) {
+  if (!precision || !Number.isFinite(value)) return Number(value) || 0;
+  return Number(Number(value).toPrecision(Math.min(21, precision)));
+}
+BIGDECIMAL_METHODS.set('<init>([C)V', (self, [chars]) => {
+  const text = charArrayText(chars, 0, charArrayLength(chars));
+  self.value = Number(text) || 0;
+  self.scale = scaleOfText(text);
+});
+BIGDECIMAL_METHODS.set('<init>([CII)V', (self, [chars, offset, count]) => {
+  const start = toInt(offset);
+  const text = charArrayText(chars, start, start + toInt(count));
+  self.value = Number(text) || 0;
+  self.scale = scaleOfText(text);
+});
+BIGDECIMAL_METHODS.set('<init>([CLjava/math/MathContext;)V', (self, [chars, context]) => {
+  const text = charArrayText(chars, 0, charArrayLength(chars));
+  self.value = roundToPrecision(Number(text) || 0, mathContextPrecision(context));
+  self.scale = scaleOfText(text);
+});
+BIGDECIMAL_METHODS.set('<init>([CIILjava/math/MathContext;)V', (self, [chars, offset, count, context]) => {
+  const start = toInt(offset);
+  const text = charArrayText(chars, start, start + toInt(count));
+  self.value = roundToPrecision(Number(text) || 0, mathContextPrecision(context));
+  self.scale = scaleOfText(text);
+});
+BIGDECIMAL_METHODS.set('<init>(Ljava/lang/String;Ljava/math/MathContext;)V', (self, [text, context]) => {
+  const raw = jsString(text);
+  self.value = roundToPrecision(Number(raw) || 0, mathContextPrecision(context));
+  self.scale = scaleOfText(raw);
+});
+BIGDECIMAL_METHODS.set('<init>(DLjava/math/MathContext;)V', (self, [value, context]) => {
+  self.value = roundToPrecision(Number(value) || 0, mathContextPrecision(context));
+  self.scale = 0;
+});
+BIGDECIMAL_METHODS.set('<init>(ILjava/math/MathContext;)V', (self, [value, context]) => {
+  self.value = roundToPrecision(toInt(value), mathContextPrecision(context));
+  self.scale = 0;
+});
+BIGDECIMAL_METHODS.set('<init>(JLjava/math/MathContext;)V', (self, [value, context]) => {
+  self.value = roundToPrecision(Number(toLong(value)), mathContextPrecision(context));
+  self.scale = 0;
+});
+BIGDECIMAL_METHODS.set('<init>(Ljava/math/BigInteger;Ljava/math/MathContext;)V', (self, [value, context]) => {
+  self.value = roundToPrecision(Number(bigIntegerValue(value)), mathContextPrecision(context));
+  self.scale = 0;
+});
+BIGDECIMAL_METHODS.set('<init>(Ljava/math/BigInteger;I)V', (self, [value, scale]) => {
+  self.value = Number(bigIntegerValue(value)) / Math.pow(10, toInt(scale));
+  self.scale = Math.max(0, toInt(scale));
+});
+BIGDECIMAL_METHODS.set('<init>(Ljava/math/BigInteger;ILjava/math/MathContext;)V', (self, [value, scale, context]) => {
+  self.value = roundToPrecision(Number(bigIntegerValue(value)) / Math.pow(10, toInt(scale)), mathContextPrecision(context));
+  self.scale = Math.max(0, toInt(scale));
+});
+BIGDECIMAL_METHODS.set('<init>(Ljava/lang/String;)V', (self, [text]) => {
+  const raw = jsString(text);
+  self.value = Number(raw) || 0;
+  self.scale = scaleOfText(raw);
+});
+BIGDECIMAL_STATIC.set('valueOf(J)Ljava/math/BigDecimal;', (_self, [value], vm) => makeBigDecimal(vm, Number(toLong(value)), 0));
+BIGDECIMAL_STATIC.set('valueOf(JI)Ljava/math/BigDecimal;', (_self, [value, scale], vm) =>
+  makeBigDecimal(vm, Number(toLong(value)) / Math.pow(10, toInt(scale)), toInt(scale)));
+BIGDECIMAL_STATIC.set('valueOf(D)Ljava/math/BigDecimal;', (_self, [value], vm) => {
+  const text = String(Number(value));
+  return makeBigDecimal(vm, Number(value), scaleOfText(text));
+});
+BIGDECIMAL_METHODS.set('add(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) + bigDecimalNumber(other), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('add(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(bigDecimalNumber(self) + bigDecimalNumber(other), mathContextPrecision(context)), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('subtract(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) - bigDecimalNumber(other), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('subtract(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(bigDecimalNumber(self) - bigDecimalNumber(other), mathContextPrecision(context)), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('multiply(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) * bigDecimalNumber(other), bigDecimalScale(self) + bigDecimalScale(other)));
+BIGDECIMAL_METHODS.set('multiply(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(bigDecimalNumber(self) * bigDecimalNumber(other), mathContextPrecision(context)), bigDecimalScale(self) + bigDecimalScale(other)));
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : bigDecimalNumber(self) / divisor, Math.max(10, bigDecimalScale(self)));
+});
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;I)Ljava/math/BigDecimal;', (self, [other, scale], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : Number((bigDecimalNumber(self) / divisor).toFixed(Math.max(0, toInt(scale)))), toInt(scale));
+});
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;II)Ljava/math/BigDecimal;', (self, [other, scale, mode], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundValue(bigDecimalNumber(self) / divisor, toInt(scale), toInt(mode)), toInt(scale));
+});
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;ILjava/math/RoundingMode;)Ljava/math/BigDecimal;', (self, [other, scale, mode], vm) => {
+  const divisor = bigDecimalNumber(other);
+  const modeValue = Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 6);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundValue(bigDecimalNumber(self) / divisor, toInt(scale), modeValue), toInt(scale));
+});
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;Ljava/math/RoundingMode;)Ljava/math/BigDecimal;', (self, [other, mode], vm) => {
+  const divisor = bigDecimalNumber(other);
+  const modeValue = Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 6);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundValue(bigDecimalNumber(self) / divisor, 10, modeValue), 10);
+});
+BIGDECIMAL_METHODS.set('divide(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundToPrecision(bigDecimalNumber(self) / divisor, mathContextPrecision(context)), Math.max(0, mathContextPrecision(context)));
+});
+BIGDECIMAL_METHODS.set('divideToIntegralValue(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : Math.trunc(bigDecimalNumber(self) / divisor), 0);
+});
+BIGDECIMAL_METHODS.set('divideToIntegralValue(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundToPrecision(Math.trunc(bigDecimalNumber(self) / divisor), mathContextPrecision(context)), 0);
+});
+BIGDECIMAL_METHODS.set('remainder(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : bigDecimalNumber(self) % divisor, Math.max(bigDecimalScale(self), bigDecimalScale(other)));
+});
+BIGDECIMAL_METHODS.set('remainder(Ljava/math/BigDecimal;Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [other, context], vm) => {
+  const divisor = bigDecimalNumber(other);
+  return makeBigDecimal(vm, divisor === 0 ? 0 : roundToPrecision(bigDecimalNumber(self) % divisor, mathContextPrecision(context)), Math.max(bigDecimalScale(self), bigDecimalScale(other)));
+});
+BIGDECIMAL_METHODS.set('divideAndRemainder(Ljava/math/BigDecimal;)[Ljava/math/BigDecimal;', (self, [other], vm) => {
+  const divisor = bigDecimalNumber(other);
+  const quotient = divisor === 0 ? 0 : Math.trunc(bigDecimalNumber(self) / divisor);
+  const remainder = divisor === 0 ? 0 : bigDecimalNumber(self) % divisor;
+  return vm.newArray('[Ljava/math/BigDecimal;', [makeBigDecimal(vm, quotient, 0), makeBigDecimal(vm, remainder, Math.max(bigDecimalScale(self), bigDecimalScale(other)))]);
+});
+BIGDECIMAL_METHODS.set('divideAndRemainder(Ljava/math/BigDecimal;Ljava/math/MathContext;)[Ljava/math/BigDecimal;', (self, [other, context], vm) => {
+  const divisor = bigDecimalNumber(other);
+  const precision = mathContextPrecision(context);
+  const quotient = divisor === 0 ? 0 : roundToPrecision(Math.trunc(bigDecimalNumber(self) / divisor), precision);
+  const remainder = divisor === 0 ? 0 : roundToPrecision(bigDecimalNumber(self) % divisor, precision);
+  return vm.newArray('[Ljava/math/BigDecimal;', [makeBigDecimal(vm, quotient, 0), makeBigDecimal(vm, remainder, Math.max(bigDecimalScale(self), bigDecimalScale(other)))]);
+});
+BIGDECIMAL_METHODS.set('pow(I)Ljava/math/BigDecimal;', (self, [exponent], vm) =>
+  makeBigDecimal(vm, Math.pow(bigDecimalNumber(self), toInt(exponent)), bigDecimalScale(self) * Math.max(0, toInt(exponent))));
+BIGDECIMAL_METHODS.set('pow(ILjava/math/MathContext;)Ljava/math/BigDecimal;', (self, [exponent, context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(Math.pow(bigDecimalNumber(self), toInt(exponent)), mathContextPrecision(context)), bigDecimalScale(self) * Math.max(0, toInt(exponent))));
+BIGDECIMAL_METHODS.set('abs()Ljava/math/BigDecimal;', (self, _args, vm) => makeBigDecimal(vm, Math.abs(bigDecimalNumber(self)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('abs(Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(Math.abs(bigDecimalNumber(self)), mathContextPrecision(context)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('negate()Ljava/math/BigDecimal;', (self, _args, vm) => makeBigDecimal(vm, -bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('negate(Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(-bigDecimalNumber(self), mathContextPrecision(context)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('plus()Ljava/math/BigDecimal;', (self, _args, vm) => makeBigDecimal(vm, bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('plus(Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(bigDecimalNumber(self), mathContextPrecision(context)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('signum()I', (self) => Math.sign(bigDecimalNumber(self)) | 0);
+BIGDECIMAL_METHODS.set('scale()I', (self) => bigDecimalScale(self));
+BIGDECIMAL_METHODS.set('precision()I', (self) => decimalPrecision(bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('unscaledValue()Ljava/math/BigInteger;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/math/BigInteger;');
+  object.$peer = { value: BigInt(Math.round(bigDecimalNumber(self) * Math.pow(10, bigDecimalScale(self)))) };
+  return object;
+});
+BIGDECIMAL_METHODS.set('round(Ljava/math/MathContext;)Ljava/math/BigDecimal;', (self, [context], vm) =>
+  makeBigDecimal(vm, roundToPrecision(bigDecimalNumber(self), mathContextPrecision(context)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('setScale(I)Ljava/math/BigDecimal;', (self, [scale], vm) =>
+  makeBigDecimal(vm, Number(bigDecimalNumber(self).toFixed(Math.max(0, toInt(scale)))), toInt(scale)));
+BIGDECIMAL_METHODS.set('setScale(ILjava/math/RoundingMode;)Ljava/math/BigDecimal;', (self, [scale, mode], vm) =>
+  makeBigDecimal(vm, roundValue(bigDecimalNumber(self), toInt(scale), Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 6)), toInt(scale)));
+BIGDECIMAL_METHODS.set('setScale(II)Ljava/math/BigDecimal;', (self, [scale, mode], vm) =>
+  makeBigDecimal(vm, roundValue(bigDecimalNumber(self), toInt(scale), toInt(mode)), toInt(scale)));
+BIGDECIMAL_METHODS.set('setScale(ILjava/math/RoundingMode;Z)Ljava/math/BigDecimal;', (self, [scale, mode], vm) =>
+  makeBigDecimal(vm, roundValue(bigDecimalNumber(self), toInt(scale), Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 6)), toInt(scale)));
+BIGDECIMAL_METHODS.set('movePointLeft(I)Ljava/math/BigDecimal;', (self, [digits], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) / Math.pow(10, toInt(digits)), bigDecimalScale(self) + toInt(digits)));
+BIGDECIMAL_METHODS.set('movePointRight(I)Ljava/math/BigDecimal;', (self, [digits], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) * Math.pow(10, toInt(digits)), Math.max(0, bigDecimalScale(self) - toInt(digits))));
+BIGDECIMAL_METHODS.set('scaleByPowerOfTen(I)Ljava/math/BigDecimal;', (self, [digits], vm) =>
+  makeBigDecimal(vm, bigDecimalNumber(self) * Math.pow(10, toInt(digits)), Math.max(0, bigDecimalScale(self) - toInt(digits))));
+BIGDECIMAL_METHODS.set('stripTrailingZeros()Ljava/math/BigDecimal;', (self, _args, vm) => {
+  let value = bigDecimalNumber(self);
+  let scale = bigDecimalScale(self);
+  while (scale > 0 && Math.abs(value * Math.pow(10, scale)) % 10 === 0) {
+    value /= 10;
+    scale -= 1;
+  }
+  return makeBigDecimal(vm, value, scale);
+});
+BIGDECIMAL_METHODS.set('min(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) =>
+  makeBigDecimal(vm, Math.min(bigDecimalNumber(self), bigDecimalNumber(other)), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('max(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;', (self, [other], vm) =>
+  makeBigDecimal(vm, Math.max(bigDecimalNumber(self), bigDecimalNumber(other)), Math.max(bigDecimalScale(self), bigDecimalScale(other))));
+BIGDECIMAL_METHODS.set('toEngineeringString()Ljava/lang/String;', (self) => formatBigDecimalText(bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('toString()Ljava/lang/String;', (self) => formatBigDecimalText(bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('toPlainString()Ljava/lang/String;', (self) => formatBigDecimalText(bigDecimalNumber(self), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('toBigInteger()Ljava/math/BigInteger;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/math/BigInteger;');
+  object.$peer = { value: BigInt(Math.trunc(bigDecimalNumber(self))) };
+  return object;
+});
+BIGDECIMAL_METHODS.set('toBigIntegerExact()Ljava/math/BigInteger;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/math/BigInteger;');
+  object.$peer = { value: BigInt(Math.trunc(bigDecimalNumber(self))) };
+  return object;
+});
+BIGDECIMAL_METHODS.set('shortValueExact()S', (self) => Number(BigInt.asIntN(16, BigInt(Math.trunc(bigDecimalNumber(self))))));
+BIGDECIMAL_METHODS.set('byteValueExact()B', (self) => Number(BigInt.asIntN(8, BigInt(Math.trunc(bigDecimalNumber(self))))));
+BIGDECIMAL_METHODS.set('ulp()Ljava/math/BigDecimal;', (self, _args, vm) => makeBigDecimal(vm, Math.pow(10, -bigDecimalScale(self)), bigDecimalScale(self)));
+BIGDECIMAL_METHODS.set('compareTo(Ljava/math/BigDecimal;)I', (self, [other]) => {
+  const left = bigDecimalNumber(self);
+  const right = bigDecimalNumber(other);
+  return left < right ? -1 : (left > right ? 1 : 0);
+});
+BIGDECIMAL_METHODS.set('equals(Ljava/lang/Object;)Z', (self, [other]) => {
+  const peer = other?.$peer ?? other;
+  if (!peer || peer.value === undefined) return 0;
+  return (bigDecimalNumber(self) === Number(peer.value) && bigDecimalScale(self) === Math.max(0, Number(peer.scale) | 0)) ? 1 : 0;
+});
+BIGDECIMAL_METHODS.set('hashCode()I', (self) => {
+  const unscaled = BigInt(Math.round(bigDecimalNumber(self) * Math.pow(10, bigDecimalScale(self))));
+  return Number(BigInt.asIntN(32, unscaled ^ BigInt(bigDecimalScale(self)))) | 0;
+});
+
+function bigIntegerValue(value) {
+  const peer = value?.$peer ?? value;
+  return peer?.value ?? 0n;
+}
+
+function formatBigDecimalText(value, scale) {
+  if (!Number.isFinite(value)) return String(value);
+  return Number(value).toFixed(Math.max(0, scale));
+}
+
+function roundValue(value, scale, mode) {
+  const factor = Math.pow(10, Math.max(0, scale));
+  const scaled = value * factor;
+  let rounded;
+  switch (mode) {
+    case 0: rounded = Math.ceil(scaled); break;
+    case 1: rounded = Math.floor(scaled); break;
+    case 2: rounded = Math.abs(scaled % 1) >= 0.5 ? scaled + Math.sign(scaled) : Math.trunc(scaled); break;
+    case 3: rounded = Math.trunc(scaled); break;
+    case 4: rounded = Math.round(scaled); break;
+    case 7: rounded = scaled < 0 ? Math.floor(scaled) : Math.ceil(scaled); break;
+    default: rounded = roundHalfEven(scaled); break;
+  }
+  return rounded / factor;
+}
+
+// ---- java.util.Locale 扩展 ----
+const LOCALE_METHODS = JAVA_CORE_CLASSES['Ljava/util/Locale;'].methods;
+const LOCALE_STATIC = JAVA_CORE_CLASSES['Ljava/util/Locale;'].staticMethods;
+LOCALE_METHODS.set('<init>(Ljava/lang/String;)V', (self, [language]) => {
+  self.language = String(jsString(language) || '').toLowerCase();
+  self.country = '';
+  self.variant = '';
+});
+LOCALE_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;)V', (self, [language, country]) => {
+  self.language = String(jsString(language) || '').toLowerCase();
+  self.country = String(jsString(country) || '').toUpperCase();
+  self.variant = '';
+});
+LOCALE_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V', (self, [language, country, variant]) => {
+  self.language = String(jsString(language) || '').toLowerCase();
+  self.country = String(jsString(country) || '').toUpperCase();
+  self.variant = String(jsString(variant) || '');
+});
+LOCALE_METHODS.set('getScript()Ljava/lang/String;', (self) => self.script || '');
+LOCALE_METHODS.set('getVariant()Ljava/lang/String;', (self) => self.variant || '');
+LOCALE_METHODS.set('hasExtensions()Z', (self) => (self.extensions && Object.keys(self.extensions).length ? 1 : 0));
+LOCALE_METHODS.set('stripExtensions()Ljava/util/Locale;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/util/Locale;');
+  object.$peer = { language: self.language || 'en', country: self.country || '', variant: self.variant || '' };
+  return object;
+});
+LOCALE_METHODS.set('getExtension(C)Ljava/lang/String;', (self, [key]) => self.extensions?.[String.fromCharCode(toInt(key))] ?? null);
+LOCALE_METHODS.set('getExtensionKeys()Ljava/util/Set;', (self, _args, vm) => makeSet(vm, Object.keys(self.extensions || {})));
+LOCALE_METHODS.set('getUnicodeLocaleAttributes()Ljava/util/Set;', (self, _args, vm) => makeSet(vm, self.unicodeAttributes || []));
+LOCALE_METHODS.set('getUnicodeLocaleType(Ljava/lang/String;)Ljava/lang/String;', (self, [key]) => self.unicodeTypes?.[jsString(key)] ?? null);
+LOCALE_METHODS.set('getUnicodeLocaleKeys()Ljava/util/Set;', (self, _args, vm) => makeSet(vm, Object.keys(self.unicodeTypes || {})));
+LOCALE_METHODS.set('toLanguageTag()Ljava/lang/String;', (self) => localeTag(self));
+LOCALE_METHODS.set('getISO3Language()Ljava/lang/String;', (self) => ISO3_LANGUAGES[self.language] || '');
+LOCALE_METHODS.set('getISO3Country()Ljava/lang/String;', (self) => ISO3_COUNTRIES[self.country] || '');
+LOCALE_METHODS.set('getDisplayLanguage()Ljava/lang/String;', (self) => displayNameOf(self.language, 'language', self.language || 'en'));
+LOCALE_METHODS.set('getDisplayLanguage(Ljava/util/Locale;)Ljava/lang/String;', (self, [display]) => displayNameOf(self.language, 'language', localePeer(display).language || 'en'));
+LOCALE_METHODS.set('getDisplayScript()Ljava/lang/String;', (self) => self.script || '');
+LOCALE_METHODS.set('getDisplayScript(Ljava/util/Locale;)Ljava/lang/String;', (self) => self.script || '');
+LOCALE_METHODS.set('getDisplayCountry()Ljava/lang/String;', (self) => displayNameOf(self.country, 'region', self.language || 'en'));
+LOCALE_METHODS.set('getDisplayCountry(Ljava/util/Locale;)Ljava/lang/String;', (self, [display]) => displayNameOf(self.country, 'region', localePeer(display).language || 'en'));
+LOCALE_METHODS.set('getDisplayVariant()Ljava/lang/String;', (self) => self.variant || '');
+LOCALE_METHODS.set('getDisplayVariant(Ljava/util/Locale;)Ljava/lang/String;', (self) => self.variant || '');
+LOCALE_METHODS.set('getDisplayName()Ljava/lang/String;', (self) => localeDisplayName(self, self.language || 'en'));
+LOCALE_METHODS.set('getDisplayName(Ljava/util/Locale;)Ljava/lang/String;', (self, [display]) => localeDisplayName(self, localePeer(display).language || 'en'));
+LOCALE_METHODS.set('getLanguage()Ljava/lang/String;', (self) => self.language || '');
+LOCALE_METHODS.set('getCountry()Ljava/lang/String;', (self) => self.country || '');
+LOCALE_METHODS.set('toString()Ljava/lang/String;', (self) => localeTag(self));
+LOCALE_METHODS.set('equals(Ljava/lang/Object;)Z', (self, [other]) => (localeTag(self) === localeTag(other) ? 1 : 0));
+LOCALE_METHODS.set('hashCode()I', (self) => hashCode(localeTag(self)));
+LOCALE_STATIC.set('getDefault(Ljava/util/Locale$Category;)Ljava/util/Locale;', (_self, _args, vm) => getDefaultLocale(vm));
+LOCALE_STATIC.set('setDefault(Ljava/util/Locale;)V', (_self, [locale], vm) => {
+  vm.defaultLocale = locale;
+  return undefined;
+});
+LOCALE_STATIC.set('setDefault(Ljava/util/Locale$Category;Ljava/util/Locale;)V', (_self, [_category, locale], vm) => {
+  vm.defaultLocale = locale;
+  return undefined;
+});
+LOCALE_STATIC.set('getAvailableLocales()[Ljava/util/Locale;', (_self, _args, vm) => {
+  const tags = typeof Intl !== 'undefined' && Intl.supportedValuesOf ? Intl.supportedValuesOf('language') : ['en', 'zh', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'ar', 'pt'];
+  return vm.newArray('[Ljava/util/Locale;', tags.length, tags.map((tag) => localeObject(vm, tag)));
+});
+LOCALE_STATIC.set('getISOCountries()[Ljava/lang/String;', (_self, _args, vm) => vm.newArray('[Ljava/lang/String;', ISO_COUNTRY_CODES.length, ISO_COUNTRY_CODES.slice()));
+LOCALE_STATIC.set('getISOLanguages()[Ljava/lang/String;', (_self, _args, vm) => vm.newArray('[Ljava/lang/String;', ISO_LANGUAGE_CODES.length, ISO_LANGUAGE_CODES.slice()));
+LOCALE_STATIC.set('filter(Ljava/util/List;Ljava/util/Collection;)Ljava/util/List;', (_self, [tags, priorities], vm) =>
+  localeFilterList(vm, tags, priorities, false));
+LOCALE_STATIC.set('filter(Ljava/util/List;Ljava/util/Collection;Ljava/util/Locale$FilteringMode;)Ljava/util/List;', (_self, [tags, priorities, mode], vm) =>
+  localeFilterList(vm, tags, priorities, Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 1) === 1));
+LOCALE_STATIC.set('filterTags(Ljava/util/List;Ljava/util/Collection;)Ljava/util/List;', (_self, [tags, priorities], vm) =>
+  localeFilterList(vm, tags, priorities, false));
+LOCALE_STATIC.set('filterTags(Ljava/util/List;Ljava/util/Collection;Ljava/util/Locale$FilteringMode;)Ljava/util/List;', (_self, [tags, priorities, mode], vm) =>
+  localeFilterList(vm, tags, priorities, Number(mode?.$peer?.ordinal ?? mode?.ordinal ?? 1) === 1));
+LOCALE_STATIC.set('lookup(Ljava/util/List;Ljava/util/Collection;)Ljava/util/Locale;', (_self, [tags, priorities], vm) =>
+  localeLookup(vm, tags, priorities, false));
+LOCALE_STATIC.set('lookupTag(Ljava/util/List;Ljava/util/Collection;)Ljava/lang/String;', (_self, [tags, priorities], vm) =>
+  localeLookup(vm, tags, priorities, true));
+
+function localePeer(self) {
+  const peer = self?.$peer ?? self ?? {};
+  return {
+    language: peer.language ?? '',
+    country: peer.country ?? '',
+    variant: peer.variant ?? '',
+    script: peer.script ?? '',
+    extensions: peer.extensions ?? null,
+    unicodeAttributes: peer.unicodeAttributes ?? null,
+    unicodeTypes: peer.unicodeTypes ?? null,
+  };
+}
+
+function localeObject(vm, tag) {
+  const raw = String(tag ?? '').replace(/_/g, '-');
+  const parts = raw.split('-');
+  const object = vm.allocateRawObject('Ljava/util/Locale;');
+  object.$peer = {
+    language: (parts[0] || 'en').toLowerCase(),
+    country: (parts[1] || '').toUpperCase(),
+    variant: parts.slice(2).join('_'),
+  };
+  return object;
+}
+
+function localeTag(self) {
+  const peer = localePeer(self);
+  let tag = peer.language || 'en';
+  if (peer.script) tag += `-${peer.script}`;
+  if (peer.country) tag += `-${peer.country}`;
+  if (peer.variant) tag += `-${peer.variant}`;
+  return tag;
+}
+
+function displayNameOf(code, type, displayLanguage) {
+  if (!code) return '';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+      const names = new Intl.DisplayNames([displayLanguage || 'en'], { type });
+      const label = names.of(code);
+      if (label && label !== code) return label;
+    }
+  } catch (_error) {
+    // 浏览器不支持该语言标签时退回原始代码，等价于 Java 的 fallback 行为。
+  }
+  return code;
+}
+
+function localeDisplayName(self, displayLanguage) {
+  const peer = localePeer(self);
+  let name = displayNameOf(peer.language, 'language', displayLanguage);
+  if (peer.country) name += ` (${displayNameOf(peer.country, 'region', displayLanguage)})`;
+  if (peer.variant) name += `, ${peer.variant}`;
+  return name;
+}
+
+function localeFilterList(vm, tags, priorities, matchAll) {
+  const candidates = arrayValues(tags).map((tag) => String(jsString(tag)).replace(/_/g, '-').toLowerCase());
+  const preferred = arrayValues(priorities).map((tag) => String(jsString(tag)).replace(/_/g, '-').toLowerCase());
+  const result = [];
+  for (const preferredTag of preferred) {
+    for (const candidate of candidates) {
+      const matches = matchAll ? candidate.split('-')[0] === preferredTag.split('-')[0] : true;
+      if (matches && !result.includes(candidate)) result.push(candidate);
+    }
+  }
+  return makeList(vm, result);
+}
+
+function localeLookup(vm, tags, priorities, asString) {
+  const candidates = arrayValues(tags).map((tag) => String(jsString(tag)).replace(/_/g, '-'));
+  const preferred = arrayValues(priorities).map((tag) => String(jsString(tag)).replace(/_/g, '-'));
+  for (const want of preferred) {
+    const lowered = want.toLowerCase();
+    const scored = candidates
+      .map((candidate) => ({ candidate, score: localeMatchScore(candidate.toLowerCase(), lowered) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length) return asString ? scored[0].candidate : localeObject(vm, scored[0].candidate);
+  }
+  return asString ? '' : localeObject(vm, 'en');
+}
+
+function localeMatchScore(candidate, wanted) {
+  if (candidate === wanted) return 3;
+  if (candidate.startsWith(`${wanted}-`) || wanted.startsWith(`${candidate}-`)) return 2;
+  if (candidate.split('-')[0] === wanted.split('-')[0]) return 1;
+  return 0;
+}
+
+const ISO3_LANGUAGES = {
+  en: 'eng', zh: 'zho', ja: 'jpn', ko: 'kor', fr: 'fra', de: 'deu', es: 'spa', ru: 'rus',
+  ar: 'ara', pt: 'por', it: 'ita', nl: 'nld', pl: 'pol', tr: 'tur', th: 'tha', vi: 'vie',
+  id: 'ind', hi: 'hin', he: 'heb', el: 'ell', sv: 'swe', da: 'dan', fi: 'fin', no: 'nor',
+  cs: 'ces', hu: 'hun', uk: 'ukr', ro: 'ron', ms: 'msa', tl: 'tgl',
+};
+
+const ISO3_COUNTRIES = {
+  US: 'USA', CN: 'CHN', JP: 'JPN', KR: 'KOR', GB: 'GBR', DE: 'DEU', FR: 'FRA', IT: 'ITA',
+  ES: 'ESP', RU: 'RUS', CA: 'CAN', AU: 'AUS', IN: 'IND', BR: 'BRA', MX: 'MEX', NL: 'NLD',
+  SE: 'SWE', CH: 'CHE', SG: 'SGP', HK: 'HKG', TW: 'TWN', TH: 'THA', VN: 'VNM', ID: 'IDN',
+  MY: 'MYS', PH: 'PHL', TR: 'TUR', PL: 'POL', UA: 'UKR', SA: 'SAU', AE: 'ARE', IL: 'ISR',
+};
+
+const ISO_COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ');
+
+const ISO_LANGUAGE_CODES = 'aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zh zu'.split(' ');
+
+// ---- java.lang.Thread 扩展 ----
+const THREAD_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Thread;'].methods;
+const THREAD_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Thread;'].staticMethods;
+for (const [key, runnableIndex, nameIndex] of [
+  ['<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;)V', 1, -1],
+  ['<init>(Ljava/lang/ThreadGroup;Ljava/lang/String;)V', -1, 1],
+  ['<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;)V', 1, 2],
+  ['<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)V', 1, 2],
+]) {
+  THREAD_METHODS.set(key, (self, args) => {
+    self.threadGroup = args[0] ?? null;
+    if (runnableIndex >= 0) self.runnable = args[runnableIndex] ?? null;
+    if (nameIndex >= 0) self.threadName = jsString(args[nameIndex]);
+    if (args.length > 3) self.stackSize = toLong(args[3]);
+  });
+}
+THREAD_STATIC.set('yield()V', () => undefined);
+THREAD_STATIC.set('sleep(J)V', (_self, [duration], vm) => performThreadSleep(vm, Number(toLong(duration))));
+THREAD_STATIC.set('sleep(JI)V', (_self, [duration], vm) => performThreadSleep(vm, Number(toLong(duration))));
+THREAD_STATIC.set('interrupted()Z', (_self, _args, vm) => {
+  const current = vm.currentThreadObject?.();
+  const peer = current?.$peer ?? current;
+  if (!peer) return 0;
+  const flag = peer.interrupted === true;
+  peer.interrupted = false;
+  return flag ? 1 : 0;
+});
+THREAD_STATIC.set('activeCount()I', () => 1);
+THREAD_STATIC.set('enumerate([Ljava/lang/Thread;)I', (_self, [target], vm) => {
+  const data = Array.isArray(target?.$data) ? target.$data : [];
+  if (data.length) data[0] = vm.currentThreadObject?.() ?? null;
+  return data.length ? 1 : 0;
+});
+THREAD_STATIC.set('dumpStack()V', () => undefined);
+THREAD_STATIC.set('holdsLock(Ljava/lang/Object;)Z', (_self, [object]) => (object?.$monitorOwner ? 1 : 0));
+THREAD_STATIC.set('getAllStackTraces()Ljava/util/Map;', (_self, _args, vm) => {
+  const map = makeMap(vm);
+  const current = vm.currentThreadObject?.();
+  if (current) {
+    const frames = (vm.methodStack || []).slice().reverse();
+    const elements = vm.newArray('[Ljava/lang/StackTraceElement;', frames.length);
+    frames.forEach((full, index) => {
+      const element = vm.allocateRawObject('Ljava/lang/StackTraceElement;');
+      const dot = full.lastIndexOf('.');
+      element.$peer = {
+        className: dot < 0 ? full : full.slice(0, dot),
+        methodName: dot < 0 ? '' : full.slice(dot + 1),
+        fileName: null,
+        lineNumber: -1,
+      };
+      elements.$data[index] = element;
+    });
+    map.$peer.map.set(current, elements);
+  }
+  return map;
+});
+THREAD_METHODS.set('stop()V', (self) => {
+  self.stopped = true;
+});
+THREAD_METHODS.set('stop(Ljava/lang/Throwable;)V', (self) => {
+  self.stopped = true;
+});
+THREAD_METHODS.set('interrupt()V', (self) => {
+  self.interrupted = true;
+});
+THREAD_METHODS.set('isInterrupted()Z', (self) => (self.interrupted ? 1 : 0));
+THREAD_METHODS.set('destroy()V', (self) => {
+  self.stopped = true;
+});
+THREAD_METHODS.set('suspend()V', (self) => {
+  self.suspended = true;
+});
+THREAD_METHODS.set('resume()V', (self) => {
+  self.suspended = false;
+});
+THREAD_METHODS.set('setPriority(I)V', (self, [priority]) => {
+  self.priority = Math.max(1, Math.min(10, toInt(priority)));
+});
+THREAD_METHODS.set('getPriority()I', (self) => (self.priority || 5));
+THREAD_METHODS.set('getThreadGroup()Ljava/lang/ThreadGroup;', (self, _args, vm) => {
+  if (!self.threadGroup) {
+    const group = vm.allocateRawObject('Ljava/lang/ThreadGroup;');
+    group.$peer = { name: 'main' };
+    self.threadGroup = group;
+  }
+  return self.threadGroup;
+});
+THREAD_METHODS.set('countStackFrames()I', (self, _args, vm) => (self === (vm.currentThreadObject?.()?.$peer ?? null) ? (vm.methodStack?.length || 0) : 0));
+THREAD_METHODS.set('join(J)V', () => undefined);
+THREAD_METHODS.set('join(JI)V', () => undefined);
+THREAD_METHODS.set('setDaemon(Z)V', (self, [daemon]) => {
+  self.daemon = !!daemon;
+});
+THREAD_METHODS.set('isDaemon()Z', (self) => (self.daemon ? 1 : 0));
+THREAD_METHODS.set('checkAccess()V', () => undefined);
+THREAD_METHODS.set('getContextClassLoader()Ljava/lang/ClassLoader;', (self) => self.contextClassLoader ?? null);
+THREAD_METHODS.set('setContextClassLoader(Ljava/lang/ClassLoader;)V', (self, [loader]) => {
+  self.contextClassLoader = loader ?? null;
+});
+THREAD_METHODS.set('getId()J', (self, _args, vm) => {
+  if (self.threadId === undefined) self.threadId = BigInt(++THREAD_ID_SEQUENCE);
+  return self.threadId;
+});
+THREAD_METHODS.set('getState()Ljava/lang/Thread$State;', (self) => threadStateObject(self));
+THREAD_METHODS.set('getUncaughtExceptionHandler()Ljava/lang/Thread$UncaughtExceptionHandler;', (self) => self.uncaughtExceptionHandler ?? null);
+THREAD_METHODS.set('setUncaughtExceptionHandler(Ljava/lang/Thread$UncaughtExceptionHandler;)V', (self, [handler]) => {
+  self.uncaughtExceptionHandler = handler ?? null;
+});
+
+let THREAD_ID_SEQUENCE = 0;
+
+function performThreadSleep(vm, milliseconds) {
+  const duration = Number(milliseconds) || 0;
+  if (duration <= 0) return undefined;
+  const canBlock = typeof SharedArrayBuffer !== 'undefined' && typeof Atomics !== 'undefined'
+    && typeof window === 'undefined';
+  if (canBlock) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(duration, 60000));
+    return undefined;
+  }
+  // 浏览器主线程不能阻塞：推进模拟器虚拟时钟，让依赖 sleep 的时间计算仍然前进。
+  if (vm) vm.clockOffset = (vm.clockOffset || 0) + duration;
+  return undefined;
+}
+
+function threadStateObject(thread) {
+  const state = thread?.stopped ? 'TERMINATED' : (thread?.suspended ? 'WAITING' : 'RUNNABLE');
+  const object = { $peer: { name: state, ordinal: THREAD_STATES.indexOf(state) } };
+  return object;
+}
+
+const THREAD_STATES = ['NEW', 'RUNNABLE', 'BLOCKED', 'WAITING', 'TIMED_WAITING', 'TERMINATED'];
+
+function exactInt(vm, value) {
+  if (!Number.isFinite(value) || value < -2147483648 || value > 2147483647) {
+    vm?.throwException?.('Ljava/lang/ArithmeticException;', 'integer overflow');
+    return 0;
+  }
+  return value | 0;
+}
+
+function roundHalfEven(value) {
+  if (!Number.isFinite(value)) return value;
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+  if (fraction < 0.5) return floor;
+  if (fraction > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
+function ieeeRemainder(left, right) {
+  if (!Number.isFinite(left) || !Number.isFinite(right) || right === 0) return NaN;
+  return left - roundHalfEven(left / right) * right;
+}
+
+function floorDivLong(left, right) {
+  const quotient = left / right;
+  return (left % right !== 0n && ((left < 0n) !== (right < 0n))) ? quotient - 1n : quotient;
+}
+
+function floorModLong(left, right) {
+  const remainder = left % right;
+  return (remainder !== 0n && ((remainder < 0n) !== (right < 0n))) ? remainder + right : remainder;
+}
+
+const MATH_FLOAT_BITS = new Float32Array(1);
+const MATH_FLOAT_INT = new Int32Array(MATH_FLOAT_BITS.buffer);
+const MATH_DOUBLE_BITS = new Float64Array(1);
+
+function nextAfterNumber(start, direction, single) {
+  if (Number.isNaN(start) || Number.isNaN(direction)) return NaN;
+  if (start === direction) return direction;
+  const minimum = single ? 1.401298464324817e-45 : Number.MIN_VALUE;
+  if (start === 0) return direction > 0 ? minimum : -minimum;
+  if (single) {
+    MATH_FLOAT_BITS[0] = start;
+    let bits = MATH_FLOAT_INT[0];
+    bits += ((direction > start) === (start > 0)) ? 1 : -1;
+    MATH_FLOAT_INT[0] = bits;
+    return MATH_FLOAT_BITS[0];
+  }
+  MATH_DOUBLE_BITS[0] = start;
+  const view = new DataView(MATH_DOUBLE_BITS.buffer);
+  let bits = view.getBigInt64(0, true);
+  bits += ((direction > start) === (start > 0)) ? 1n : -1n;
+  view.setBigInt64(0, bits, true);
+  return MATH_DOUBLE_BITS[0];
+}
+
+function ulpDouble(value) {
+  if (Number.isNaN(value)) return NaN;
+  const magnitude = Math.abs(value);
+  if (!Number.isFinite(magnitude)) return Infinity;
+  return nextAfterNumber(magnitude, Infinity, false) - magnitude;
+}
+
+function ulpFloat(value) {
+  if (Number.isNaN(value)) return NaN;
+  const magnitude = Math.abs(value);
+  if (!Number.isFinite(magnitude)) return Infinity;
+  return nextAfterNumber(magnitude, Infinity, true) - magnitude;
+}
+
+function exponentOf(value, mantissaBits, exponentBits) {
+  if (Number.isNaN(value) || !Number.isFinite(value)) return Math.pow(2, exponentBits - 1) + 1;
+  if (mantissaBits === 23) {
+    MATH_FLOAT_BITS[0] = value;
+    const raw = (MATH_FLOAT_INT[0] >>> 23) & 0xff;
+    return raw === 0 ? -126 : raw - 127;
+  }
+  MATH_DOUBLE_BITS[0] = value;
+  const view = new DataView(MATH_DOUBLE_BITS.buffer);
+  const raw = Number((view.getBigInt64(0, true) >> 52n) & 0x7ffn);
+  return raw === 0 ? -1022 : raw - 1023;
+}
+
+function charMatches(code, pattern) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return 0;
+  try {
+    return pattern.test(String.fromCodePoint(code)) ? 1 : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+function charTransform(code, transform) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return code;
+  const text = transform(String.fromCodePoint(code));
+  return text.length ? text.codePointAt(0) : code;
+}
+
+function charArrayData(chars) {
+  return Array.isArray(chars?.$data) ? chars.$data : [];
+}
+
+function charArrayLength(chars) {
+  return charArrayData(chars).length;
+}
+
+function charArrayText(chars, from, to) {
+  return charArrayData(chars)
+    .slice(from, to)
+    .map((value) => String.fromCharCode(toInt(value) & 0xffff))
+    .join('');
+}
+
+function isHighSurrogateCode(code) {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogateCode(code) {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function codePointAtText(text, index) {
+  if (index < 0 || index >= text.length) return 0;
+  return text.codePointAt(index) ?? 0;
+}
+
+function codePointAtChars(chars, index, limit) {
+  const data = charArrayData(chars);
+  const at = index;
+  const end = Math.min(limit, data.length);
+  if (at < 0 || at >= end) return 0;
+  const high = toInt(data[at]) & 0xffff;
+  if (isHighSurrogateCode(high) && at + 1 < end) {
+    const low = toInt(data[at + 1]) & 0xffff;
+    if (isLowSurrogateCode(low)) return ((high - 0xd800) << 10) + (low - 0xdc00) + 0x10000;
+  }
+  return high;
+}
+
+function codePointBeforeText(text, index) {
+  if (index <= 0 || index > text.length) return 0;
+  const low = text.charCodeAt(index - 1);
+  if (isLowSurrogateCode(low) && index >= 2) {
+    const high = text.charCodeAt(index - 2);
+    if (isHighSurrogateCode(high)) return ((high - 0xd800) << 10) + (low - 0xdc00) + 0x10000;
+  }
+  return low;
+}
+
+function codePointBeforeChars(chars, index, start = 0) {
+  const data = charArrayData(chars);
+  if (index <= start || index > data.length) return 0;
+  const low = toInt(data[index - 1]) & 0xffff;
+  if (isLowSurrogateCode(low) && index - 2 >= start) {
+    const high = toInt(data[index - 2]) & 0xffff;
+    if (isHighSurrogateCode(high)) return ((high - 0xd800) << 10) + (low - 0xdc00) + 0x10000;
+  }
+  return low;
+}
+
+function countCodePointsText(text, begin, end) {
+  let count = 0;
+  for (let index = begin; index < end;) {
+    const code = text.codePointAt(index) ?? 0;
+    index += code > 0xffff ? 2 : 1;
+    count += 1;
+  }
+  return count;
+}
+
+function countCodePointsChars(chars, begin, end) {
+  const data = charArrayData(chars);
+  let count = 0;
+  for (let index = begin; index < end && index < data.length;) {
+    const code = toInt(data[index]) & 0xffff;
+    index += isHighSurrogateCode(code) && index + 1 < end ? 2 : 1;
+    count += 1;
+  }
+  return count;
+}
+
+function offsetByCodePoint(text, index, offset) {
+  let cursor = index;
+  if (offset >= 0) {
+    for (let step = 0; step < offset && cursor < text.length; step++) {
+      const code = text.codePointAt(cursor) ?? 0;
+      cursor += code > 0xffff ? 2 : 1;
+    }
+  } else {
+    for (let step = 0; step < -offset && cursor > 0; step++) {
+      cursor -= 1;
+      if (cursor > 0 && isLowSurrogateCode(text.charCodeAt(cursor))) cursor -= 1;
+    }
+  }
+  return cursor;
+}
+
+function isDefinedCodePoint(code) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return false;
+  if (code >= 0xd800 && code <= 0xdfff) return false;
+  if (code >= 0xfdd0 && code <= 0xfdef) return false;
+  return (code & 0xfffe) !== 0xfffe;
+}
+
+function isIdeographicCodePoint(code) {
+  return (code >= 0x3006 && code <= 0x3007)
+    || (code >= 0x3021 && code <= 0x3029)
+    || (code >= 0x3038 && code <= 0x303a)
+    || (code >= 0x3400 && code <= 0x4dbf)
+    || (code >= 0x4e00 && code <= 0x9fff)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0x20000 && code <= 0x2fa1f);
+}
+
+function isJavaIdentifierPartCodePoint(code) {
+  if (charMatches(code, /[\p{L}\p{Nl}$_]/u)) return true;
+  return !!charMatches(code, /[\p{Nd}\p{Mn}\p{Mc}\p{Pc}\p{Cf}]/u) || isIdentifierIgnorableCodePoint(code);
+}
+
+function isUnicodeIdentifierPartCodePoint(code) {
+  if (charMatches(code, /[\p{L}\p{Nl}]/u)) return true;
+  return !!charMatches(code, /[\p{Nd}\p{Mn}\p{Mc}\p{Pc}\p{Cf}]/u) || isIdentifierIgnorableCodePoint(code);
+}
+
+function isIdentifierIgnorableCodePoint(code) {
+  if ((code >= 0 && code <= 8) || (code >= 0x0e && code <= 0x1b) || (code >= 0x7f && code <= 0x9f)) return true;
+  return !!charMatches(code, /\p{Cf}/u);
+}
+
+function isWhitespaceCodePoint(code) {
+  return code === 0x20 || (code >= 0x09 && code <= 0x0d) || (code >= 0x1c && code <= 0x1f);
+}
+
+function isIsoControl(code) {
+  return (code >= 0 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f);
+}
+
+function digitValueOf(code, radix) {
+  if (radix < 2 || radix > 36 || !Number.isFinite(code) || code < 0) return -1;
+  let value = -1;
+  if (code >= 0x30 && code <= 0x39) value = code - 0x30;
+  else if (code >= 0x61 && code <= 0x7a) value = code - 0x61 + 10;
+  else if (code >= 0x41 && code <= 0x5a) value = code - 0x41 + 10;
+  else if (code >= 0xff10 && code <= 0xff19) value = code - 0xff10;
+  else if (code >= 0xff21 && code <= 0xff3a) value = code - 0xff21 + 10;
+  else if (code >= 0xff41 && code <= 0xff5a) value = code - 0xff41 + 10;
+  return value >= 0 && value < radix ? value : -1;
+}
+
+function numericValueOf(code) {
+  if (code >= 0x30 && code <= 0x39) return code - 0x30;
+  if (code >= 0x41 && code <= 0x5a) return code - 0x41 + 10;
+  if (code >= 0x61 && code <= 0x7a) return code - 0x61 + 10;
+  if (code >= 0xff10 && code <= 0xff19) return code - 0xff10;
+  if (code === 0x00bc) return -2;
+  if (code === 0x00bd) return -2;
+  if (code === 0x00be) return -2;
+  return -1;
+}
+
+function charTypeOf(code) {
+  const categories = [
+    [1, /\p{Lu}/u], [2, /\p{Ll}/u], [3, /\p{Lt}/u], [4, /\p{Lm}/u], [5, /\p{Lo}/u],
+    [6, /\p{Mn}/u], [7, /\p{Me}/u], [8, /\p{Mc}/u], [9, /\p{Nd}/u], [10, /\p{Nl}/u],
+    [11, /\p{No}/u], [12, /\p{Zs}/u], [13, /\p{Zl}/u], [14, /\p{Zp}/u], [15, /\p{Cc}/u],
+    [16, /\p{Cf}/u], [18, /\p{Co}/u], [19, /\p{Cs}/u], [20, /\p{Pd}/u], [21, /\p{Ps}/u],
+    [22, /\p{Pe}/u], [23, /\p{Pc}/u], [24, /\p{Po}/u], [25, /\p{Sm}/u], [26, /\p{Sc}/u],
+    [27, /\p{Sk}/u], [28, /\p{So}/u],
+  ];
+  for (const [value, pattern] of categories) {
+    if (charMatches(code, pattern)) return value;
+  }
+  return 0;
+}
+
+function directionalityOf(code) {
+  if ((code >= 0x0590 && code <= 0x05ff)) return 1;
+  if ((code >= 0x0600 && code <= 0x07bf) || (code >= 0x08a0 && code <= 0x08ff)) return 1;
+  if (code >= 0xfb1d && code <= 0xfdff) return 1;
+  if (code >= 0xfe70 && code <= 0xfeff) return 2;
+  return 0;
+}
+
+function isMirroredCodePoint(code) {
+  return (code >= 0x28 && code <= 0x29)
+    || (code >= 0x3c && code <= 0x3e)
+    || (code >= 0x5b && code <= 0x5d)
+    || code === 0x7b || code === 0x7d
+    || (code >= 0xab && code <= 0xab)
+    || (code >= 0xbb && code <= 0xbb)
+    || (code >= 0x2018 && code <= 0x201f)
+    || (code >= 0x2039 && code <= 0x203a)
+    || (code >= 0x2045 && code <= 0x2046)
+    || (code >= 0x207d && code <= 0x207e)
+    || (code >= 0x208d && code <= 0x208e)
+    || (code >= 0x2200 && code <= 0x22ff);
+}
+
+const CHARACTER_ASCII_NAMES = {
+  0x09: 'CHARACTER TABULATION',
+  0x0a: 'LINE FEED (LF)',
+  0x0d: 'CARRIAGE RETURN (CR)',
+  0x20: 'SPACE',
+  0x21: 'EXCLAMATION MARK',
+  0x22: 'QUOTATION MARK',
+  0x23: 'NUMBER SIGN',
+  0x24: 'DOLLAR SIGN',
+  0x25: 'PERCENT SIGN',
+  0x26: 'AMPERSAND',
+  0x27: 'APOSTROPHE',
+  0x28: 'LEFT PARENTHESIS',
+  0x29: 'RIGHT PARENTHESIS',
+  0x2a: 'ASTERISK',
+  0x2b: 'PLUS SIGN',
+  0x2c: 'COMMA',
+  0x2d: 'HYPHEN-MINUS',
+  0x2e: 'FULL STOP',
+  0x2f: 'SOLIDUS',
+  0x3a: 'COLON',
+  0x3b: 'SEMICOLON',
+  0x3c: 'LESS-THAN SIGN',
+  0x3d: 'EQUALS SIGN',
+  0x3e: 'GREATER-THAN SIGN',
+  0x3f: 'QUESTION MARK',
+  0x40: 'COMMERCIAL AT',
+  0x5b: 'LEFT SQUARE BRACKET',
+  0x5c: 'REVERSE SOLIDUS',
+  0x5d: 'RIGHT SQUARE BRACKET',
+  0x5e: 'CIRCUMFLEX ACCENT',
+  0x5f: 'LOW LINE',
+  0x60: 'GRAVE ACCENT',
+  0x7b: 'LEFT CURLY BRACKET',
+  0x7c: 'VERTICAL LINE',
+  0x7d: 'RIGHT CURLY BRACKET',
+  0x7e: 'TILDE',
+};
+
+const CHARACTER_DIGIT_NAMES = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
+
+function characterName(code) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return null;
+  if (code >= 0x30 && code <= 0x39) return `DIGIT ${CHARACTER_DIGIT_NAMES[code - 0x30]}`;
+  if (code >= 0x41 && code <= 0x5a) return `LATIN CAPITAL LETTER ${String.fromCharCode(code)}`;
+  if (code >= 0x61 && code <= 0x7a) return `LATIN SMALL LETTER ${String.fromCharCode(code).toUpperCase()}`;
+  return CHARACTER_ASCII_NAMES[code] ?? null;
+}
