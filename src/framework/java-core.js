@@ -9580,3 +9580,572 @@ DATE_STATIC.set('from(Ljava/time/Instant;)Ljava/util/Date;', (_self, [instant], 
   object.$peer = { time: Number(instant?.$peer?.epochMilli ?? 0) };
   return object;
 });
+
+// ---- java.io.PrintStream 真实字节输出 ----
+function printStreamTarget(self) {
+  return self?.$target ?? null;
+}
+function emitPrintBytes(self, bytes) {
+  const target = printStreamTarget(self);
+  const peer = target?.$peer ?? target;
+  if (peer && Array.isArray(peer.$buffer)) {
+    for (const byte of bytes) peer.$buffer.push(byte & 0xff);
+    return true;
+  }
+  if (peer && peer.$targetPath) {
+    VIRTUAL_FS.write(peer.$targetPath, Uint8Array.from(bytes));
+    return true;
+  }
+  return false;
+}
+function printStreamEmit(self, text, vm, newline = false) {
+  const payload = String(text) + (newline ? '\n' : '');
+  const bytes = Array.from(new TextEncoder().encode(payload));
+  if (emitPrintBytes(self, bytes)) return;
+  vm.log('info', 'System.out', payload.replace(/\n$/, ''));
+}
+function printStreamForPath(vm, path) {
+  const stream = vm.allocateRawObject('Ljava/io/OutputStream;');
+  stream.$peer = { $targetPath: VIRTUAL_FS.normalize(path), $buffer: [] };
+  return stream;
+}
+function printValueText(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : String(value);
+  if (value && typeof value === 'object' && value.$type === '[C' && Array.isArray(value.$data)) {
+    return value.$data.map((c) => String.fromCharCode(c & 0xffff)).join('');
+  }
+  if (isJavaArray(value) && value.$type === '[C') return value.$data.map((c) => String.fromCharCode(c & 0xffff)).join('');
+  return jsString(value);
+}
+const PRINT_METHODS = JAVA_CORE_CLASSES['Ljava/io/PrintStream;'].methods;
+PRINT_METHODS.set('<init>(Ljava/io/OutputStream;)V', (self, [stream]) => { self.$target = stream ?? null; self.autoFlush = false; });
+PRINT_METHODS.set('<init>(Ljava/io/OutputStream;Z)V', (self, [stream, autoFlush]) => { self.$target = stream ?? null; self.autoFlush = !!autoFlush; });
+PRINT_METHODS.set('<init>(Ljava/io/OutputStream;ZLjava/lang/String;)V', (self, [stream, autoFlush, encoding]) => {
+  self.$target = stream ?? null;
+  self.autoFlush = !!autoFlush;
+  self.encoding = jsString(encoding);
+});
+PRINT_METHODS.set('<init>(Ljava/lang/String;)V', (self, [path], vm) => { self.$target = printStreamForPath(vm, jsString(path)); });
+PRINT_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;)V', (self, [path, encoding], vm) => {
+  self.$target = printStreamForPath(vm, jsString(path));
+  self.encoding = jsString(encoding);
+});
+PRINT_METHODS.set('<init>(Ljava/io/File;)V', (self, [file], vm) => {
+  self.$target = printStreamForPath(vm, file?.path ?? file?.$peer?.path ?? '/tmp/printstream.txt');
+});
+PRINT_METHODS.set('<init>(Ljava/io/File;Ljava/lang/String;)V', (self, [file, encoding], vm) => {
+  self.$target = printStreamForPath(vm, file?.path ?? file?.$peer?.path ?? '/tmp/printstream.txt');
+  self.encoding = jsString(encoding);
+});
+PRINT_METHODS.set('flush()V', (self) => {
+  const target = printStreamTarget(self);
+  const peer = target?.$peer ?? target;
+  if (peer) flushOutputStreamSink(peer);
+});
+PRINT_METHODS.set('close()V', (self) => {
+  const target = printStreamTarget(self);
+  const peer = target?.$peer ?? target;
+  if (peer) flushOutputStreamSink(peer);
+  self.closed = true;
+});
+PRINT_METHODS.set('checkError()Z', (self) => (self.errorFlag ? 1 : 0));
+PRINT_METHODS.set('setError()V', (self) => { self.errorFlag = true; });
+PRINT_METHODS.set('clearError()V', (self) => { self.errorFlag = false; });
+PRINT_METHODS.set('write(I)V', (self, [value], vm) => { printStreamEmit(self, String.fromCharCode(toInt(value) & 0xff), vm); });
+PRINT_METHODS.set('write([BII)V', (self, [bytes, offset, length]) => {
+  const data = bytes?.$data || [];
+  const start = toInt(offset);
+  const count = toInt(length);
+  const target = printStreamTarget(self);
+  const peer = target?.$peer ?? target;
+  if (peer && Array.isArray(peer.$buffer)) {
+    for (let index = start; index < start + count && index < data.length; index++) peer.$buffer.push(data[index] & 0xff);
+  }
+});
+PRINT_METHODS.set('print(Z)V', (self, [value], vm) => printStreamEmit(self, value ? 'true' : 'false', vm));
+PRINT_METHODS.set('print(C)V', (self, [value], vm) => printStreamEmit(self, String.fromCharCode(toInt(value)), vm));
+PRINT_METHODS.set('print(J)V', (self, [value], vm) => printStreamEmit(self, String(toLong(value)), vm));
+PRINT_METHODS.set('print(F)V', (self, [value], vm) => printStreamEmit(self, String(Number(value)), vm));
+PRINT_METHODS.set('print(D)V', (self, [value], vm) => printStreamEmit(self, String(Number(value)), vm));
+PRINT_METHODS.set('print([C)V', (self, [value], vm) => printStreamEmit(self, printValueText(value), vm));
+PRINT_METHODS.set('println(C)V', (self, [value], vm) => printStreamEmit(self, String.fromCharCode(toInt(value)), vm, true));
+PRINT_METHODS.set('println([C)V', (self, [value], vm) => printStreamEmit(self, printValueText(value), vm, true));
+PRINT_METHODS.set('printf(Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintStream;', (self, [format, args], vm) => {
+  printStreamEmit(self, formatJavaString(format, args, vm), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('printf(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintStream;', (self, [_locale, format, args], vm) => {
+  printStreamEmit(self, formatJavaString(format, args, vm), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintStream;', (self, [format, args], vm) => {
+  printStreamEmit(self, formatJavaString(format, args, vm), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('format(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/PrintStream;', (self, [_locale, format, args], vm) => {
+  printStreamEmit(self, formatJavaString(format, args, vm), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('append(Ljava/lang/CharSequence;)Ljava/io/PrintStream;', (self, [text], vm) => {
+  printStreamEmit(self, jsString(text), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('append(Ljava/lang/CharSequence;II)Ljava/io/PrintStream;', (self, [text, start, end], vm) => {
+  printStreamEmit(self, jsString(text).slice(toInt(start), toInt(end)), vm);
+  return self.$object ?? self;
+});
+PRINT_METHODS.set('append(C)Ljava/io/PrintStream;', (self, [value], vm) => {
+  printStreamEmit(self, String.fromCharCode(toInt(value)), vm);
+  return self.$object ?? self;
+});
+
+// ---- java.net.URLConnection / FileNameMap 补全 ----
+const MIME_BY_EXTENSION = {
+  txt: 'text/plain', html: 'text/html', htm: 'text/html', css: 'text/css', js: 'application/javascript',
+  json: 'application/json', xml: 'application/xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', pdf: 'application/pdf',
+  zip: 'application/zip', gz: 'application/gzip', mp3: 'audio/mpeg', mp4: 'video/mp4', webm: 'video/webm',
+  wav: 'audio/wav', apk: 'application/vnd.android.package-archive', ttf: 'font/ttf', otf: 'font/otf',
+};
+JAVA_CORE_CLASSES['Ljava/net/FileNameMap;'] = nativeDef('Ljava/net/FileNameMap;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'getContentTypeFor(Ljava/lang/String;)Ljava/lang/String;': (self, [name]) => {
+      const table = self.map || MIME_BY_EXTENSION;
+      const key = String(jsString(name)).split('.').pop().toLowerCase();
+      return table[key] ?? null;
+    },
+  },
+});
+let DEFAULT_FILE_NAME_MAP = null;
+function defaultFileNameMap(vm) {
+  if (!DEFAULT_FILE_NAME_MAP) {
+    DEFAULT_FILE_NAME_MAP = vm.allocateRawObject('Ljava/net/FileNameMap;');
+    DEFAULT_FILE_NAME_MAP.$peer = { map: MIME_BY_EXTENSION };
+  }
+  return DEFAULT_FILE_NAME_MAP;
+}
+function mimeTypeForName(name) {
+  const key = String(name ?? '').split('.').pop().toLowerCase();
+  return MIME_BY_EXTENSION[key] ?? null;
+}
+const URL_CONNECTION_DEFAULTS = {
+  allowUserInteraction: false,
+  useCaches: true,
+  ifModifiedSince: 0n,
+  requestProperties: new Map(),
+  contentHandlerFactory: null,
+  fileNameMap: null,
+};
+function connectionPeer(self) {
+  if (self?.$peer) return self.$peer;
+  if (!self || typeof self !== 'object') return {};
+  if (!(self.headers instanceof Map)) self.headers = new Map();
+  if (!Array.isArray(self.headerOrder)) self.headerOrder = [];
+  return self;
+}
+const CONN_METHODS = JAVA_CORE_CLASSES['Ljava/net/URLConnection;'].methods;
+const CONN_STATIC = JAVA_CORE_CLASSES['Ljava/net/URLConnection;'].staticMethods;
+CONN_METHODS.set('<init>(Ljava/net/URL;)V', (self, [url], vm) => {
+  const text = urlTextOf(url);
+  self.vm = vm;
+  self.url = text;
+  self.parts = parseUrlParts(text);
+  self.headers = new Map();
+  self.headerOrder = [];
+});
+CONN_METHODS.set('setRequestProperty(Ljava/lang/String;Ljava/lang/String;)V', (self, [key, value]) => {
+  const peer = connectionPeer(self);
+  peer.headers.set(jsString(key), jsString(value));
+  if (!peer.headerOrder.includes(jsString(key))) peer.headerOrder.push(jsString(key));
+});
+CONN_METHODS.set('addRequestProperty(Ljava/lang/String;Ljava/lang/String;)V', (self, [key, value]) => {
+  const peer = connectionPeer(self);
+  peer.headers.set(jsString(key), jsString(value));
+  if (!peer.headerOrder.includes(jsString(key))) peer.headerOrder.push(jsString(key));
+});
+CONN_METHODS.set('getRequestProperty(Ljava/lang/String;)Ljava/lang/String;', (self, [key]) => {
+  const peer = connectionPeer(self);
+  return peer.headers.get(jsString(key)) ?? null;
+});
+CONN_METHODS.set('getRequestProperties()Ljava/util/Map;', (self, _args, vm) => {
+  const peer = connectionPeer(self);
+  const map = makeMap(vm);
+  const storage = mapPeer(map);
+  if (storage) for (const [key, value] of peer.headers) storage.set(key, value);
+  return map;
+});
+CONN_METHODS.set('getHeaderField(I)Ljava/lang/String;', (self, [index]) => {
+  const peer = connectionPeer(self);
+  const key = peer.headerOrder[toInt(index)];
+  return key ? (peer.headers.get(key) ?? null) : null;
+});
+CONN_METHODS.set('getHeaderFieldKey(I)Ljava/lang/String;', (self, [index]) => {
+  const peer = connectionPeer(self);
+  return peer.headerOrder[toInt(index)] ?? null;
+});
+CONN_METHODS.set('getHeaderFieldInt(Ljava/lang/String;I)I', (self, [key, fallback]) => {
+  const peer = connectionPeer(self);
+  const text = peer.headers.get(jsString(key));
+  const parsed = parseInt(text, 10);
+  return Number.isNaN(parsed) ? toInt(fallback) : parsed;
+});
+CONN_METHODS.set('getHeaderFieldLong(Ljava/lang/String;J)J', (self, [key, fallback]) => {
+  const peer = connectionPeer(self);
+  const text = peer.headers.get(jsString(key));
+  const parsed = parseInt(text, 10);
+  return BigInt(Number.isNaN(parsed) ? toLong(fallback) : parsed);
+});
+CONN_METHODS.set('getHeaderFieldDate(Ljava/lang/String;J)J', (self, [key, fallback]) => {
+  const peer = connectionPeer(self);
+  const text = peer.headers.get(jsString(key));
+  const parsed = Date.parse(text);
+  return BigInt(Number.isNaN(parsed) ? toLong(fallback) : parsed);
+});
+CONN_METHODS.set('getExpiration()J', (self) => BigInt(Date.parse(connectionPeer(self).headers.get('expires')) || 0));
+CONN_METHODS.set('getDate()J', (self) => BigInt(Date.parse(connectionPeer(self).headers.get('date')) || 0));
+CONN_METHODS.set('getLastModified()J', (self) => BigInt(Date.parse(connectionPeer(self).headers.get('last-modified')) || 0));
+CONN_METHODS.set('getContent()Ljava/lang/Object;', (self, _args, vm) => urlConnectionContent(self, null, vm));
+CONN_METHODS.set('getContent([Ljava/lang/Class;)Ljava/lang/Object;', (self, [types], vm) => urlConnectionContent(self, types, vm));
+CONN_METHODS.set('setAllowUserInteraction(Z)V', (self, [value]) => { connectionPeer(self).allowUserInteraction = !!value; });
+CONN_METHODS.set('getAllowUserInteraction()Z', (self) => (connectionPeer(self).allowUserInteraction ? 1 : 0));
+CONN_METHODS.set('setIfModifiedSince(J)V', (self, [value]) => { connectionPeer(self).ifModifiedSince = BigInt(value); });
+CONN_METHODS.set('getIfModifiedSince()J', (self) => BigInt(connectionPeer(self).ifModifiedSince ?? 0n));
+CONN_METHODS.set('getDefaultUseCaches()Z', () => (URL_CONNECTION_DEFAULTS.useCaches ? 1 : 0));
+CONN_METHODS.set('setDefaultUseCaches(Z)V', (_self, [value]) => { URL_CONNECTION_DEFAULTS.useCaches = !!value; });
+CONN_METHODS.set('setDefaultRequestProperty(Ljava/lang/String;Ljava/lang/String;)V', (_self, [key, value]) => {
+  URL_CONNECTION_DEFAULTS.requestProperties.set(jsString(key), jsString(value));
+});
+CONN_METHODS.set('getDefaultRequestProperty(Ljava/lang/String;)Ljava/lang/String;', (_self, [key]) =>
+  URL_CONNECTION_DEFAULTS.requestProperties.get(jsString(key)) ?? null);
+CONN_STATIC.set('getFileNameMap()Ljava/net/FileNameMap;', (_self, _args, vm) =>
+  URL_CONNECTION_DEFAULTS.fileNameMap ?? defaultFileNameMap(vm));
+CONN_STATIC.set('setFileNameMap(Ljava/net/FileNameMap;)V', (_self, [map]) => { URL_CONNECTION_DEFAULTS.fileNameMap = map ?? null; });
+CONN_STATIC.set('setDefaultAllowUserInteraction(Z)V', (_self, [value]) => { URL_CONNECTION_DEFAULTS.allowUserInteraction = !!value; });
+CONN_STATIC.set('getDefaultAllowUserInteraction()Z', () => (URL_CONNECTION_DEFAULTS.allowUserInteraction ? 1 : 0));
+CONN_STATIC.set('setContentHandlerFactory(Ljava/net/ContentHandlerFactory;)V', (_self, [factory]) => {
+  URL_CONNECTION_DEFAULTS.contentHandlerFactory = factory ?? null;
+});
+CONN_STATIC.set('guessContentTypeFromName(Ljava/lang/String;)Ljava/lang/String;', (_self, [name], vm) => {
+  const map = URL_CONNECTION_DEFAULTS.fileNameMap;
+  if (map) {
+    try {
+      const result = vm.invokeInterface?.(map, 'getContentTypeFor', '(Ljava/lang/String;)Ljava/lang/String;', [jsString(name)]);
+      if (result) return result;
+    } catch (_) {
+      // 用户 FileNameMap 失败时回退内置表。
+    }
+  }
+  return mimeTypeForName(jsString(name));
+});
+CONN_STATIC.set('guessContentTypeFromStream(Ljava/io/InputStream;)Ljava/lang/String;', (_self, [stream]) => {
+  if (!stream) return null;
+  const peer = stream.$peer ?? stream;
+  const data = inputStreamData(peer);
+  const start = inputStreamCursor(peer);
+  const at = (offset) => data[start + offset] ?? -1;
+  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) return 'image/png';
+  if (at(0) === 0xff && at(1) === 0xd8) return 'image/jpeg';
+  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46) return 'image/gif';
+  if (at(0) === 0x25 && at(1) === 0x50 && at(2) === 0x44 && at(3) === 0x46) return 'application/pdf';
+  if (at(0) === 0x50 && at(1) === 0x4b) return 'application/zip';
+  return null;
+});
+function urlConnectionContent(self, types, vm) {
+  const peer = connectionPeer(self);
+  const text = String(peer.url ?? self?.url ?? '');
+  if (text.startsWith('file:')) {
+    const path = VIRTUAL_FS.normalize(text.replace(/^file:\/*/, '/'));
+    const bytes = VIRTUAL_FS.read(path);
+    if (!bytes) return null;
+    const wantString = types?.$data?.some((type) => (type?.$name || type?.$descriptor) === 'java.lang.String');
+    if (wantString) return new TextDecoder('utf-8').decode(bytes);
+    const stream = vm.allocateRawObject('Ljava/io/InputStream;');
+    stream.$peer = { $streamData: bytes, $streamCursor: 0, $streamMark: 0, $streamMarkLimit: 0 };
+    return stream;
+  }
+  throw new Error('Unable to resolve host: no network in simulator');
+}
+
+// ---- java.lang.Class 反射补充 ----
+const CLASS_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Class;'].methods;
+function nestedClassDescriptors(vm, descriptor) {
+  const base = descriptor.endsWith(';') ? descriptor.slice(0, -1) : descriptor;
+  const prefix = `${base}$`;
+  const found = new Set();
+  for (const key of vm.registry?.nativeDefs?.keys?.() || []) {
+    if (key.startsWith(prefix)) found.add(key);
+  }
+  for (const dex of vm.dexFiles || []) {
+    for (const key of dex.classesByDescriptor?.keys?.() || []) {
+      if (key.startsWith(prefix)) found.add(key);
+    }
+  }
+  return [...found];
+}
+CLASS_METHODS.set('toGenericString()Ljava/lang/String;', (self) => {
+  const modifiers = CLASS_METHODS.get('getModifiers()I')(self, [], null);
+  const keyword = CLASS_METHODS.get('isInterface()Z')(self, [], null) ? 'interface' : 'class';
+  return `public ${keyword} ${self.$name || descriptorToName(self.$descriptor || '')}`.replace(/^public(?= )/, modifiers ? 'public' : '');
+});
+CLASS_METHODS.set('isSynthetic()Z', (self, _args, vm) => {
+  const rc = vm?.registry?.resolve(self.$descriptor);
+  return rc?.dexClass && (rc.dexClass.accessFlags & 0x1000) ? 1 : 0;
+});
+CLASS_METHODS.set('getTypeParameters()[Ljava/lang/reflect/TypeVariable;', (_self, _args, vm) =>
+  vm.newArray('[Ljava/lang/reflect/TypeVariable;', 0, null));
+CLASS_METHODS.set('getGenericSuperclass()Ljava/lang/reflect/Type;', (self, _args, vm) => {
+  const rc = vm.registry.resolve(self.$descriptor);
+  return rc?.superDescriptor ? vm.getClassObject(rc.superDescriptor) : null;
+});
+CLASS_METHODS.set('getGenericInterfaces()[Ljava/lang/reflect/Type;', (self, _args, vm) => {
+  const rc = vm.registry.resolve(self.$descriptor);
+  const descriptors = rc?.interfaces || [];
+  const array = vm.newArray('[Ljava/lang/reflect/Type;', descriptors.length, null);
+  descriptors.forEach((descriptor, index) => { array.$data[index] = vm.getClassObject(descriptor); });
+  return array;
+});
+CLASS_METHODS.set('getComponentType()Ljava/lang/Class;', (self, _args, vm) => {
+  const descriptor = String(self.$descriptor ?? '');
+  if (!descriptor.startsWith('[')) return null;
+  try {
+    return vm.getClassObject(descriptor.slice(1));
+  } catch (_) {
+    return null;
+  }
+});
+CLASS_METHODS.set('getSigners()[Ljava/lang/Object;', () => null);
+CLASS_METHODS.set('getEnclosingMethod()Ljava/lang/reflect/Method;', () => null);
+CLASS_METHODS.set('getEnclosingConstructor()Ljava/lang/reflect/Constructor;', () => null);
+CLASS_METHODS.set('getDeclaringClass()Ljava/lang/Class;', (self, _args, vm) => {
+  const name = self.$name || descriptorToName(self.$descriptor || '');
+  const index = name.lastIndexOf('$');
+  if (index <= 0) return null;
+  try {
+    return vm.getClassObject(nameToDescriptor(name.slice(0, index)));
+  } catch (_) {
+    return null;
+  }
+});
+CLASS_METHODS.set('getEnclosingClass()Ljava/lang/Class;', (self, _args, vm) =>
+  CLASS_METHODS.get('getDeclaringClass()Ljava/lang/Class;')(self, [], vm));
+CLASS_METHODS.set('getClasses()[Ljava/lang/Class;', (self, _args, vm) => {
+  const descriptors = nestedClassDescriptors(vm, self.$descriptor);
+  const array = vm.newArray('[Ljava/lang/Class;', descriptors.length, null);
+  descriptors.forEach((descriptor, index) => { array.$data[index] = vm.getClassObject(descriptor); });
+  return array;
+});
+CLASS_METHODS.set('getDeclaredClasses()[Ljava/lang/Class;', (self, _args, vm) =>
+  CLASS_METHODS.get('getClasses()[Ljava/lang/Class;')(self, [], vm));
+CLASS_METHODS.set('getResourceAsStream(Ljava/lang/String;)Ljava/io/InputStream;', (self, [name], vm) => {
+  const text = String(jsString(name) ?? '');
+  const path = VIRTUAL_FS.normalize(text.startsWith('/') ? text : `/${text}`);
+  const bytes = VIRTUAL_FS.read(path);
+  if (!bytes) return null;
+  const stream = vm.allocateRawObject('Ljava/io/InputStream;');
+  stream.$peer = { $streamData: bytes, $streamCursor: 0, $streamMark: 0, $streamMarkLimit: 0 };
+  return stream;
+});
+CLASS_METHODS.set('getResource(Ljava/lang/String;)Ljava/net/URL;', (self, [name], vm) => {
+  const text = String(jsString(name) ?? '');
+  const path = VIRTUAL_FS.normalize(text.startsWith('/') ? text : `/${text}`);
+  if (!VIRTUAL_FS.exists(path)) return null;
+  const object = vm.allocateRawObject('Ljava/net/URL;');
+  const urlText = `file://${path}`;
+  object.$peer = { vm, text: urlText, parts: parseUrlParts(urlText) };
+  return object;
+});
+JAVA_CORE_CLASSES['Ljava/security/ProtectionDomain;'] = nativeDef('Ljava/security/ProtectionDomain;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'implies(Ljava/security/Permission;)Z': () => 1,
+    'getCodeSource()Ljava/security/CodeSource;': () => null,
+    'getPermissions()Ljava/security/PermissionCollection;': () => null,
+    'getPrincipals()[Ljava/security/Principal;': (_self, _args, vm) => vm.newArray('[Ljava/security/Principal;', 0, null),
+    'toString()Ljava/lang/String;': () => 'ProtectionDomain  (apk.js)',
+  },
+});
+CLASS_METHODS.set('getProtectionDomain()Ljava/security/ProtectionDomain;', (_self, _args, vm) => {
+  const domain = vm.allocateRawObject('Ljava/security/ProtectionDomain;');
+  domain.$peer = { implies: true };
+  return domain;
+});
+CLASS_METHODS.set('desiredAssertionStatus()Z', () => 0);
+CLASS_METHODS.set('getEnumConstants()[Ljava/lang/Object;', (self, _args, vm) => {
+  if (!CLASS_METHODS.get('isEnum()Z')(self, [], vm)) return null;
+  const fields = collectFields(vm, self.$descriptor, { declaredOnly: true })
+    .filter((field) => field.$peer?.type === self.$descriptor);
+  if (!fields.length) return null;
+  const array = vm.newArray('[Ljava/lang/Object;', fields.length, null);
+  fields.forEach((field, index) => {
+    array.$data[index] = vm.getStaticField({
+      name: field.$peer.name,
+      type: field.$peer.type,
+      classDesc: field.$peer.classDesc,
+    }) ?? null;
+  });
+  return array;
+});
+CLASS_METHODS.set('getAnnotation(Ljava/lang/Class;)Ljava/lang/annotation/Annotation;', () => null);
+CLASS_METHODS.set('isAnnotationPresent(Ljava/lang/Class;)Z', () => 0);
+CLASS_METHODS.set('getAnnotationsByType(Ljava/lang/Class;)[Ljava/lang/annotation/Annotation;', (_self, _args, vm) =>
+  vm.newArray('[Ljava/lang/annotation/Annotation;', 0, null));
+CLASS_METHODS.set('getAnnotations()[Ljava/lang/annotation/Annotation;', (_self, _args, vm) =>
+  vm.newArray('[Ljava/lang/annotation/Annotation;', 0, null));
+CLASS_METHODS.set('getDeclaredAnnotation(Ljava/lang/Class;)Ljava/lang/annotation/Annotation;', () => null);
+CLASS_METHODS.set('getDeclaredAnnotations()[Ljava/lang/annotation/Annotation;', (_self, _args, vm) =>
+  vm.newArray('[Ljava/lang/annotation/Annotation;', 0, null));
+
+// ---- android.app.ActivityManager 补全 ----
+const ACT_METHODS = JAVA_CORE_CLASSES['Landroid/app/ActivityManager;'].methods;
+const ACT_STATIC = JAVA_CORE_CLASSES['Landroid/app/ActivityManager;'].staticMethods;
+JAVA_CORE_CLASSES['Landroid/os/Debug$MemoryInfo;'] = nativeDef('Landroid/os/Debug$MemoryInfo;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm) {
+    this.vm = vm;
+    const caps = deviceCapabilities();
+    const totalKb = Math.max(1, Math.round(caps.memoryBytes / 1024));
+    this.dalvikPss = Math.round(totalKb * 0.08);
+    this.nativePss = Math.round(totalKb * 0.04);
+    this.otherPss = Math.round(totalKb * 0.02);
+    this.totalPss = this.dalvikPss + this.nativePss + this.otherPss;
+    this.dalvikPrivateDirty = Math.round(this.dalvikPss * 0.7);
+    this.dalvikSharedDirty = this.dalvikPss - this.dalvikPrivateDirty;
+    this.nativePrivateDirty = Math.round(this.nativePss * 0.6);
+    this.nativeSharedDirty = this.nativePss - this.nativePrivateDirty;
+    this.totalPrivateDirty = this.dalvikPrivateDirty + this.nativePrivateDirty;
+    this.totalSharedDirty = this.totalPss - this.totalPrivateDirty;
+    this.otherLabels = new Map();
+  }, { dalvikPss: 0, nativePss: 0, otherPss: 0, totalPss: 0 }),
+  methods: {
+    'getTotalPss()I': (self) => toInt(self.totalPss),
+    'getTotalUss()I': (self) => toInt(self.totalPss),
+    'getTotalPrivateDirty()I': (self) => toInt(self.totalPrivateDirty),
+    'getTotalSharedDirty()I': (self) => toInt(self.totalSharedDirty),
+    'getTotalPrivateClean()I': (self) => toInt(self.totalPrivateClean ?? 0),
+    'getTotalSharedClean()I': (self) => toInt(self.totalSharedClean ?? 0),
+    'getTotalSwappablePss()I': (self) => toInt(self.totalSwappablePss ?? 0),
+    'getTotalSwappedOutPss()I': (self) => toInt(self.totalSwappedOutPss ?? 0),
+    'getDalvikPss()I': (self) => toInt(self.dalvikPss),
+    'getDalvikPrivateDirty()I': (self) => toInt(self.dalvikPrivateDirty),
+    'getDalvikSharedDirty()I': (self) => toInt(self.dalvikSharedDirty),
+    'getNativePss()I': (self) => toInt(self.nativePss),
+    'getNativePrivateDirty()I': (self) => toInt(self.nativePrivateDirty),
+    'getNativeSharedDirty()I': (self) => toInt(self.nativeSharedDirty),
+    'getOtherPss(I)I': (self, [type]) => (toInt(type) === -1 ? toInt(self.otherPss) : 0),
+    'getOtherPrivateDirty(I)I': () => 0,
+    'getOtherSharedDirty(I)I': () => 0,
+    'getOtherLabel(I)Ljava/lang/String;': (self, [index]) => self.otherLabels?.get(toInt(index)) ?? null,
+    'getOtherLabelCount()I': (self) => self.otherLabels?.size ?? 0,
+    'setOtherLabel(ILjava/lang/String;)V': (self, [index, label]) => {
+      if (!self.otherLabels) self.otherLabels = new Map();
+      self.otherLabels.set(toInt(index), jsString(label));
+    },
+    'getMemoryStat(Ljava/util/Map;)Z': (self, [map], vm) => {
+      if (!map) return false;
+      const entries = [
+        ['summary.java-heap', self.dalvikPss],
+        ['summary.native-heap', self.nativePss],
+        ['summary.total-pss', self.totalPss],
+        ['summary.total-swap', self.totalSwappedOutPss ?? 0],
+      ];
+      const storage = mapPeer(map);
+      if (!storage) return false;
+      for (const [key, value] of entries) storage.set(key, String(toInt(value)));
+      return true;
+    },
+  },
+});
+function activityManagerMemoryInfo(vm) {
+  const object = vm.allocateRawObject('Landroid/os/Debug$MemoryInfo;');
+  const rc = vm.registry.resolve('Landroid/os/Debug$MemoryInfo;');
+  object.$peer = rc?.nativeDef?.ctor ? new rc.nativeDef.ctor(vm) : { totalPss: 0 };
+  return object;
+}
+ACT_METHODS.set('getRecentTasks(II)Ljava/util/List;', (_self, _args, vm) => makeList(vm, []));
+ACT_METHODS.set('getAppTasks()Ljava/util/List;', (_self, _args, vm) => makeList(vm, []));
+ACT_METHODS.set('getRunningTasks(I)Ljava/util/List;', (_self, _args, vm) => makeList(vm, []));
+ACT_METHODS.set('getProcessesInErrorState()Ljava/util/List;', (_self, _args, vm) => makeList(vm, []));
+ACT_METHODS.set('getHistoricalProcessExitReasons(Ljava/lang/String;II)Ljava/util/List;', (_self, _args, vm) => makeList(vm, []));
+ACT_METHODS.set('getAppTaskThumbnailSize()Landroid/util/Size;', (_self, _args, vm) => {
+  const size = vm.allocateRawObject('Landroid/util/Size;');
+  const density = vm.resources?.density ?? 1;
+  size.$peer = { width: Math.round(48 * density), height: Math.round(48 * density) };
+  return size;
+});
+ACT_METHODS.set('addAppTask(Landroid/app/Activity;Landroid/content/Intent;Landroid/app/ActivityManager$TaskDescription;Landroid/graphics/Bitmap;)I', () => 0);
+ACT_METHODS.set('moveTaskToFront(II)V', () => undefined);
+ACT_METHODS.set('moveTaskToFront(IILandroid/os/Bundle;)V', () => undefined);
+ACT_METHODS.set('isActivityStartAllowedOnDisplay(Landroid/content/Context;ILandroid/content/Intent;)Z', () => 1);
+ACT_METHODS.set('getRunningServiceControlPanel(Landroid/content/ComponentName;)Landroid/app/PendingIntent;', () => null);
+ACT_METHODS.set('clearApplicationUserData()Z', (_self, _args, vm) => {
+  const pkg = vm.packageName || 'app';
+  const prefixes = [`/data/user/0/${pkg}`, `/data/data/${pkg}`];
+  for (const key of [...VIRTUAL_FS.files.keys()]) {
+    if (prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`))) VIRTUAL_FS.files.delete(key);
+  }
+  for (const key of [...VIRTUAL_FS.dirs]) {
+    if (prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`))) VIRTUAL_FS.dirs.delete(key);
+  }
+  if (vm.__sharedPreferencesStores instanceof Map) {
+    for (const key of [...vm.__sharedPreferencesStores.keys()]) {
+      if (String(key).startsWith(pkg)) vm.__sharedPreferencesStores.delete(key);
+    }
+  }
+  return true;
+});
+ACT_METHODS.set('isBackgroundRestricted()Z', () => 0);
+ACT_METHODS.set('setProcessStateSummary([B)V', (_self, [bytes], vm) => { vm.__processStateSummary = bytes ?? null; });
+ACT_METHODS.set('getProcessMemoryInfo([I)[Landroid/os/Debug$MemoryInfo;', (_self, [pids], vm) => {
+  const count = Math.max(1, pids?.$data?.length || 0);
+  const array = vm.newArray('[Landroid/os/Debug$MemoryInfo;', count, null);
+  for (let index = 0; index < count; index++) array.$data[index] = activityManagerMemoryInfo(vm);
+  return array;
+});
+ACT_METHODS.set('restartPackage(Ljava/lang/String;)V', (_self, [_packageName], vm) => {
+  vm.log?.('info', 'ActivityManager', 'restartPackage is not supported for the current process');
+});
+ACT_METHODS.set('killBackgroundProcesses(Ljava/lang/String;)V', () => undefined);
+ACT_METHODS.set('getLauncherLargeIconDensity()I', (_self, _args, vm) => {
+  const density = vm.resources?.densityDpi ?? 160;
+  return density <= 120 ? 160 : density <= 160 ? 240 : density <= 240 ? 320 : 480;
+});
+ACT_METHODS.set('getLauncherLargeIconSize()I', (_self, _args, vm) => {
+  const density = vm.resources?.density ?? 1;
+  return Math.round(48 * density);
+});
+ACT_METHODS.set('dumpPackageState(Ljava/io/FileDescriptor;Ljava/lang/String;)V', (_self, [fd, packageName], vm) => {
+  const peer = fd?.$peer ?? fd;
+  const text = `Package [${jsString(packageName)}] (apk.js)\n  userId=10000\n`;
+  if (peer && Array.isArray(peer.$buffer)) {
+    for (const byte of new TextEncoder().encode(text)) peer.$buffer.push(byte);
+    return;
+  }
+  vm.log?.('info', 'ActivityManager', text.trim());
+});
+ACT_METHODS.set('setWatchHeapLimit(J)V', (self, [limit]) => { self.watchHeapLimit = BigInt(limit); });
+ACT_METHODS.set('clearWatchHeapLimit()V', (self) => { self.watchHeapLimit = 0n; });
+ACT_METHODS.set('isInLockTaskMode()Z', () => 0);
+ACT_METHODS.set('getLockTaskModeState()I', () => 0);
+ACT_METHODS.set('appNotResponding(Ljava/lang/String;)V', (_self, [reason], vm) => {
+  vm.log?.('warn', 'ActivityManager', `appNotResponding: ${jsString(reason)}`);
+});
+ACT_STATIC.set('isLowMemoryKillReportSupported()Z', () => 0);
+ACT_STATIC.set('getMyMemoryState(Landroid/app/ActivityManager$RunningAppProcessInfo;)V', (_self, [info], vm) => {
+  const peer = info?.$peer ?? info;
+  if (!peer) return;
+  peer.pid = 1000;
+  peer.uid = 10000;
+  peer.importance = 100;
+  peer.importanceReasonCode = 0;
+  peer.lru = 0;
+  peer.lastTrimLevel = 5;
+  peer.processName = vm.packageName || 'app';
+});
+ACT_STATIC.set('isUserAMonkey()Z', () => 0);
+ACT_STATIC.set('isRunningInTestHarness()Z', () => 0);
+ACT_STATIC.set('isRunningInUserTestHarness()Z', () => 0);
+ACT_STATIC.set('setVrThread(I)V', (_self, [tid]) => { ACT_STATIC.__vrThread = toInt(tid); });
