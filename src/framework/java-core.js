@@ -5764,6 +5764,117 @@ function listMethods() {
     },
     'contains(Ljava/lang/Object;)Z': (self, [value]) => self.items.some((item) => refsEqual(item, value)),
     'indexOf(Ljava/lang/Object;)I': (self, [value]) => self.items.findIndex((item) => refsEqual(item, value)),
+    'lastIndexOf(Ljava/lang/Object;)I': (self, [value]) => {
+      for (let index = self.items.length - 1; index >= 0; index -= 1) {
+        if (refsEqual(self.items[index], value)) return index;
+      }
+      return -1;
+    },
+    'trimToSize()V': () => undefined,
+    'ensureCapacity(I)V': () => undefined,
+    'toArray()[Ljava/lang/Object;': (self, _args, vm) => vm.newArray('[Ljava/lang/Object;', [...self.items]),
+    'toArray([Ljava/lang/Object;)[Ljava/lang/Object;': (self, [target], vm) => {
+      const targetData = target?.$data;
+      const descriptor = target?.$type || '[Ljava/lang/Object;';
+      if (Array.isArray(targetData) && targetData.length >= self.items.length) {
+        self.items.forEach((item, index) => { targetData[index] = item; });
+        if (targetData.length > self.items.length) targetData[self.items.length] = null;
+        return target;
+      }
+      const array = vm.newArray(descriptor, self.items.length, null);
+      self.items.forEach((item, index) => { array.$data[index] = item; });
+      return array;
+    },
+    'addAll(Ljava/util/Collection;)Z': (self, [other]) => {
+      const source = collectionItems(other);
+      if (!source.length) return false;
+      self.items.push(...source);
+      return true;
+    },
+    'addAll(ILjava/util/Collection;)Z': (self, [index, other]) => {
+      const source = collectionItems(other);
+      if (!source.length) return false;
+      self.items.splice(Math.max(0, toInt(index)), 0, ...source);
+      return true;
+    },
+    'addAllAbsent(Ljava/util/Collection;)I': (self, [other]) => {
+      const source = collectionItems(other);
+      let added = 0;
+      for (const item of source) {
+        if (self.items.some((existing) => refsEqual(existing, item))) continue;
+        self.items.push(item);
+        added++;
+      }
+      return added;
+    },
+    'addIfAbsent(Ljava/lang/Object;)Z': (self, [value]) => {
+      if (self.items.some((item) => refsEqual(item, value))) return false;
+      self.items.push(value);
+      return true;
+    },
+    'containsAll(Ljava/util/Collection;)Z': (self, [other]) => {
+      const source = collectionItems(other);
+      return source.every((item) => self.items.some((existing) => refsEqual(existing, item)));
+    },
+    'removeRange(II)V': (self, [from, to]) => {
+      self.items.splice(Math.max(0, toInt(from)), Math.max(0, toInt(to) - toInt(from)));
+    },
+    'removeAll(Ljava/util/Collection;)Z': (self, [other]) => {
+      const source = collectionItems(other);
+      const before = self.items.length;
+      for (let index = self.items.length - 1; index >= 0; index -= 1) {
+        if (source.some((item) => refsEqual(item, self.items[index]))) self.items.splice(index, 1);
+      }
+      return self.items.length !== before;
+    },
+    'retainAll(Ljava/util/Collection;)Z': (self, [other]) => {
+      const source = collectionItems(other);
+      const before = self.items.length;
+      for (let index = self.items.length - 1; index >= 0; index -= 1) {
+        if (!source.some((item) => refsEqual(item, self.items[index]))) self.items.splice(index, 1);
+      }
+      return self.items.length !== before;
+    },
+    'iterator()Ljava/util/Iterator;': (self, _args, vm) => makeIterator(vm, self.items),
+    'listIterator()Ljava/util/ListIterator;': (self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+      object.$peer = { cursor: 0, abstractList: self.$object ?? self };
+      return object;
+    },
+    'listIterator(I)Ljava/util/ListIterator;': (self, [index], vm) => {
+      const object = vm.allocateRawObject('Ljava/util/ListIterator;');
+      object.$peer = { cursor: toInt(index), abstractList: self.$object ?? self };
+      return object;
+    },
+    'subList(II)Ljava/util/List;': (self, [from, to], vm) => makeList(vm, self.items.slice(toInt(from), toInt(to))),
+    'forEach(Ljava/util/function/Consumer;)V': (self, [consumer], vm) => {
+      for (const item of [...self.items]) {
+        vm.invokeByName('accept', '(Ljava/lang/Object;)V', consumer, [item]);
+      }
+    },
+    'removeIf(Ljava/util/function/Predicate;)Z': (self, [predicate], vm) => {
+      let changed = false;
+      for (let index = self.items.length - 1; index >= 0; index -= 1) {
+        const matched = vm.invokeByName('test', '(Ljava/lang/Object;)Z', predicate, [self.items[index]]);
+        if (matched) {
+          self.items.splice(index, 1);
+          changed = true;
+        }
+      }
+      return changed;
+    },
+    'replaceAll(Ljava/util/function/UnaryOperator;)V': (self, [operator], vm) => {
+      for (let index = 0; index < self.items.length; index += 1) {
+        self.items[index] = vm.invokeByName('apply', '(Ljava/lang/Object;)Ljava/lang/Object;', operator, [self.items[index]]);
+      }
+    },
+    'sort(Ljava/util/Comparator;)V': (self, [comparator], vm) => {
+      const compare = comparator
+        ? (a, b) => vm.invokeByName('compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', comparator, [a, b]) | 0
+        : (a, b) => defaultArrayCompare(a, b);
+      self.items.sort(compare);
+    },
+    'spliterator()Ljava/util/Spliterator;': (self, _args, vm) => makeSpliterator(vm, self.items),
     'toString()Ljava/lang/String;': (self) => `[${self.items.map(jsString).join(', ')}]`,
   };
 }
@@ -9028,3 +9139,444 @@ DF_METHODS.set('getMinimumFractionDigits()I', (self) => toInt(decimalOptions(sel
 DF_METHODS.set('getCurrency()Ljava/util/Currency;', (self) => self.currency ?? null);
 DF_METHODS.set('setCurrency(Ljava/util/Currency;)V', (self, [value]) => { self.currency = value ?? null; });
 DF_METHODS.set('getRoundingMode()Ljava/math/RoundingMode;', (self) => decimalOptions(self).roundingMode ?? null);
+
+// ---- 集合：List 接口委托、CopyOnWriteArrayList/LinkedList/ArrayDeque 补全 ----
+function listBacking(self) {
+  if (!self || typeof self !== 'object') return null;
+  if (Array.isArray(self.items)) return self.items;
+  if (Array.isArray(self.setItems)) return self.setItems;
+  if (Array.isArray(self.$data)) return self.$data;
+  const peer = self.$peer;
+  if (peer) {
+    if (Array.isArray(peer.items)) return peer.items;
+    if (Array.isArray(peer.setItems)) return peer.setItems;
+  }
+  return null;
+}
+
+function collectionArrayOf(other) {
+  const items = collectionItems(other);
+  if (items.length) return items;
+  const backing = listBacking(other);
+  return backing ? [...backing] : [];
+}
+
+function makeSpliterator(vm, items) {
+  const object = vm.allocateRawObject('Ljava/util/Spliterator;');
+  object.$peer = { items: [...(items || [])], cursor: 0 };
+  return object;
+}
+
+JAVA_CORE_CLASSES['Ljava/util/Spliterator;'] = nativeDef('Ljava/util/Spliterator;', {
+  super: 'Ljava/lang/Object;',
+  staticFields: {
+    'ORDERED:I': 16,
+    'DISTINCT:I': 1,
+    'SORTED:I': 4,
+    'SIZED:I': 64,
+    'NONNULL:I': 256,
+    'IMMUTABLE:I': 1024,
+    'CONCURRENT:I': 4096,
+    'SUBSIZED:I': 16384,
+  },
+  methods: {
+    'tryAdvance(Ljava/util/function/Consumer;)Z': (self, [consumer], vm) => {
+      if (self.cursor >= self.items.length) return false;
+      const value = self.items[self.cursor++];
+      if (consumer) vm.invokeByName('accept', '(Ljava/lang/Object;)V', consumer, [value]);
+      return true;
+    },
+    'forEachRemaining(Ljava/util/function/Consumer;)V': (self, [consumer], vm) => {
+      while (self.cursor < self.items.length) {
+        const value = self.items[self.cursor++];
+        if (consumer) vm.invokeByName('accept', '(Ljava/lang/Object;)V', consumer, [value]);
+      }
+    },
+    'trySplit()Ljava/util/Spliterator;': (self, _args, vm) => {
+      const remaining = self.items.length - self.cursor;
+      if (remaining < 2) return null;
+      const half = self.cursor + Math.floor(remaining / 2);
+      const head = self.items.slice(self.cursor, half);
+      const split = makeSpliterator(vm, head);
+      self.cursor = half;
+      return split;
+    },
+    'estimateSize()J': (self) => BigInt(self.items.length - self.cursor),
+    'getExactSizeIfKnown()J': (self) => BigInt(self.items.length - self.cursor),
+    'characteristics()I': () => 16464,
+    'hasCharacteristics(I)Z': (_self, [flags]) => ((16464 & toInt(flags)) === toInt(flags) ? 1 : 0),
+    'getComparator()Ljava/util/Comparator;': () => null,
+  },
+});
+
+const LIST_METHODS = JAVA_CORE_CLASSES['Ljava/util/List;'].methods;
+const LIST_STATIC = JAVA_CORE_CLASSES['Ljava/util/List;'].staticMethods;
+LIST_METHODS.set('add(Ljava/lang/Object;)Z', (self, [value]) => {
+  const list = listBacking(self);
+  if (!list) return false;
+  list.push(value);
+  return true;
+});
+LIST_METHODS.set('add(ILjava/lang/Object;)V', (self, [index, value]) => {
+  const list = listBacking(self);
+  if (list) list.splice(toInt(index), 0, value);
+});
+LIST_METHODS.set('remove(Ljava/lang/Object;)Z', (self, [value]) => {
+  const list = listBacking(self);
+  if (!list) return false;
+  const index = list.findIndex((item) => refsEqual(item, value));
+  if (index < 0) return false;
+  list.splice(index, 1);
+  return true;
+});
+LIST_METHODS.set('remove(I)Ljava/lang/Object;', (self, [index]) => {
+  const list = listBacking(self);
+  if (!list) return null;
+  const removed = list.splice(toInt(index), 1);
+  return removed.length ? removed[0] : null;
+});
+LIST_METHODS.set('clear()V', (self) => {
+  const list = listBacking(self);
+  if (list) list.length = 0;
+});
+LIST_METHODS.set('containsAll(Ljava/util/Collection;)Z', (self, [other]) => {
+  const list = listBacking(self) || [];
+  const source = collectionArrayOf(other);
+  return source.every((item) => list.some((existing) => refsEqual(existing, item)));
+});
+LIST_METHODS.set('addAll(Ljava/util/Collection;)Z', (self, [other]) => {
+  const list = listBacking(self);
+  const source = collectionArrayOf(other);
+  if (!list || !source.length) return false;
+  list.push(...source);
+  return true;
+});
+LIST_METHODS.set('addAll(ILjava/util/Collection;)Z', (self, [index, other]) => {
+  const list = listBacking(self);
+  const source = collectionArrayOf(other);
+  if (!list || !source.length) return false;
+  list.splice(Math.max(0, toInt(index)), 0, ...source);
+  return true;
+});
+LIST_METHODS.set('removeAll(Ljava/util/Collection;)Z', (self, [other]) => {
+  const list = listBacking(self);
+  if (!list) return false;
+  const source = collectionArrayOf(other);
+  const before = list.length;
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (source.some((item) => refsEqual(item, list[index]))) list.splice(index, 1);
+  }
+  return list.length !== before;
+});
+LIST_METHODS.set('retainAll(Ljava/util/Collection;)Z', (self, [other]) => {
+  const list = listBacking(self);
+  if (!list) return false;
+  const source = collectionArrayOf(other);
+  const before = list.length;
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (!source.some((item) => refsEqual(item, list[index]))) list.splice(index, 1);
+  }
+  return list.length !== before;
+});
+LIST_METHODS.set('toArray([Ljava/lang/Object;)[Ljava/lang/Object;', (self, [target], vm) => {
+  const list = listBacking(self) || [];
+  const data = target?.$data;
+  if (Array.isArray(data) && data.length >= list.length) {
+    list.forEach((item, index) => { data[index] = item; });
+    if (data.length > list.length) data[list.length] = null;
+    return target;
+  }
+  const array = vm.newArray(target?.$type || '[Ljava/lang/Object;', list.length, null);
+  list.forEach((item, index) => { array.$data[index] = item; });
+  return array;
+});
+LIST_METHODS.set('replaceAll(Ljava/util/function/UnaryOperator;)V', (self, [operator], vm) => {
+  const list = listBacking(self);
+  if (!list) return;
+  for (let index = 0; index < list.length; index += 1) {
+    list[index] = vm.invokeByName('apply', '(Ljava/lang/Object;)Ljava/lang/Object;', operator, [list[index]]);
+  }
+});
+LIST_METHODS.set('sort(Ljava/util/Comparator;)V', (self, [comparator], vm) => {
+  const list = listBacking(self);
+  if (!list) return;
+  list.sort(comparator
+    ? (a, b) => vm.invokeByName('compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', comparator, [a, b]) | 0
+    : (a, b) => defaultArrayCompare(a, b));
+});
+LIST_METHODS.set('spliterator()Ljava/util/Spliterator;', (self, _args, vm) => makeSpliterator(vm, listBacking(self) || []));
+const listOf = (vm, args) => makeList(vm, args);
+LIST_STATIC.set('of()Ljava/util/List;', (_self, _args, vm) => listOf(vm, []));
+LIST_STATIC.set('of(Ljava/lang/Object;)Ljava/util/List;', (_self, [a], vm) => listOf(vm, [a]));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;', (_self, args, vm) => listOf(vm, args));
+LIST_STATIC.set('of([Ljava/lang/Object;)Ljava/util/List;', (_self, [array], vm) => listOf(vm, array?.$data ? [...array.$data] : []));
+LIST_STATIC.set('copyOf(Ljava/util/Collection;)Ljava/util/List;', (_self, [other], vm) => listOf(vm, collectionArrayOf(other)));
+
+const COWAL_METHODS = JAVA_CORE_CLASSES['Ljava/util/concurrent/CopyOnWriteArrayList;'].methods;
+COWAL_METHODS.set('<init>([Ljava/lang/Object;)V', (self, [array]) => { self.items = array?.$data ? [...array.$data] : []; });
+COWAL_METHODS.set('indexOf(Ljava/lang/Object;I)I', (self, [value, from]) => {
+  const start = Math.max(0, toInt(from));
+  for (let index = start; index < self.items.length; index += 1) {
+    if (refsEqual(self.items[index], value)) return index;
+  }
+  return -1;
+});
+COWAL_METHODS.set('lastIndexOf(Ljava/lang/Object;)I', (self, [value]) => {
+  for (let index = self.items.length - 1; index >= 0; index -= 1) {
+    if (refsEqual(self.items[index], value)) return index;
+  }
+  return -1;
+});
+COWAL_METHODS.set('lastIndexOf(Ljava/lang/Object;I)I', (self, [value, from]) => {
+  for (let index = Math.min(toInt(from), self.items.length - 1); index >= 0; index -= 1) {
+    if (refsEqual(self.items[index], value)) return index;
+  }
+  return -1;
+});
+
+const LINKED_LIST_METHODS = JAVA_CORE_CLASSES['Ljava/util/LinkedList;'].methods;
+LINKED_LIST_METHODS.set('getFirst()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items[0] ?? null;
+});
+LINKED_LIST_METHODS.set('getLast()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items[self.items.length - 1] ?? null;
+});
+LINKED_LIST_METHODS.set('remove()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items.shift();
+});
+LINKED_LIST_METHODS.set('removeFirstOccurrence(Ljava/lang/Object;)Z', (self, [value]) => {
+  const index = self.items.findIndex((item) => refsEqual(item, value));
+  if (index < 0) return false;
+  self.items.splice(index, 1);
+  return true;
+});
+LINKED_LIST_METHODS.set('removeLastOccurrence(Ljava/lang/Object;)Z', (self, [value]) => {
+  for (let index = self.items.length - 1; index >= 0; index -= 1) {
+    if (refsEqual(self.items[index], value)) {
+      self.items.splice(index, 1);
+      return true;
+    }
+  }
+  return false;
+});
+LINKED_LIST_METHODS.set('descendingIterator()Ljava/util/Iterator;', (self, _args, vm) => makeIterator(vm, [...self.items].reverse()));
+
+const DEQUE_METHODS = JAVA_CORE_CLASSES['Ljava/util/ArrayDeque;'].methods;
+DEQUE_METHODS.set('<init>(I)V', (self) => { self.items = []; });
+DEQUE_METHODS.set('<init>(Ljava/util/Collection;)V', (self, [other]) => { self.items = collectionArrayOf(other); });
+DEQUE_METHODS.set('offerFirst(Ljava/lang/Object;)Z', (self, [value]) => { self.items.unshift(value); return true; });
+DEQUE_METHODS.set('offerLast(Ljava/lang/Object;)Z', (self, [value]) => { self.items.push(value); return true; });
+DEQUE_METHODS.set('removeFirst()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items.shift();
+});
+DEQUE_METHODS.set('removeLast()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items.pop();
+});
+DEQUE_METHODS.set('pollFirst()Ljava/lang/Object;', (self) => (self.items.length ? self.items.shift() : null));
+DEQUE_METHODS.set('pollLast()Ljava/lang/Object;', (self) => (self.items.length ? self.items.pop() : null));
+DEQUE_METHODS.set('getFirst()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items[0];
+});
+DEQUE_METHODS.set('getLast()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items[self.items.length - 1];
+});
+DEQUE_METHODS.set('peekFirst()Ljava/lang/Object;', (self) => self.items[0] ?? null);
+DEQUE_METHODS.set('peekLast()Ljava/lang/Object;', (self) => self.items[self.items.length - 1] ?? null);
+DEQUE_METHODS.set('removeFirstOccurrence(Ljava/lang/Object;)Z', (self, [value]) => {
+  const index = self.items.findIndex((item) => refsEqual(item, value));
+  if (index < 0) return false;
+  self.items.splice(index, 1);
+  return true;
+});
+DEQUE_METHODS.set('removeLastOccurrence(Ljava/lang/Object;)Z', (self, [value]) => {
+  for (let index = self.items.length - 1; index >= 0; index -= 1) {
+    if (refsEqual(self.items[index], value)) {
+      self.items.splice(index, 1);
+      return true;
+    }
+  }
+  return false;
+});
+DEQUE_METHODS.set('remove()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items.shift();
+});
+DEQUE_METHODS.set('element()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items[0];
+});
+DEQUE_METHODS.set('push(Ljava/lang/Object;)V', (self, [value]) => { self.items.unshift(value); });
+DEQUE_METHODS.set('pop()Ljava/lang/Object;', (self, _args, vm) => {
+  if (!self.items.length) vm.throwException('Ljava/util/NoSuchElementException;', '');
+  return self.items.shift();
+});
+DEQUE_METHODS.set('descendingIterator()Ljava/util/Iterator;', (self, _args, vm) => makeIterator(vm, [...self.items].reverse()));
+DEQUE_METHODS.set('contains(Ljava/lang/Object;)Z', (self, [value]) => (self.items.some((item) => refsEqual(item, value)) ? 1 : 0));
+DEQUE_METHODS.set('remove(Ljava/lang/Object;)Z', (self, [value]) => {
+  const index = self.items.findIndex((item) => refsEqual(item, value));
+  if (index < 0) return false;
+  self.items.splice(index, 1);
+  return true;
+});
+DEQUE_METHODS.set('clear()V', (self) => { self.items = []; });
+DEQUE_METHODS.set('toArray()[Ljava/lang/Object;', (self, _args, vm) => vm.newArray('[Ljava/lang/Object;', [...self.items]));
+DEQUE_METHODS.set('toArray([Ljava/lang/Object;)[Ljava/lang/Object;', (self, [target], vm) => {
+  const data = target?.$data;
+  if (Array.isArray(data) && data.length >= self.items.length) {
+    self.items.forEach((item, index) => { data[index] = item; });
+    if (data.length > self.items.length) data[self.items.length] = null;
+    return target;
+  }
+  const array = vm.newArray(target?.$type || '[Ljava/lang/Object;', self.items.length, null);
+  self.items.forEach((item, index) => { array.$data[index] = item; });
+  return array;
+});
+DEQUE_METHODS.set('clone()Ljava/util/ArrayDeque;', (self, _args, vm) => {
+  const copy = vm.allocateRawObject('Ljava/util/ArrayDeque;');
+  copy.$peer = { items: [...self.items] };
+  return copy;
+});
+DEQUE_METHODS.set('spliterator()Ljava/util/Spliterator;', (self, _args, vm) => makeSpliterator(vm, self.items));
+
+// ---- java.time.Instant 与 java.util.Date 补全 ----
+JAVA_CORE_CLASSES['Ljava/time/Instant;'] = nativeDef('Ljava/time/Instant;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function () {
+    this.epochMilli = 0n;
+  }, { epochMilli: 0n }),
+  methods: {
+    'toEpochMilli()J': (self) => BigInt(self.epochMilli ?? 0n),
+    'getEpochSecond()J': (self) => BigInt(Number(self.epochMilli ?? 0n) / 1000 | 0),
+    'getNano()I': (self) => (Number(self.epochMilli ?? 0n) % 1000) * 1000000,
+    'toString()Ljava/lang/String;': (self) => new Date(Number(self.epochMilli ?? 0n)).toISOString(),
+    'isBefore(Ljava/time/Instant;)Z': (self, [other]) => (BigInt(self.epochMilli ?? 0n) < BigInt(other?.$peer?.epochMilli ?? 0n) ? 1 : 0),
+    'isAfter(Ljava/time/Instant;)Z': (self, [other]) => (BigInt(self.epochMilli ?? 0n) > BigInt(other?.$peer?.epochMilli ?? 0n) ? 1 : 0),
+    'compareTo(Ljava/time/Instant;)I': (self, [other]) => {
+      const left = BigInt(self.epochMilli ?? 0n);
+      const right = BigInt(other?.$peer?.epochMilli ?? 0n);
+      return left < right ? -1 : (left > right ? 1 : 0);
+    },
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => (BigInt(self.epochMilli ?? 0n) === BigInt(other?.$peer?.epochMilli ?? 0n) ? 1 : 0),
+    'plusMillis(J)Ljava/time/Instant;': (self, [amount], vm) => {
+      const copy = vm.allocateRawObject('Ljava/time/Instant;');
+      copy.$peer = { epochMilli: BigInt(self.epochMilli ?? 0n) + BigInt(amount) };
+      return copy;
+    },
+    'minusMillis(J)Ljava/time/Instant;': (self, [amount], vm) => {
+      const copy = vm.allocateRawObject('Ljava/time/Instant;');
+      copy.$peer = { epochMilli: BigInt(self.epochMilli ?? 0n) - BigInt(amount) };
+      return copy;
+    },
+  },
+  staticMethods: {
+    'now()Ljava/time/Instant;': (_self, _args, vm) => {
+      const object = vm.allocateRawObject('Ljava/time/Instant;');
+      object.$peer = { epochMilli: BigInt(Date.now()) };
+      return object;
+    },
+    'ofEpochMilli(J)Ljava/time/Instant;': (_self, [milli], vm) => {
+      const object = vm.allocateRawObject('Ljava/time/Instant;');
+      object.$peer = { epochMilli: BigInt(milli) };
+      return object;
+    },
+    'ofEpochSecond(J)Ljava/time/Instant;': (_self, [seconds], vm) => {
+      const object = vm.allocateRawObject('Ljava/time/Instant;');
+      object.$peer = { epochMilli: BigInt(seconds) * 1000n };
+      return object;
+    },
+  },
+});
+
+const DATE_METHODS = JAVA_CORE_CLASSES['Ljava/util/Date;'].methods;
+const DATE_STATIC = JAVA_CORE_CLASSES['Ljava/util/Date;'].staticMethods;
+function datePeer(self) {
+  return { date: new Date(Number(self.time ?? 0)) };
+}
+function storeDate(self, date) {
+  self.time = date.getTime();
+}
+DATE_METHODS.set('<init>(III)V', (self, [year, month, day]) => {
+  storeDate(self, new Date(Number(year) + 1900, toInt(month), toInt(day)));
+});
+DATE_METHODS.set('<init>(IIIII)V', (self, [year, month, day, hour, minute]) => {
+  storeDate(self, new Date(Number(year) + 1900, toInt(month), toInt(day), toInt(hour), toInt(minute)));
+});
+DATE_METHODS.set('<init>(IIIIII)V', (self, [year, month, day, hour, minute, second]) => {
+  storeDate(self, new Date(Number(year) + 1900, toInt(month), toInt(day), toInt(hour), toInt(minute), toInt(second)));
+});
+DATE_METHODS.set('<init>(Ljava/lang/String;)V', (self, [text]) => {
+  const parsed = Date.parse(jsString(text));
+  self.time = Number.isNaN(parsed) ? 0 : parsed;
+});
+DATE_METHODS.set('getYear()I', (self) => datePeer(self).date.getFullYear() - 1900);
+DATE_METHODS.set('setYear(I)V', (self, [year]) => {
+  const { date } = datePeer(self);
+  const value = toInt(year);
+  date.setFullYear(value >= 0 && value <= 99 ? value + 1900 : value);
+  storeDate(self, date);
+});
+DATE_METHODS.set('getMonth()I', (self) => datePeer(self).date.getMonth());
+DATE_METHODS.set('setMonth(I)V', (self, [month]) => {
+  const { date } = datePeer(self);
+  date.setMonth(toInt(month));
+  storeDate(self, date);
+});
+DATE_METHODS.set('getDate()I', (self) => datePeer(self).date.getDate());
+DATE_METHODS.set('setDate(I)V', (self, [day]) => {
+  const { date } = datePeer(self);
+  date.setDate(toInt(day));
+  storeDate(self, date);
+});
+DATE_METHODS.set('getDay()I', (self) => datePeer(self).date.getDay());
+DATE_METHODS.set('getHours()I', (self) => datePeer(self).date.getHours());
+DATE_METHODS.set('setHours(I)V', (self, [hour]) => {
+  const { date } = datePeer(self);
+  date.setHours(toInt(hour));
+  storeDate(self, date);
+});
+DATE_METHODS.set('getMinutes()I', (self) => datePeer(self).date.getMinutes());
+DATE_METHODS.set('setMinutes(I)V', (self, [minute]) => {
+  const { date } = datePeer(self);
+  date.setMinutes(toInt(minute));
+  storeDate(self, date);
+});
+DATE_METHODS.set('getSeconds()I', (self) => datePeer(self).date.getSeconds());
+DATE_METHODS.set('setSeconds(I)V', (self, [second]) => {
+  const { date } = datePeer(self);
+  date.setSeconds(toInt(second));
+  storeDate(self, date);
+});
+DATE_METHODS.set('toLocaleString()Ljava/lang/String;', (self) => datePeer(self).date.toLocaleString());
+DATE_METHODS.set('toGMTString()Ljava/lang/String;', (self) => datePeer(self).date.toUTCString());
+DATE_METHODS.set('getTimezoneOffset()I', (self) => -datePeer(self).date.getTimezoneOffset());
+DATE_METHODS.set('toInstant()Ljava/time/Instant;', (self, _args, vm) => {
+  const object = vm.allocateRawObject('Ljava/time/Instant;');
+  object.$peer = { epochMilli: BigInt(Math.trunc(Number(self.time ?? 0))) };
+  return object;
+});
+DATE_STATIC.set('UTC(IIIIII)J', (_self, [year, month, day, hour, minute, second]) =>
+  BigInt(Date.UTC(Number(year) + 1900, toInt(month), toInt(day), toInt(hour), toInt(minute), toInt(second))));
+DATE_STATIC.set('parse(Ljava/lang/String;)J', (_self, [text]) => {
+  const parsed = Date.parse(jsString(text));
+  return BigInt(Number.isNaN(parsed) ? 0 : parsed);
+});
+DATE_STATIC.set('from(Ljava/time/Instant;)Ljava/util/Date;', (_self, [instant], vm) => {
+  const object = vm.allocateRawObject('Ljava/util/Date;');
+  object.$peer = { time: Number(instant?.$peer?.epochMilli ?? 0) };
+  return object;
+});
