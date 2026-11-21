@@ -2890,53 +2890,157 @@ JAVA_CORE_CLASSES['Ljava/util/Locale;'] = nativeDef('Ljava/util/Locale;', {
 
 function decimalFormatOptions(pattern) {
   const text = String(pattern ?? '#.##');
-  const dot = text.indexOf('.');
+  const halves = text.split(';');
+  const positive = analyzeDecimalSubpattern(halves[0] ?? '#.##');
+  const negative = halves.length > 1 ? analyzeDecimalSubpattern(halves[1]) : null;
+  const percent = positive.core.includes('%') || positive.suffix.includes('%');
+  const permille = positive.core.includes('\u2030') || positive.suffix.includes('\u2030');
+  const multiplier = percent ? 100 : (permille ? 1000 : 1);
+  const options = {
+    pattern: text,
+    maxFractionDigits: positive.maxFractionDigits,
+    minFractionDigits: positive.minFractionDigits,
+    minIntegerDigits: Math.max(1, positive.minIntegerDigits),
+    grouping: positive.grouping,
+    groupingSize: positive.groupingSize || 3,
+    multiplier,
+    positivePrefix: positive.prefix,
+    positiveSuffix: positive.suffix,
+    negativePrefix: negative ? negative.prefix : `-${positive.prefix}`,
+    negativeSuffix: negative ? negative.suffix : positive.suffix,
+    decimalSeparatorAlwaysShown: false,
+    parseBigDecimal: false,
+    parseIntegerOnly: false,
+    explicitMaxIntegerDigits: false,
+    maxIntegerDigits: 0,
+    roundingMode: null,
+  };
+  if (percent) {
+    options.positiveSuffix = options.positiveSuffix || '%';
+    options.negativeSuffix = options.negativeSuffix || '%';
+  } else if (permille) {
+    options.positiveSuffix = options.positiveSuffix || '\u2030';
+    options.negativeSuffix = options.negativeSuffix || '\u2030';
+  }
+  return options;
+}
+
+function analyzeDecimalSubpattern(source) {
+  const part = String(source ?? '');
+  const first = part.search(/[0#.,]/);
+  const last = part.length - 1 - [...part].reverse().join('').search(/[0#.,]/);
+  const prefix = first > 0 ? part.slice(0, first) : '';
+  const suffix = last >= 0 && last + 1 < part.length ? part.slice(last + 1) : '';
+  const core = first >= 0 && last >= first ? part.slice(first, last + 1) : '';
+  const dot = core.indexOf('.');
   let maxFractionDigits = 0;
   let minFractionDigits = 0;
   if (dot >= 0) {
-    for (let index = dot + 1; index < text.length; index++) {
-      const ch = text[index];
+    for (let index = dot + 1; index < core.length; index++) {
+      const ch = core[index];
       if (ch !== '0' && ch !== '#') break;
       maxFractionDigits++;
       if (ch === '0') minFractionDigits++;
     }
   }
-  return {
-    pattern: text,
-    maxFractionDigits,
-    minFractionDigits,
-    grouping: text.includes(','),
-  };
+  const integerPart = dot >= 0 ? core.slice(0, dot) : core;
+  const commas = [];
+  let minIntegerDigits = 0;
+  for (let index = 0; index < integerPart.length; index++) {
+    const ch = integerPart[index];
+    if (ch === ',') commas.push(index);
+    else if (ch === '0') minIntegerDigits++;
+  }
+  const grouping = commas.length > 0;
+  const groupingSize = grouping ? Math.max(1, integerPart.length - commas[commas.length - 1] - 1) : 3;
+  return { prefix, suffix, core, maxFractionDigits, minFractionDigits, minIntegerDigits, grouping, groupingSize };
 }
 
-function groupDecimalDigits(text) {
+function groupDecimalDigits(text, size = 3) {
   const negative = text.startsWith('-');
   const body = negative ? text.slice(1) : text;
   const [integer, fraction] = body.split('.');
+  const group = Math.max(1, size | 0);
   let grouped = '';
   for (let index = 0; index < integer.length; index++) {
-    if (index > 0 && (integer.length - index) % 3 === 0) grouped += ',';
+    if (index > 0 && (integer.length - index) % group === 0) grouped += ',';
     grouped += integer[index];
   }
   return (negative ? '-' : '') + grouped + (fraction !== undefined ? '.' + fraction : '');
 }
 
 function formatDecimalNumber(value, options) {
-  const number = Number(value);
-  if (Number.isNaN(number)) return 'NaN';
+  const opt = options || {};
+  const number = Number(value) * (opt.multiplier === undefined ? 1 : Number(opt.multiplier) || 0);
+  if (Number.isNaN(number)) return opt.positivePrefix ? `${opt.positivePrefix}NaN${opt.positiveSuffix ?? ''}` : 'NaN';
   if (number === Infinity) return '\u221e';
   if (number === -Infinity) return '-\u221e';
-  const normalized = Object.is(number, -0) ? 0 : number;
-  const fixed = normalized.toFixed(options.maxFractionDigits);
+  const negative = number < 0 || Object.is(number, -0);
+  const fixed = Math.abs(number).toFixed(opt.maxFractionDigits ?? 2);
   let [integer, fraction] = fixed.split('.');
+  const minInt = Math.max(0, opt.minIntegerDigits ?? 1);
+  while (integer.length < minInt) integer = '0' + integer;
+  if (opt.explicitMaxIntegerDigits && opt.maxIntegerDigits >= 0 && integer.length > opt.maxIntegerDigits) {
+    integer = integer.slice(integer.length - opt.maxIntegerDigits);
+  }
   if (fraction !== undefined) {
-    while (fraction.length > options.minFractionDigits && fraction.endsWith('0')) {
-      fraction = fraction.slice(0, -1);
+    while (fraction.length > (opt.minFractionDigits ?? 0) && fraction.endsWith('0')) fraction = fraction.slice(0, -1);
+  }
+  const dot = fraction ? '.' + fraction : (opt.decimalSeparatorAlwaysShown ? '.' : '');
+  let body = integer + dot;
+  if (opt.grouping) body = groupDecimalDigits(body, opt.groupingSize || 3);
+  const prefix = negative ? (opt.negativePrefix ?? '-') : (opt.positivePrefix ?? '');
+  const suffix = negative ? (opt.negativeSuffix ?? '') : (opt.positiveSuffix ?? '');
+  return prefix + body + suffix;
+}
+
+function parseDecimalValue(text, options) {
+  const opt = options || {};
+  let source = String(jsString(text) ?? '').trim();
+  let negative = false;
+  const negPrefix = opt.negativePrefix ?? '-';
+  const negSuffix = opt.negativeSuffix ?? '';
+  if (negPrefix && source.startsWith(negPrefix)) {
+    negative = true;
+    source = source.slice(negPrefix.length);
+  } else {
+    const posPrefix = opt.positivePrefix ?? '';
+    if (posPrefix && source.startsWith(posPrefix)) source = source.slice(posPrefix.length);
+    if (source.startsWith('-')) {
+      negative = true;
+      source = source.slice(1);
     }
   }
-  const body = integer + (fraction ? '.' + fraction : '');
-  return options.grouping ? groupDecimalDigits(body) : body;
+  if (negSuffix && source.endsWith(negSuffix)) source = source.slice(0, -negSuffix.length);
+  const posSuffix = opt.positiveSuffix ?? '';
+  if (posSuffix && source.endsWith(posSuffix)) source = source.slice(0, -posSuffix.length);
+  source = source.replace(/,/g, '');
+  const parsed = parseFloat(source);
+  if (Number.isNaN(parsed)) return null;
+  const multiplier = Number(opt.multiplier) || 1;
+  return (negative ? -parsed : parsed) / multiplier;
 }
+
+function appendToCharBuffer(buffer, text) {
+  const peer = buffer?.$peer ?? buffer;
+  if (peer && Array.isArray(peer.parts)) {
+    peer.parts.push(text);
+    return buffer;
+  }
+  if (peer) {
+    peer.parts = [String(text)];
+    return buffer;
+  }
+  return buffer;
+}
+
+function updateFieldPosition(position, begin, end) {
+  const peer = position?.$peer;
+  if (!peer) return;
+  peer.beginIndex = begin;
+  peer.endIndex = end;
+}
+
 
 JAVA_CORE_CLASSES['Ljava/text/DecimalFormatSymbols;'] = nativeDef('Ljava/text/DecimalFormatSymbols;', {
   super: 'Ljava/lang/Object;',
@@ -8459,3 +8563,468 @@ function characterName(code) {
   if (code >= 0x61 && code <= 0x7a) return `LATIN SMALL LETTER ${String.fromCharCode(code).toUpperCase()}`;
   return CHARACTER_ASCII_NAMES[code] ?? null;
 }
+
+// ---- Integer / Float / Double 数值语义补全 ----
+const INTEGER_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Integer;'].methods;
+const INTEGER_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Integer;'].staticMethods;
+const FLOAT_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Float;'].methods;
+const FLOAT_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Float;'].staticMethods;
+const DOUBLE_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Double;'].methods;
+const DOUBLE_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Double;'].staticMethods;
+
+const FLOAT_VIEW = new Float32Array(1);
+const FLOAT_INT_VIEW = new Int32Array(FLOAT_VIEW.buffer);
+const DOUBLE_VIEW = new Float64Array(1);
+const DOUBLE_LONG_VIEW = new BigInt64Array(DOUBLE_VIEW.buffer);
+
+function floatToRawIntBitsValue(value) {
+  FLOAT_VIEW[0] = Number(value);
+  return FLOAT_INT_VIEW[0] | 0;
+}
+
+function intBitsToFloatValue(bits) {
+  FLOAT_INT_VIEW[0] = toInt(bits);
+  return FLOAT_VIEW[0];
+}
+
+function doubleToRawLongBitsValue(value) {
+  DOUBLE_VIEW[0] = Number(value);
+  return DOUBLE_LONG_VIEW[0];
+}
+
+function longBitsToDoubleValue(bits) {
+  DOUBLE_LONG_VIEW[0] = BigInt.asIntN(64, toLong(bits));
+  return DOUBLE_VIEW[0];
+}
+
+function parseRadixDigits(text, radix, vm) {
+  const source = String(jsString(text) ?? '').trim();
+  const base = toInt(radix);
+  if (base < 2 || base > 36) {
+    if (vm?.throwException) vm.throwException('Ljava/lang/NumberFormatException;', `radix ${base}`);
+    return null;
+  }
+  const negative = source.startsWith('-');
+  const body = source[0] === '-' || source[0] === '+' ? source.slice(1) : source;
+  if (!body) {
+    if (vm?.throwException) vm.throwException('Ljava/lang/NumberFormatException;', `For input string: "${source}"`);
+    return null;
+  }
+  let acc = 0n;
+  for (const ch of body) {
+    const code = ch.codePointAt(0);
+    let digit = -1;
+    if (code >= 48 && code <= 57) digit = code - 48;
+    else if (code >= 97 && code <= 122) digit = code - 87;
+    else if (code >= 65 && code <= 90) digit = code - 55;
+    if (digit < 0 || digit >= base) {
+      if (vm?.throwException) vm.throwException('Ljava/lang/NumberFormatException;', `For input string: "${source}"`);
+      return null;
+    }
+    acc = acc * BigInt(base) + BigInt(digit);
+  }
+  return negative ? -acc : acc;
+}
+
+function integerRadixText(value, radix) {
+  return (toInt(value) >>> 0).toString(toInt(radix));
+}
+
+function unsignedIntegerText(value, radix) {
+  const base = toInt(radix);
+  if (base < 2 || base > 36) return (toInt(value) >>> 0).toString();
+  return (toInt(value) >>> 0).toString(base);
+}
+
+function compareFloatNumbers(a, b) {
+  const left = Number(a);
+  const right = Number(b);
+  if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : 1;
+  if (Number.isNaN(right)) return -1;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  if (left === 0 && right === 0) return Object.is(left, -0) && !Object.is(right, -0) ? -1 : (Object.is(right, -0) && !Object.is(left, -0) ? 1 : 0);
+  return 0;
+}
+
+INTEGER_STATIC.set('toString(II)Ljava/lang/String;', (_self, [value, radix]) => integerRadixText(value, radix));
+INTEGER_STATIC.set('toUnsignedString(I)Ljava/lang/String;', (_self, [value]) => unsignedIntegerText(value, 10));
+INTEGER_STATIC.set('toUnsignedString(II)Ljava/lang/String;', (_self, [value, radix]) => unsignedIntegerText(value, radix));
+INTEGER_STATIC.set('parseUnsignedInt(Ljava/lang/String;)I', (_self, [value], vm) => {
+  const parsed = parseRadixDigits(value, 10, vm);
+  return parsed === null ? 0 : Number(BigInt.asIntN(32, parsed));
+});
+INTEGER_STATIC.set('parseUnsignedInt(Ljava/lang/String;I)I', (_self, [value, radix], vm) => {
+  const parsed = parseRadixDigits(value, radix, vm);
+  return parsed === null ? 0 : Number(BigInt.asIntN(32, parsed));
+});
+INTEGER_STATIC.set('valueOf(Ljava/lang/String;I)Ljava/lang/Integer;', (_self, [value, radix], vm) => {
+  const parsed = parseRadixDigits(value, radix, vm);
+  return vm.wrapPeer({ value: parsed === null ? 0 : Number(BigInt.asIntN(32, parsed)) });
+});
+INTEGER_STATIC.set('hashCode(I)I', (_self, [value]) => toInt(value));
+INTEGER_STATIC.set('compareUnsigned(II)I', (_self, [a, b]) => {
+  const left = toInt(a) >>> 0;
+  const right = toInt(b) >>> 0;
+  return left < right ? -1 : left > right ? 1 : 0;
+});
+INTEGER_STATIC.set('toUnsignedLong(I)J', (_self, [value]) => BigInt(toInt(value) >>> 0));
+INTEGER_STATIC.set('divideUnsigned(II)I', (_self, [a, b]) => {
+  const divisor = toInt(b) >>> 0;
+  if (divisor === 0) return 0;
+  return Number(BigInt.asIntN(32, BigInt(Math.floor((toInt(a) >>> 0) / divisor))));
+});
+INTEGER_STATIC.set('remainderUnsigned(II)I', (_self, [a, b]) => {
+  const divisor = toInt(b) >>> 0;
+  if (divisor === 0) return 0;
+  return Number(BigInt.asIntN(32, BigInt((toInt(a) >>> 0) % divisor)));
+});
+INTEGER_STATIC.set('rotateLeft(II)I', (_self, [value, distance]) => {
+  const v = toInt(value);
+  const d = ((toInt(distance) % 32) + 32) % 32;
+  return ((v << d) | (v >>> (32 - d))) | 0;
+});
+INTEGER_STATIC.set('rotateRight(II)I', (_self, [value, distance]) => {
+  const v = toInt(value);
+  const d = ((toInt(distance) % 32) + 32) % 32;
+  return ((v >>> d) | (v << (32 - d))) | 0;
+});
+INTEGER_STATIC.set('signum(I)I', (_self, [value]) => {
+  const v = toInt(value);
+  return v > 0 ? 1 : (v < 0 ? -1 : 0);
+});
+INTEGER_STATIC.set('reverseBytes(I)I', (_self, [value]) => {
+  const v = toInt(value) >>> 0;
+  return (((v >>> 24) & 0xff) | ((v >>> 8) & 0xff00) | ((v << 8) & 0xff0000) | (v << 24)) | 0;
+});
+INTEGER_STATIC.set('sum(II)I', (_self, [a, b]) => (toInt(a) + toInt(b)) | 0);
+INTEGER_STATIC.set('max(II)I', (_self, [a, b]) => (toInt(a) >= toInt(b) ? toInt(a) : toInt(b)));
+INTEGER_STATIC.set('min(II)I', (_self, [a, b]) => (toInt(a) <= toInt(b) ? toInt(a) : toInt(b)));
+INTEGER_METHODS.set('byteValue()B', (self) => (toInt(self.value) << 24) >> 24);
+INTEGER_METHODS.set('shortValue()S', (self) => (toInt(self.value) << 16) >> 16);
+INTEGER_METHODS.set('floatValue()F', (self) => Number(toInt(self.value)));
+INTEGER_METHODS.set('doubleValue()D', (self) => Number(toInt(self.value)));
+INTEGER_METHODS.set('compareTo(Ljava/lang/Integer;)I', (self, [other]) => {
+  const value = toInt(self.value);
+  const target = toInt(other?.$peer?.value ?? other?.value ?? 0);
+  return value < target ? -1 : value > target ? 1 : 0;
+});
+
+FLOAT_STATIC.set('toHexString(F)Ljava/lang/String;', (_self, [value]) => {
+  const number = Number(value);
+  if (Number.isNaN(number)) return 'NaN';
+  if (!Number.isFinite(number)) return number > 0 ? 'Infinity' : '-Infinity';
+  const text = number.toString(16);
+  return `0x${text}p0`;
+});
+FLOAT_STATIC.set('valueOf(Ljava/lang/String;)Ljava/lang/Float;', (_self, [value], vm) =>
+  vm.wrapPeer({ value: parseFloat(jsString(value)) || 0 }));
+FLOAT_STATIC.set('isNaN(F)Z', (_self, [value]) => (Number.isNaN(Number(value)) ? 1 : 0));
+FLOAT_STATIC.set('isInfinite(F)Z', (_self, [value]) => (Number.isFinite(Number(value)) ? 0 : 1));
+FLOAT_STATIC.set('isFinite(F)Z', (_self, [value]) => (Number.isFinite(Number(value)) ? 1 : 0));
+FLOAT_STATIC.set('hashCode(F)I', (_self, [value]) => floatToRawIntBitsValue(value));
+FLOAT_STATIC.set('floatToIntBits(F)I', (_self, [value]) => floatToRawIntBitsValue(value));
+FLOAT_STATIC.set('floatToRawIntBits(F)I', (_self, [value]) => floatToRawIntBitsValue(value));
+FLOAT_STATIC.set('intBitsToFloat(I)F', (_self, [bits]) => intBitsToFloatValue(bits));
+FLOAT_STATIC.set('compare(FF)I', (_self, [a, b]) => compareFloatNumbers(a, b));
+FLOAT_STATIC.set('sum(FF)F', (_self, [a, b]) => Number(a) + Number(b));
+FLOAT_STATIC.set('max(FF)F', (_self, [a, b]) => (compareFloatNumbers(a, b) >= 0 ? Number(a) : Number(b)));
+FLOAT_STATIC.set('min(FF)F', (_self, [a, b]) => (compareFloatNumbers(a, b) <= 0 ? Number(a) : Number(b)));
+FLOAT_METHODS.set('<init>(Ljava/lang/String;)V', (self, [value]) => {
+  self.value = parseFloat(jsString(value)) || 0;
+});
+FLOAT_METHODS.set('isNaN()Z', (self) => (Number.isNaN(Number(self.value)) ? 1 : 0));
+FLOAT_METHODS.set('isInfinite()Z', (self) => (Number.isFinite(Number(self.value)) ? 0 : 1));
+FLOAT_METHODS.set('byteValue()B', (self) => ((Number(self.value) | 0) << 24) >> 24);
+FLOAT_METHODS.set('shortValue()S', (self) => ((Number(self.value) | 0) << 16) >> 16);
+FLOAT_METHODS.set('intValue()I', (self) => Math.trunc(Number(self.value)) | 0);
+FLOAT_METHODS.set('longValue()J', (self) => BigInt(Math.trunc(Number(self.value) || 0)));
+FLOAT_METHODS.set('compareTo(Ljava/lang/Float;)I', (self, [other]) =>
+  compareFloatNumbers(self.value, other?.$peer?.value ?? other?.value ?? 0));
+
+DOUBLE_STATIC.set('toHexString(D)Ljava/lang/String;', (_self, [value]) => {
+  const number = Number(value);
+  if (Number.isNaN(number)) return 'NaN';
+  if (!Number.isFinite(number)) return number > 0 ? 'Infinity' : '-Infinity';
+  return `0x${number.toString(16)}p0`;
+});
+DOUBLE_STATIC.set('valueOf(Ljava/lang/String;)Ljava/lang/Double;', (_self, [value], vm) =>
+  vm.wrapPeer({ value: parseDouble(jsString(value)) }));
+DOUBLE_STATIC.set('isFinite(D)Z', (_self, [value]) => (Number.isFinite(Number(value)) ? 1 : 0));
+DOUBLE_STATIC.set('hashCode(D)I', (_self, [value]) => {
+  const bits = doubleToRawLongBitsValue(value);
+  return Number(BigInt.asIntN(32, bits ^ (bits >> 32n)));
+});
+DOUBLE_STATIC.set('doubleToLongBits(D)J', (_self, [value]) => doubleToRawLongBitsValue(value));
+DOUBLE_STATIC.set('doubleToRawLongBits(D)J', (_self, [value]) => doubleToRawLongBitsValue(value));
+DOUBLE_STATIC.set('longBitsToDouble(J)D', (_self, [bits]) => longBitsToDoubleValue(bits));
+DOUBLE_STATIC.set('compare(DD)I', (_self, [a, b]) => compareFloatNumbers(a, b));
+DOUBLE_STATIC.set('sum(DD)D', (_self, [a, b]) => Number(a) + Number(b));
+DOUBLE_STATIC.set('max(DD)D', (_self, [a, b]) => (compareFloatNumbers(a, b) >= 0 ? Number(a) : Number(b)));
+DOUBLE_STATIC.set('min(DD)D', (_self, [a, b]) => (compareFloatNumbers(a, b) <= 0 ? Number(a) : Number(b)));
+DOUBLE_METHODS.set('<init>(Ljava/lang/String;)V', (self, [value]) => {
+  self.value = parseDouble(jsString(value));
+});
+DOUBLE_METHODS.set('isNaN()Z', (self) => (Number.isNaN(Number(self.value)) ? 1 : 0));
+DOUBLE_METHODS.set('isInfinite()Z', (self) => (Number.isFinite(Number(self.value)) ? 0 : 1));
+DOUBLE_METHODS.set('byteValue()B', (self) => ((Number(self.value) | 0) << 24) >> 24);
+DOUBLE_METHODS.set('shortValue()S', (self) => ((Number(self.value) | 0) << 16) >> 16);
+DOUBLE_METHODS.set('intValue()I', (self) => Math.trunc(Number(self.value)) | 0);
+DOUBLE_METHODS.set('longValue()J', (self) => BigInt(Math.trunc(Number(self.value) || 0)));
+DOUBLE_METHODS.set('compareTo(Ljava/lang/Double;)I', (self, [other]) =>
+  compareFloatNumbers(self.value, other?.$peer?.value ?? other?.value ?? 0));
+
+// ---- java.lang.StringBuffer（复用 StringBuilder 的真实缓冲语义）----
+(() => {
+  const builder = JAVA_CORE_CLASSES['Ljava/lang/StringBuilder;'];
+  if (!builder) return;
+  const buffer = nativeDef('Ljava/lang/StringBuffer;', {
+    super: 'Ljava/lang/Object;',
+    ctor: peerClass(function () {
+      this.parts = [];
+    }, { parts: [] }),
+    methods: {},
+    staticMethods: {},
+  });
+  for (const [key, fn] of builder.methods) {
+    buffer.methods.set(key.split('Ljava/lang/StringBuilder;').join('Ljava/lang/StringBuffer;'), fn);
+  }
+  JAVA_CORE_CLASSES['Ljava/lang/StringBuffer;'] = buffer;
+})();
+
+// ---- java.text.FieldPosition / ParsePosition / AttributedCharacterIterator ----
+JAVA_CORE_CLASSES['Ljava/text/FieldPosition;'] = nativeDef('Ljava/text/FieldPosition;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, field) {
+    this.field = field ?? 0;
+    this.beginIndex = 0;
+    this.endIndex = 0;
+  }, { field: 0, beginIndex: 0, endIndex: 0 }),
+  methods: {
+    '<init>(I)V': (self, [field]) => { self.field = toInt(field); },
+    '<init>(Ljava/text/Format$Field;)V': (self, [field]) => { self.field = field ?? null; },
+    'getField()I': (self) => toInt(self.field) | 0,
+    'getFieldAttribute()Ljava/text/Format$Field;': (self) => self.fieldAttribute ?? null,
+    'getBeginIndex()I': (self) => toInt(self.beginIndex),
+    'getEndIndex()I': (self) => toInt(self.endIndex),
+    'setBeginIndex(I)V': (self, [value]) => { self.beginIndex = toInt(value); },
+    'setEndIndex(I)V': (self, [value]) => { self.endIndex = toInt(value); },
+    'toString()Ljava/lang/String;': (self) => `java.text.FieldPosition[field=${toInt(self.field)},beginIndex=${toInt(self.beginIndex)},endIndex=${toInt(self.endIndex)}]`,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/text/ParsePosition;'] = nativeDef('Ljava/text/ParsePosition;', {
+  super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm, object, index) {
+    this.index = index ?? 0;
+    this.errorIndex = -1;
+  }, { index: 0, errorIndex: -1 }),
+  methods: {
+    '<init>(I)V': (self, [index]) => { self.index = toInt(index); },
+    'getIndex()I': (self) => toInt(self.index),
+    'setIndex(I)V': (self, [index]) => { self.index = toInt(index); },
+    'getErrorIndex()I': (self) => toInt(self.errorIndex),
+    'setErrorIndex(I)V': (self, [index]) => { self.errorIndex = toInt(index); },
+    'toString()Ljava/lang/String;': (self) => `java.text.ParsePosition[index=${toInt(self.index)},errorIndex=${toInt(self.errorIndex)}]`,
+  },
+});
+
+JAVA_CORE_CLASSES['Ljava/text/AttributedCharacterIterator;'] = nativeDef('Ljava/text/AttributedCharacterIterator;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/text/CharacterIterator;'],
+  ctor: peerClass(function (vm, object, text) {
+    this.text = String(text ?? '');
+    this.index = 0;
+    this.attributes = [];
+  }, { text: '', index: 0, attributes: [] }),
+  methods: {
+    'getText()Ljava/lang/String;': (self) => self.text,
+    'getBeginIndex()I': () => 0,
+    'getEndIndex()I': (self) => self.text.length,
+    'getIndex()I': (self) => toInt(self.index),
+    'setIndex(I)C': (self, [index]) => {
+      self.index = Math.max(0, Math.min(self.text.length, toInt(index)));
+      return self.text.charCodeAt(self.index) || 0xffff;
+    },
+    'current()C': (self) => self.text.charCodeAt(toInt(self.index)) || 0xffff,
+    'first()C': (self) => {
+      self.index = 0;
+      return self.text.charCodeAt(0) || 0xffff;
+    },
+    'last()C': (self) => {
+      self.index = Math.max(0, self.text.length - 1);
+      return self.text.charCodeAt(self.index) || 0xffff;
+    },
+    'next()C': (self) => {
+      if (self.index >= self.text.length) {
+        self.index = self.text.length;
+        return 0xffff;
+      }
+      self.index += 1;
+      return self.index >= self.text.length ? 0xffff : self.text.charCodeAt(self.index);
+    },
+    'previous()C': (self) => {
+      if (self.index <= 0) return 0xffff;
+      self.index -= 1;
+      return self.text.charCodeAt(self.index);
+    },
+    'getRunStart()I': (self) => toInt(self.index),
+    'getRunLimit()I': (self) => self.text.length,
+    'getRunStart(Ljava/util/Set;)I': (self) => toInt(self.index),
+    'getRunLimit(Ljava/util/Set;)I': (self) => self.text.length,
+    'getAttributes()Ljava/util/Set;': (self, _args, vm) => makeSet(vm, self.attributes ?? []),
+    'getAllAttributeKeys()Ljava/util/Set;': (self, _args, vm) => makeSet(vm, self.attributes ?? []),
+    'getAttribute(Ljava/lang/Object;)Ljava/lang/Object;': () => null,
+    'clone()Ljava/lang/Object;': (self, _args, vm) => {
+      const copy = vm.allocateRawObject('Ljava/text/AttributedCharacterIterator;');
+      copy.$peer = { text: self.text, index: toInt(self.index), attributes: [...(self.attributes ?? [])] };
+      return copy;
+    },
+  },
+});
+
+// ---- java.text.DecimalFormatSymbols 补全 ----
+const DFS_METHODS = JAVA_CORE_CLASSES['Ljava/text/DecimalFormatSymbols;'].methods;
+const DFS_STATIC = JAVA_CORE_CLASSES['Ljava/text/DecimalFormatSymbols;'].staticMethods;
+function symbolChar(self, key, fallback) {
+  const value = self[key];
+  return (typeof value === 'string' ? value : fallback).charCodeAt(0);
+}
+function setSymbolChar(self, key, value) {
+  self[key] = String.fromCharCode(toInt(value));
+}
+DFS_STATIC.set('getAvailableLocales()[Ljava/util/Locale;', (_self, _args, vm) => {
+  const tags = ['zh-CN', 'zh-TW', 'en-US', 'en-GB', 'ja-JP', 'ko-KR', 'fr-FR', 'de-DE', 'es-ES', 'ru-RU'];
+  const array = vm.newArray('[Ljava/util/Locale;', tags.length, null);
+  tags.forEach((tag, index) => { array.$data[index] = localeObject(vm, tag); });
+  return array;
+});
+DFS_METHODS.set('getPerMill()C', (self) => symbolChar(self, 'perMill', '\u2030'));
+DFS_METHODS.set('setPerMill(C)V', (self, [value]) => setSymbolChar(self, 'perMill', value));
+DFS_METHODS.set('getPercent()C', (self) => symbolChar(self, 'percent', '%'));
+DFS_METHODS.set('setPercent(C)V', (self, [value]) => setSymbolChar(self, 'percent', value));
+DFS_METHODS.set('getDigit()C', (self) => symbolChar(self, 'digit', '#'));
+DFS_METHODS.set('setDigit(C)V', (self, [value]) => setSymbolChar(self, 'digit', value));
+DFS_METHODS.set('getPatternSeparator()C', (self) => symbolChar(self, 'patternSeparator', ';'));
+DFS_METHODS.set('setPatternSeparator(C)V', (self, [value]) => setSymbolChar(self, 'patternSeparator', value));
+DFS_METHODS.set('getInfinity()Ljava/lang/String;', (self) => self.infinity ?? '\u221e');
+DFS_METHODS.set('setInfinity(Ljava/lang/String;)V', (self, [value]) => { self.infinity = jsString(value); });
+DFS_METHODS.set('getNaN()Ljava/lang/String;', (self) => self.nan ?? 'NaN');
+DFS_METHODS.set('setNaN(Ljava/lang/String;)V', (self, [value]) => { self.nan = jsString(value); });
+DFS_METHODS.set('getMinusSign()C', (self) => symbolChar(self, 'minusSign', '-'));
+DFS_METHODS.set('setMinusSign(C)V', (self, [value]) => setSymbolChar(self, 'minusSign', value));
+DFS_METHODS.set('getCurrencySymbol()Ljava/lang/String;', (self) => self.currencySymbol ?? '\u00a4');
+DFS_METHODS.set('setCurrencySymbol(Ljava/lang/String;)V', (self, [value]) => { self.currencySymbol = jsString(value); });
+DFS_METHODS.set('getInternationalCurrencySymbol()Ljava/lang/String;', (self) => self.internationalCurrencySymbol ?? '');
+DFS_METHODS.set('setInternationalCurrencySymbol(Ljava/lang/String;)V', (self, [value]) => {
+  self.internationalCurrencySymbol = jsString(value);
+});
+DFS_METHODS.set('getCurrency()Ljava/util/Currency;', (self) => self.currency ?? null);
+DFS_METHODS.set('setCurrency(Ljava/util/Currency;)V', (self, [value]) => { self.currency = value ?? null; });
+DFS_METHODS.set('getMonetaryDecimalSeparator()C', (self) => symbolChar(self, 'monetaryDecimalSeparator', self.decimalSeparator || '.'));
+DFS_METHODS.set('setMonetaryDecimalSeparator(C)V', (self, [value]) => setSymbolChar(self, 'monetaryDecimalSeparator', value));
+DFS_METHODS.set('getExponentSeparator()Ljava/lang/String;', (self) => self.exponentSeparator ?? 'E');
+DFS_METHODS.set('setExponentSeparator(Ljava/lang/String;)V', (self, [value]) => { self.exponentSeparator = jsString(value); });
+
+// ---- java.text.DecimalFormat 补全 ----
+const DF_METHODS = JAVA_CORE_CLASSES['Ljava/text/DecimalFormat;'].methods;
+function decimalOptions(self) {
+  if (!self.options) self.options = decimalFormatOptions('#.##');
+  return self.options;
+}
+function formatDecimalValue(self, value) {
+  const number = typeof value === 'object' && value !== null
+    ? Number(value.$peer?.value ?? value.value)
+    : Number(value);
+  return formatDecimalNumber(number, decimalOptions(self));
+}
+function decimalNumberObject(vm, value, self) {
+  if (self.options?.parseBigDecimal) return makeBigDecimal(vm, value, scaleOfText(String(value)));
+  if (self.options?.parseIntegerOnly) {
+    const object = vm.allocateRawObject('Ljava/lang/Long;');
+    object.$peer = { value: BigInt(Math.trunc(value)) };
+    return object;
+  }
+  const object = vm.allocateRawObject('Ljava/lang/Double;');
+  object.$peer = { value: Number(value) };
+  return object;
+}
+DF_METHODS.set('format(Ljava/lang/Object;Ljava/lang/StringBuffer;Ljava/text/FieldPosition;)Ljava/lang/StringBuffer;', (self, [value, buffer, position]) => {
+  const text = formatDecimalValue(self, value);
+  const start = (buffer?.$peer?.parts || []).join('').length;
+  updateFieldPosition(position, start, start + text.length);
+  return appendToCharBuffer(buffer, text);
+});
+DF_METHODS.set('format(DLjava/lang/StringBuffer;Ljava/text/FieldPosition;)Ljava/lang/StringBuffer;', (self, [value, buffer, position]) => {
+  const text = formatDecimalNumber(Number(value), decimalOptions(self));
+  const start = (buffer?.$peer?.parts || []).join('').length;
+  updateFieldPosition(position, start, start + text.length);
+  return appendToCharBuffer(buffer, text);
+});
+DF_METHODS.set('format(JLjava/lang/StringBuffer;Ljava/text/FieldPosition;)Ljava/lang/StringBuffer;', (self, [value, buffer, position]) => {
+  const text = formatDecimalNumber(Number(toLong(value)), decimalOptions(self));
+  const start = (buffer?.$peer?.parts || []).join('').length;
+  updateFieldPosition(position, start, start + text.length);
+  return appendToCharBuffer(buffer, text);
+});
+DF_METHODS.set('formatToCharacterIterator(Ljava/lang/Object;)Ljava/text/AttributedCharacterIterator;', (self, [value], vm) => {
+  const text = formatDecimalValue(self, value);
+  const iterator = vm.allocateRawObject('Ljava/text/AttributedCharacterIterator;');
+  iterator.$peer = { text, index: 0, attributes: [] };
+  return iterator;
+});
+DF_METHODS.set('parse(Ljava/lang/String;Ljava/text/ParsePosition;)Ljava/lang/Number;', (self, [text, position], vm) => {
+  const parsed = parseDecimalValue(text, decimalOptions(self));
+  const peer = position?.$peer;
+  if (parsed === null) {
+    if (peer) peer.errorIndex = toInt(peer.index);
+    return null;
+  }
+  if (peer) {
+    peer.index = String(jsString(text) ?? '').length;
+    peer.errorIndex = -1;
+  }
+  return decimalNumberObject(vm, parsed, self);
+});
+DF_METHODS.set('setDecimalFormatSymbols(Ljava/text/DecimalFormatSymbols;)V', (self, [symbols]) => { self.symbols = symbols ?? null; });
+DF_METHODS.set('getPositivePrefix()Ljava/lang/String;', (self) => String(decimalOptions(self).positivePrefix ?? ''));
+DF_METHODS.set('setPositivePrefix(Ljava/lang/String;)V', (self, [value]) => { decimalOptions(self).positivePrefix = jsString(value); });
+DF_METHODS.set('getNegativePrefix()Ljava/lang/String;', (self) => String(decimalOptions(self).negativePrefix ?? ''));
+DF_METHODS.set('setNegativePrefix(Ljava/lang/String;)V', (self, [value]) => { decimalOptions(self).negativePrefix = jsString(value); });
+DF_METHODS.set('getPositiveSuffix()Ljava/lang/String;', (self) => String(decimalOptions(self).positiveSuffix ?? ''));
+DF_METHODS.set('setPositiveSuffix(Ljava/lang/String;)V', (self, [value]) => { decimalOptions(self).positiveSuffix = jsString(value); });
+DF_METHODS.set('getNegativeSuffix()Ljava/lang/String;', (self) => String(decimalOptions(self).negativeSuffix ?? ''));
+DF_METHODS.set('setNegativeSuffix(Ljava/lang/String;)V', (self, [value]) => { decimalOptions(self).negativeSuffix = jsString(value); });
+DF_METHODS.set('getMultiplier()I', (self) => toInt(decimalOptions(self).multiplier));
+DF_METHODS.set('setMultiplier(I)V', (self, [value]) => { decimalOptions(self).multiplier = toInt(value); });
+DF_METHODS.set('isGroupingUsed()Z', (self) => (decimalOptions(self).grouping ? 1 : 0));
+DF_METHODS.set('getGroupingSize()I', (self) => toInt(decimalOptions(self).groupingSize ?? 3));
+DF_METHODS.set('setGroupingSize(I)V', (self, [value]) => { decimalOptions(self).groupingSize = Math.max(1, toInt(value)); });
+DF_METHODS.set('isDecimalSeparatorAlwaysShown()Z', (self) => (decimalOptions(self).decimalSeparatorAlwaysShown ? 1 : 0));
+DF_METHODS.set('isParseBigDecimal()Z', (self) => (decimalOptions(self).parseBigDecimal ? 1 : 0));
+DF_METHODS.set('setParseBigDecimal(Z)V', (self, [value]) => { decimalOptions(self).parseBigDecimal = !!value; });
+DF_METHODS.set('isParseIntegerOnly()Z', (self) => (decimalOptions(self).parseIntegerOnly ? 1 : 0));
+DF_METHODS.set('setParseIntegerOnly(Z)V', (self, [value]) => { decimalOptions(self).parseIntegerOnly = !!value; });
+DF_METHODS.set('toPattern()Ljava/lang/String;', (self) => String(decimalOptions(self).pattern ?? '#.##'));
+DF_METHODS.set('toLocalizedPattern()Ljava/lang/String;', (self) => String(decimalOptions(self).pattern ?? '#.##'));
+DF_METHODS.set('applyLocalizedPattern(Ljava/lang/String;)V', (self, [pattern]) => {
+  self.options = decimalFormatOptions(jsString(pattern));
+});
+DF_METHODS.set('setMaximumIntegerDigits(I)V', (self, [value]) => {
+  const options = decimalOptions(self);
+  options.explicitMaxIntegerDigits = true;
+  options.maxIntegerDigits = Math.max(0, toInt(value));
+});
+DF_METHODS.set('setMinimumIntegerDigits(I)V', (self, [value]) => {
+  decimalOptions(self).minIntegerDigits = Math.max(0, toInt(value));
+});
+DF_METHODS.set('getMaximumIntegerDigits()I', (self) => {
+  const options = decimalOptions(self);
+  return options.explicitMaxIntegerDigits ? toInt(options.maxIntegerDigits) : 40;
+});
+DF_METHODS.set('getMinimumIntegerDigits()I', (self) => toInt(decimalOptions(self).minIntegerDigits ?? 1));
+DF_METHODS.set('getMaximumFractionDigits()I', (self) => toInt(decimalOptions(self).maxFractionDigits));
+DF_METHODS.set('getMinimumFractionDigits()I', (self) => toInt(decimalOptions(self).minFractionDigits));
+DF_METHODS.set('getCurrency()Ljava/util/Currency;', (self) => self.currency ?? null);
+DF_METHODS.set('setCurrency(Ljava/util/Currency;)V', (self, [value]) => { self.currency = value ?? null; });
+DF_METHODS.set('getRoundingMode()Ljava/math/RoundingMode;', (self) => decimalOptions(self).roundingMode ?? null);
