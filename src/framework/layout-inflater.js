@@ -295,6 +295,23 @@ export class LayoutInflater {
     return view;
   }
 
+  /** 按 AOSP createView(name, prefix, attrs) 的语义构造视图：短名默认走 android.widget 前缀。 */
+  createViewFromName(name, prefix, attrs) {
+    const tag = String(name ?? '');
+    if (!tag) return null;
+    const fullName = prefix ? `${prefix}.${tag}` : (tag.includes('.') ? tag : `android.widget.${tag}`);
+    const sourceNode = attrs?.$attrNode || attrs?.$peer?.node || null;
+    const node = {
+      type: 'element',
+      name: fullName,
+      attrs: sourceNode?.attrs ? sourceNode.attrs.slice() : [],
+      children: [],
+    };
+    const view = this.createView(node);
+    if (view && node.attrs.length) this.applyAttributes(view, node);
+    return view;
+  }
+
   inflateNode(node, parent, inheritedTheme = null) {
     if (!node || node.type !== 'element') return null;
     if (node.name === 'include') return this.inflateInclude(node, parent, inheritedTheme);

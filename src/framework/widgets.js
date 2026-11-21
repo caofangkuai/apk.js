@@ -786,6 +786,12 @@ export class ImageView extends View {
     this.cropToPadding = false;
     this.maxWidth = 0;
     this.maxHeight = 0;
+    this.imageAlpha = 255;
+    this.colorFilter = null;
+    this.imageState = null;
+    this.baseline = -1;
+    this.baselineAlignBottom = false;
+    this.imageTransform = null;
   }
 
   setImageDrawable(drawable) {
@@ -805,6 +811,76 @@ export class ImageView extends View {
     this.drawable = { type: 'bitmap', bitmap };
     this.invalidate();
     return this;
+  }
+
+  setImageState(state, merge) {
+    const current = Array.isArray(this.imageState) ? this.imageState : [];
+    this.imageState = merge ? [...current, ...(state?.$data ?? state ?? [])] : [...(state?.$data ?? state ?? [])];
+    this.refreshDrawableState();
+  }
+
+  setFrame(left, top, right, bottom) {
+    if (typeof super.setFrame === 'function') return super.setFrame(left, top, right, bottom);
+    this.left = left;
+    this.top = top;
+    this.right = right;
+    this.bottom = bottom;
+    return true;
+  }
+
+  /** 对应 AOSP ImageView.animateTransform：对 drawable 应用矩阵变换后重绘。 */
+  animateTransform(matrix) {
+    const peer = matrix?.$peer || matrix;
+    if (!peer) return;
+    const values = typeof peer.getValues === 'function'
+      ? peer.getValues()
+      : (peer.values ?? peer.$values ?? null);
+    this.imageTransform = Array.isArray(values) ? [...values] : null;
+    this.invalidate();
+  }
+
+  setBaseline(baseline) {
+    this.baseline = Number(baseline) | 0;
+  }
+
+  setBaselineAlignBottom(aligned) {
+    this.baselineAlignBottom = !!aligned;
+    this.requestLayout();
+  }
+
+  getBaselineAlignBottom() {
+    return this.baselineAlignBottom;
+  }
+
+  setColorFilter(color, mode) {
+    if (color && typeof color === 'object' && !mode) {
+      this.colorFilter = color;
+    } else {
+      this.colorFilter = { type: 'color', color: Number(color) >>> 0, mode: mode ?? null };
+    }
+    this.invalidate();
+  }
+
+  clearColorFilter() {
+    this.colorFilter = null;
+    this.invalidate();
+  }
+
+  getColorFilter() {
+    return this.colorFilter && this.colorFilter.type !== 'color' ? this.colorFilter : null;
+  }
+
+  setAlpha(alpha) {
+    this.imageAlpha = Math.max(0, Math.min(255, Number(alpha) | 0));
+    this.invalidate();
+  }
+
+  getImageAlpha() {
+    return this.imageAlpha;
+  }
+
+  getBaseline() {
+    return this.baseline;
   }
 
   setScaleType(scaleType) {
@@ -974,6 +1050,11 @@ export class ImageView extends View {
     const rect = this.computeDrawRect(intrinsic.width, intrinsic.height);
     const ctx = canvas.context;
     ctx.save();
+    if (this.imageAlpha < 255) ctx.globalAlpha = (ctx.globalAlpha ?? 1) * (this.imageAlpha / 255);
+    if (this.imageTransform) {
+      const [a, b, c, d, e, f] = this.imageTransform;
+      ctx.transform(a, b, c, d, e, f);
+    }
     if (this.cropToPadding) {
       ctx.beginPath();
       ctx.rect(this.paddingLeft, this.paddingTop, this.getWidth() - this.paddingLeft - this.paddingRight, this.getHeight() - this.paddingTop - this.paddingBottom);
@@ -989,8 +1070,23 @@ export class ImageView extends View {
       if (drawable.$dexClass) drawDexDrawableCentered(ctx, drawable, target, vm, this);
       else drawDrawable(ctx, drawable, target, { vm, state: this.drawableStateMap(), stateSet: this.drawableState() });
     }
+    if (this.colorFilter) applyImageViewColorFilter(ctx, target, this.colorFilter);
     ctx.restore();
   }
+}
+
+/** 把 ImageView 的 colorFilter 转换成 Canvas2D 合成操作（SRC_IN/SRC_ATOP/MULTIPLY/SCREEN）。 */
+function applyImageViewColorFilter(ctx, rect, filter) {
+  const peer = filter?.$peer || filter;
+  const color = typeof filter === 'object' ? peer?.color : filter;
+  if (typeof color !== 'number') return;
+  const mode = (peer?.mode?.$peer || peer?.mode)?.name || 'SRC_ATOP';
+  const operation = mode === 'MULTIPLY' ? 'multiply' : (mode === 'SCREEN' ? 'screen' : 'source-atop');
+  ctx.save();
+  ctx.globalCompositeOperation = operation;
+  ctx.fillStyle = colorToCss(color >>> 0);
+  ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+  ctx.restore();
 }
 
 function themeColorOf(view, key, fallback) {
@@ -1625,12 +1721,97 @@ export class NumberPicker extends TextView {
   constructor(context = null) {
     super(context);
     this.value = 0;
+    this.minValue = 0;
+    this.maxValue = 0;
+    this.wrapSelectorWheel = true;
+    this.displayedValues = null;
+    this.selectionDividerHeight = -1;
+    this.pickerTextColor = 0xff000000;
+    this.pickerTextSize = 0;
+    this.onScrollListener = null;
+    this.onLongPressUpdateInterval = 300;
     this.setText('0');
   }
 
+  /** 值到展示文本：优先 displayedValues，其次 formatter 之外的十进制字符串。 */
+  label(value) {
+    const min = this.minValue | 0;
+    const list = this.displayedValues;
+    if (Array.isArray(list)) {
+      const index = (value | 0) - min;
+      if (index >= 0 && index < list.length) return String(list[index] ?? '');
+    }
+    return String(value);
+  }
+
+  /** 按 wrapSelectorWheel 把值收敛到 [minValue, maxValue]。 */
+  clamp(value) {
+    const min = this.minValue | 0;
+    const max = this.maxValue | 0;
+    const span = max - min + 1;
+    if (span <= 0) return min;
+    if (this.wrapSelectorWheel) return min + ((((value | 0) - min) % span) + span) % span;
+    return Math.max(min, Math.min(max, value | 0));
+  }
+
   setValue(value) {
-    this.value = Number(value) || 0;
-    this.setText(String(this.value));
+    this.value = this.clamp(Number(value) || 0);
+    this.setText(this.label(this.value));
     this.invalidate?.();
+  }
+
+  rowHeight() {
+    const density = this.getDensity();
+    const size = this.pickerTextSize || 24 * density;
+    return size * 1.6;
+  }
+
+  onMeasure(widthSpec, heightSpec) {
+    const density = this.getDensity();
+    const size = this.pickerTextSize || 24 * density;
+    const labels = [
+      this.label(this.clamp(this.value - 1)),
+      this.label(this.value),
+      this.label(this.clamp(this.value + 1)),
+    ];
+    let width = 0;
+    for (const label of labels) width = Math.max(width, measureTextWidth(label, size, this.fontSpec()));
+    width = Math.ceil(width + 32 * density);
+    const divider = Math.max(0, this.selectionDividerHeight);
+    const height = Math.ceil(this.rowHeight() * 3 + divider);
+    this.setMeasuredDimension(resolveSize(width, widthSpec), resolveSize(height, heightSpec));
+  }
+
+  onDraw(ctx) {
+    const density = this.getDensity();
+    const size = this.pickerTextSize || 24 * density;
+    const row = this.rowHeight();
+    const divider = Math.max(0, this.selectionDividerHeight);
+    const width = this.getWidth();
+    const contentHeight = this.getHeight() - divider;
+    const centerY = contentHeight / 2;
+    const font = this.fontSpec();
+    const rows = [
+      { label: this.label(this.clamp(this.value - 1)), y: centerY - row, alpha: 0.4, size: size * 0.8 },
+      { label: this.label(this.value), y: centerY, alpha: 1, size },
+      { label: this.label(this.clamp(this.value + 1)), y: centerY + row, alpha: 0.4, size: size * 0.8 },
+    ];
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const baseAlpha = typeof ctx.globalAlpha === 'number' ? ctx.globalAlpha : 1;
+    for (const item of rows) {
+      ctx.globalAlpha = item.alpha * baseAlpha;
+      ctx.fillStyle = colorToCss(this.pickerTextColor);
+      ctx.font = `${Math.round(item.size)}px ${font}`;
+      ctx.fillText(item.label, width / 2, item.y);
+    }
+    ctx.globalAlpha = baseAlpha;
+    const dividerColor = this.$vm?.themeAttributes?.colorControlNormal;
+    ctx.fillStyle = colorToCss(typeof dividerColor === 'number' ? dividerColor : 0x1f000000);
+    const dividerHeight = Math.max(1, Math.round(density));
+    ctx.fillRect(0, centerY - row / 2, width, dividerHeight);
+    ctx.fillRect(0, centerY + row / 2 - dividerHeight, width, dividerHeight);
+    ctx.restore();
   }
 }

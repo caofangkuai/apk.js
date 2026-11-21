@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：19
-- 注册的 native 类：423
-- 方法/构造函数键（静态统计）：5924
+- 注册的 native 类：425
+- 方法/构造函数键（静态统计）：8796
 
 ## Native 类清单
 
@@ -243,6 +243,7 @@
 | `Landroid/widget/EdgeEffect;` | registry.js |
 | `Landroid/widget/EditText;` | registry.js |
 | `Landroid/widget/ExpandableListView;` | registry.js |
+| `Landroid/widget/Filter;` | registry.js |
 | `Landroid/widget/FrameLayout;` | registry.js |
 | `Landroid/widget/FrameLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/Gallery;` | registry.js |
@@ -252,6 +253,7 @@
 | `Landroid/widget/ImageButton;` | registry.js |
 | `Landroid/widget/ImageSwitcher;` | registry.js |
 | `Landroid/widget/ImageView;` | registry.js |
+| `Landroid/widget/ImageView$ScaleType;` | registry.js |
 | `Landroid/widget/LinearLayout;` | registry.js |
 | `Landroid/widget/LinearLayout$LayoutParams;` | registry.js |
 | `Landroid/widget/ListAdapter;` | registry.js |

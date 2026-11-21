@@ -674,6 +674,88 @@ export class TableLayout extends LinearLayout {
     this.mShrinkableColumnList = null;
     this.mCollapsedColumnList = null;
   }
+
+  /** 对应 AOSP TableLayout.onMeasure：先量自然列宽，再按 stretch/shrink/collapsed 分配。 */
+  onMeasure(widthSpec, heightSpec) {
+    const rows = this.children.filter((child) => !isGone(child));
+    const widthMode = MeasureSpec.getMode(widthSpec);
+    const available = widthMode === MeasureSpec.UNSPECIFIED
+      ? Infinity
+      : MeasureSpec.getSize(widthSpec) - this.paddingLeft - this.paddingRight;
+    const collapsed = this.mCollapsedColumnList;
+    const table = [];
+    let numColumns = 0;
+    for (const row of rows) {
+      const cellWidths = [];
+      let rowHeight = 0;
+      for (const cell of row.children) {
+        if (isGone(cell)) continue;
+        const lp = cell.layoutParams || {};
+        cell.measure(
+          getChildMeasureSpec(widthSpec, this.paddingLeft + this.paddingRight, lp.width),
+          getChildMeasureSpec(heightSpec, this.paddingTop + this.paddingBottom, lp.height)
+        );
+        cellWidths.push(cell.getMeasuredWidth());
+        rowHeight = Math.max(rowHeight, cell.getMeasuredHeight());
+      }
+      table.push({ row, cellWidths, rowHeight });
+      numColumns = Math.max(numColumns, cellWidths.length);
+    }
+    const columnWidths = new Array(numColumns).fill(0);
+    for (const entry of table) {
+      entry.cellWidths.forEach((width, index) => {
+        columnWidths[index] = Math.max(columnWidths[index], width);
+      });
+    }
+    const stretchable = [];
+    const shrinkable = [];
+    for (let i = 0; i < numColumns; i++) {
+      if (collapsed?.has?.(i)) continue;
+      if (this.mStretchAllColumns || this.mStretchableColumnList?.has?.(i)) stretchable.push(i);
+      if (this.mShrinkAllColumns || this.mShrinkableColumnList?.has?.(i)) shrinkable.push(i);
+    }
+    const total = columnWidths.reduce((sum, width, index) => (collapsed?.has?.(index) ? sum : sum + width), 0);
+    if (Number.isFinite(available)) {
+      if (total < available && stretchable.length) {
+        const extra = Math.floor((available - total) / stretchable.length);
+        for (const index of stretchable) columnWidths[index] += extra;
+      } else if (total > available && shrinkable.length) {
+        const excess = total - available;
+        const weights = shrinkable.map((index) => columnWidths[index] || 1);
+        const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
+        shrinkable.forEach((index, cursor) => {
+          const cut = Math.min(columnWidths[index], Math.round(excess * (weights[cursor] / weightSum)));
+          columnWidths[index] -= cut;
+        });
+      }
+    }
+    this.mColumns = columnWidths;
+    let measuredWidth = 0;
+    let measuredHeight = 0;
+    for (const entry of table) {
+      let column = 0;
+      let rowWidth = 0;
+      let rowHeight = 0;
+      for (const cell of entry.row.children) {
+        if (isGone(cell)) continue;
+        const width = collapsed?.has?.(column) ? 0 : (columnWidths[column] ?? cell.getMeasuredWidth());
+        cell.measure(
+          MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+          MeasureSpec.makeMeasureSpec(cell.getMeasuredHeight(), MeasureSpec.EXACTLY)
+        );
+        rowWidth += width;
+        rowHeight = Math.max(rowHeight, cell.getMeasuredHeight());
+        column++;
+      }
+      entry.row.setMeasuredDimension(rowWidth, rowHeight);
+      measuredWidth = Math.max(measuredWidth, rowWidth);
+      measuredHeight += rowHeight;
+    }
+    this.setMeasuredDimension(
+      resolveSize(measuredWidth + this.paddingLeft + this.paddingRight, widthSpec),
+      resolveSize(measuredHeight + this.paddingTop + this.paddingBottom, heightSpec)
+    );
+  }
 }
 
 export class TableRow extends LinearLayout {

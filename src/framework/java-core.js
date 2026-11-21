@@ -5287,7 +5287,44 @@ function flushFileWriter(self) {
 
 JAVA_CORE_CLASSES['Ljava/io/Serializable;'] ??= nativeDef('Ljava/io/Serializable;', { super: null });
 JAVA_CORE_CLASSES['Ljava/io/Closeable;'] ??= nativeDef('Ljava/io/Closeable;', { super: null });
-JAVA_CORE_CLASSES['Ljava/io/InputStream;'] ??= nativeDef('Ljava/io/InputStream;', { super: 'Ljava/lang/Object;', interfaces: ['Ljava/io/Closeable;'] });
+JAVA_CORE_CLASSES['Ljava/io/InputStream;'] ??= nativeDef('Ljava/io/InputStream;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/io/Closeable;'],
+  ctor: peerClass(function () {
+    this.$streamData = null;
+    this.$streamCursor = 0;
+    this.$streamMark = 0;
+    this.$streamMarkLimit = 0;
+  }),
+  methods: {
+    '<init>()V': (self) => { self.$streamData = null; self.$streamCursor = 0; self.$streamMark = 0; self.$streamMarkLimit = 0; },
+    'read()I': (self) => {
+      const data = inputStreamData(self);
+      const cursor = inputStreamCursor(self);
+      if (cursor >= data.length) return -1;
+      self.$streamCursor = cursor + 1;
+      return data[cursor];
+    },
+    'read([B)I': (self, [buffer]) => readInputStreamInto(self, buffer, 0, -1),
+    'read([BII)I': (self, [buffer, offset, length]) => readInputStreamInto(self, buffer, offset | 0, length | 0),
+    'skip(J)J': (self, [count]) => {
+      const data = inputStreamData(self);
+      const cursor = inputStreamCursor(self);
+      const step = Math.max(0, Number(count) || 0);
+      const target = Math.min(data.length, cursor + step);
+      self.$streamCursor = target;
+      return BigInt(target - cursor);
+    },
+    'available()I': (self) => Math.max(0, inputStreamData(self).length - inputStreamCursor(self)),
+    'mark(I)V': (self, [limit]) => {
+      self.$streamMark = inputStreamCursor(self);
+      self.$streamMarkLimit = Math.max(0, Number(limit) | 0);
+    },
+    'reset()V': (self) => { self.$streamCursor = Math.max(0, Number(self.$streamMark) || 0); },
+    'markSupported()Z': () => 1,
+    'close()V': () => undefined,
+  },
+});
 JAVA_CORE_CLASSES['Ljava/io/OutputStream;'] ??= nativeDef('Ljava/io/OutputStream;', {
   super: 'Ljava/lang/Object;',
   interfaces: ['Ljava/io/Closeable;', 'Ljava/io/Flushable;'],
@@ -5921,6 +5958,44 @@ function writeRandom(self, position, chunk) {
   VIRTUAL_FS.write(self.path, self.data);
 }
 
+/** InputStream 的底层字节来源：兼容 FileInputStream 的 data/cursor 与 openInputStream 的 bytes/offset。 */
+function inputStreamData(self) {
+  if (self.$streamData instanceof Uint8Array) return self.$streamData;
+  const raw = self.data instanceof Uint8Array ? self.data
+    : self.bytes instanceof Uint8Array ? self.bytes
+      : self.$bytes instanceof Uint8Array ? self.$bytes : null;
+  self.$streamData = raw || new Uint8Array(0);
+  return self.$streamData;
+}
+
+/** 读取并缓存 InputStream 的当前读取位置。 */
+function inputStreamCursor(self) {
+  if (typeof self.$streamCursor !== 'number' || !Number.isFinite(self.$streamCursor)) {
+    const cursor = Number.isFinite(self.cursor) ? self.cursor : (Number.isFinite(self.offset) ? self.offset : 0);
+    self.$streamCursor = Math.max(0, cursor | 0);
+  }
+  return self.$streamCursor;
+}
+
+/** read([B) / read([BII) 的真实实现：写入调用方数组并返回读取字节数（EOF 返回 -1）。 */
+function readInputStreamInto(self, buffer, offset = 0, length = -1) {
+  if (buffer === null || buffer === undefined) throw new Error('NullPointerException: buffer');
+  const target = buffer?.$data || buffer?._items || buffer?.items || buffer;
+  if (!target) return -1;
+  const start = Math.max(0, offset | 0);
+  const size = length < 0 ? target.length - start : Math.max(0, length | 0);
+  if (size === 0) return 0;
+  const data = inputStreamData(self);
+  let cursor = inputStreamCursor(self);
+  let count = 0;
+  for (let i = 0; i < size && cursor < data.length; i += 1) {
+    target[start + i] = data[cursor++];
+    count += 1;
+  }
+  self.$streamCursor = cursor;
+  return count > 0 ? count : -1;
+}
+
 function readIntoBuffer(self, buffer, offset = 0, length = -1) {
   const target = buffer?.$data ?? buffer;
   if (!target) return 0;
@@ -5946,7 +6021,7 @@ function flushOutput(self) {
   self.chunks = [];
 }
 
-export { VIRTUAL_FS, wrapFilePath, joinPaths, seedHardwareFs, readFsText };
+export { VIRTUAL_FS, wrapFilePath, joinPaths, seedHardwareFs, readFsText, inputStreamData, inputStreamCursor, readInputStreamInto };
 
 JAVA_CORE_CLASSES['Ljava/util/UUID;'] = nativeDef('Ljava/util/UUID;', {
   super: 'Ljava/lang/Object;',

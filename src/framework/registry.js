@@ -2,7 +2,7 @@ import { JavaVM, descriptorOfValue, parseParameterDescriptors } from '../runtime
 import { floatBitsToNumber, numberToFloatBits, toInt } from '../runtime/values.js';
 import { applyCompatMethods } from './compat.js';
 import { NativeClassDef } from '../runtime/class-registry.js';
-import { JAVA_CORE_CLASSES, deviceCapabilities, hardwareIdentity, jsString, nativeDef, VIRTUAL_FS, readFsText } from './java-core.js';
+import { JAVA_CORE_CLASSES, deviceCapabilities, hardwareIdentity, jsString, nativeDef, VIRTUAL_FS, readFsText, inputStreamData, inputStreamCursor, readInputStreamInto } from './java-core.js';
 import {
   LayoutInflater,
   buildLayoutParamsViaDex,
@@ -229,6 +229,148 @@ function colorObject(vm, argb) {
   const object = vm.allocateRawObject('Landroid/graphics/Color;');
   object.$peer = { vm, argb: argb >>> 0 };
   return object;
+}
+
+/** 构造一个 ComponentName Java 对象（对应 AOSP ComponentName 的 pkg/cls 二元组）。 */
+function componentNameObject(vm, pkg, cls) {
+  const object = vm.allocateRawObject('Landroid/content/ComponentName;');
+  object.$peer = { pkg: String(pkg ?? ''), cls: String(cls ?? '') };
+  return object;
+}
+
+/** 构造 Toast 对象，字段与 ToastPeer 对齐，供 setGravity/setView 等方法继续使用。 */
+function createToast(vm, text, duration) {
+  const toast = vm.allocateRawObject('Landroid/widget/Toast;');
+  toast.$peer = {
+    vm,
+    object: toast,
+    text: jsString(text) ?? '',
+    duration: Number(duration) | 0,
+    view: null,
+    gravity: 81,
+    xOffset: 0,
+    yOffset: 0,
+    horizontalMargin: 0,
+    verticalMargin: 0,
+    callbacks: [],
+  };
+  return toast;
+}
+
+/** 按 AOSP Comparable.compareTo 的语义比较两个值（数值、字符串或 Java 对象）。 */
+function compareComparables(vm, left, right) {
+  if (typeof left === 'number' && typeof right === 'number') return left < right ? -1 : (left > right ? 1 : 0);
+  if (typeof left === 'bigint' || typeof right === 'bigint') {
+    const a = BigInt(left ?? 0);
+    const b = BigInt(right ?? 0);
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }
+  if (typeof left === 'string' && typeof right === 'string') {
+    const order = left.localeCompare(right);
+    return order < 0 ? -1 : (order > 0 ? 1 : 0);
+  }
+  if (left && typeof left === 'object') {
+    try {
+      return vm.invokeByName('compareTo', '(Ljava/lang/Object;)I', left, [right]) | 0;
+    } catch {
+      // 退回到 identity 比较之外的最合理默认值：无法比较时视为相等。
+    }
+  }
+  if (left === right) return 0;
+  return String(comparableText(left)).localeCompare(String(comparableText(right))) < 0 ? -1 : 1;
+}
+
+/** 把 Comparable 值转成便于 toString 的文本。 */
+function comparableText(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'string') return String(value);
+  if (typeof value?.$string === 'string') return value.$string;
+  if (typeof value?.$peer?.text === 'string') return value.$peer.text;
+  return '[object]';
+}
+
+/** 按 Comparable 的数值/文本语义求哈希，保证相同值的 Range 哈希一致。 */
+function hashComparable(value) {
+  const text = comparableText(value);
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0;
+  return hash;
+}
+
+function rangeCreate(vm, lower, upper) {
+  const range = vm.allocateRawObject('Landroid/util/Range;');
+  range.$peer = { lower, upper };
+  return range;
+}
+
+/** 对应 AOSP Range.intersect：取两个区间交集，空交集抛 IllegalArgumentException。 */
+function rangeIntersect(vm, aLower, aUpper, bLower, bUpper) {
+  const lower = compareComparables(vm, aLower, bLower) >= 0 ? aLower : bLower;
+  const upper = compareComparables(vm, aUpper, bUpper) <= 0 ? aUpper : bUpper;
+  if (compareComparables(vm, lower, upper) > 0) {
+    vm.throwException('Ljava/lang/IllegalArgumentException;', `intersect(${comparableText(lower)}, ${comparableText(upper)}) is empty`);
+  }
+  return rangeCreate(vm, lower, upper);
+}
+
+let defaultLocaleList = null;
+
+function localeListObject(vm, locales) {
+  const object = vm.allocateRawObject('Landroid/os/LocaleList;');
+  object.$peer = { locales: Array.isArray(locales) ? locales : [] };
+  return object;
+}
+
+/** 读取 Locale 的 BCP-47 标签（模拟器里 Locale peer 保存 language/country）。 */
+function localeTagOf(locale) {
+  const peer = locale?.$peer || locale || {};
+  const direct = peer.tag ?? locale?.$fields?.tag;
+  if (typeof direct === 'string' && direct) return String(direct).replace(/_/g, '-');
+  const language = String(peer.language ?? locale?.$fields?.language ?? '').toLowerCase();
+  const country = String(peer.country ?? locale?.$fields?.country ?? '').toUpperCase();
+  return country ? `${language}-${country}` : language;
+}
+
+function localeFromTag(vm, tag) {
+  const [language, country] = String(tag).replace(/_/g, '-').split('-');
+  const object = vm.allocateRawObject('Ljava/util/Locale;');
+  object.$peer = { language: (language || 'en').toLowerCase(), country: (country || '').toUpperCase() };
+  return object;
+}
+
+const WINDOW_INSET_TYPE_GESTURES = 1 << 4;
+const WINDOW_INSET_TYPE_MANDATORY_GESTURES = 1 << 5;
+const WINDOW_INSET_TYPE_TAPPABLE_ELEMENT = 1 << 6;
+
+/** 按 AOSP WindowInsets.getInsets(type) 的语义，把请求的各类 insets 取并集（逐边取最大值）。 */
+function windowInsetsForType(peer, type, includeIgnoringVisibility) {
+  const merged = { left: 0, top: 0, right: 0, bottom: 0 };
+  const merge = (insets) => {
+    if (!insets) return;
+    merged.left = Math.max(merged.left, insets.left | 0);
+    merged.top = Math.max(merged.top, insets.top | 0);
+    merged.right = Math.max(merged.right, insets.right | 0);
+    merged.bottom = Math.max(merged.bottom, insets.bottom | 0);
+  };
+  const stored = peer.insetsTypes?.get(type);
+  if (stored) {
+    merge(stored);
+  } else {
+    if (type & WINDOW_INSET_TYPE_GESTURES) {
+      merge({ left: peer.gestureLeft, top: peer.gestureTop, right: peer.gestureRight, bottom: peer.gestureBottom });
+    }
+    if (type & WINDOW_INSET_TYPE_MANDATORY_GESTURES) {
+      merge({ left: peer.mandatoryLeft, top: peer.mandatoryTop, right: peer.mandatoryRight, bottom: peer.mandatoryBottom });
+    }
+    if (type & WINDOW_INSET_TYPE_TAPPABLE_ELEMENT) {
+      merge({ left: peer.tappableLeft, top: peer.tappableTop, right: peer.tappableRight, bottom: peer.tappableBottom });
+    }
+    if (type & ~(WINDOW_INSET_TYPE_GESTURES | WINDOW_INSET_TYPE_MANDATORY_GESTURES | WINDOW_INSET_TYPE_TAPPABLE_ELEMENT)) {
+      merge({ left: peer.left, top: peer.top, right: peer.right, bottom: peer.bottom });
+    }
+  }
+  if (includeIgnoringVisibility) merge(peer.insetsIgnoringVisibilityTypes?.get(type));
+  return merged;
 }
 
 function colorLuminance(argb) {
@@ -506,13 +648,45 @@ function runShellCommand(command) {
 }
 
 class MessagePeer {
-  constructor(vm) {
+  constructor(vm, object) {
     this.vm = vm;
+    this.$object = object;
     this.what = 0;
+    this.arg1 = 0;
+    this.arg2 = 0;
     this.obj = null;
+    this.data = null;
     this.callback = null;
+    this.when = 0;
   }
 }
+
+/** 读取 Java 对象字段：DEX 侧 iput 写入 $fields，宿主侧写入 peer，二者都要能读到。 */
+function peerField(self, name) {
+  const fields = self?.$object?.$fields ?? (self?.$fields instanceof Map ? self.$fields : null);
+  if (fields instanceof Map && fields.has(name)) return fields.get(name);
+  if (fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, name)) return fields[name];
+  return self?.[name];
+}
+
+const messageField = peerField;
+
+const APPLICATION_INFO_FIELDS = [
+  'flags', 'uid', 'packageName', 'processName', 'className', 'sourceDir', 'publicSourceDir',
+  'dataDir', 'nativeLibraryDir', 'taskAffinity', 'targetSdkVersion', 'minSdkVersion', 'theme',
+  'category', 'descriptionRes', 'gwpAsanMode', 'memtagMode', 'nativeHeapZeroInitialized',
+  'virtualPreload', 'profileableByShell', 'profileable', 'attributionsUserVisible',
+  'resourceOverlay', 'rawExternalStorageAccess',
+];
+
+const PACKAGE_ITEM_FIELDS = [
+  'name', 'packageName', 'labelRes', 'nonLocalizedLabel', 'icon', 'banner', 'logo', 'descriptionRes',
+];
+
+const RESOLVE_INFO_FIELDS = [
+  'activityInfo', 'serviceInfo', 'providerInfo', 'filter', 'priority', 'preferredOrder', 'match',
+  'specificIndex', 'isDefault', 'labelRes', 'nonLocalizedLabel', 'icon', 'resolvePackageName',
+];
 
 const RUNTIME_SINGLETON = { current: null };
 
@@ -805,6 +979,48 @@ function manifestApplicationEntries(vm, tagName) {
   return application?.findAll?.(tagName) || [];
 }
 
+/**
+ * 收集清单里声明了 AccessibilityService intent-filter 的 service，
+ * 并按 AOSP 的 meta-data 约定填出 AccessibilityServiceInfo。
+ */
+function accessibilityServiceInfos(vm) {
+  const packageName = vm?.packageName || vm?.apk?.manifest?.packageName || '';
+  const infos = [];
+  for (const node of manifestApplicationEntries(vm, 'service')) {
+    const serves = (node.findAll?.('intent-filter') || []).some((filter) => (
+      (filter.findAll?.('action') || [])
+        .map((action) => manifestAttrText(action, 'android:name', 'name'))
+        .includes('android.accessibilityservice.AccessibilityService')
+    ));
+    if (!serves) continue;
+    const meta = new Map();
+    for (const item of node.findAll?.('meta-data') || []) {
+      meta.set(
+        manifestAttrText(item, 'android:name', 'name'),
+        manifestAttrText(item, 'android:value', 'android:resource')
+      );
+    }
+    const numberOrZero = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    };
+    const info = vm.allocateRawObject('Landroid/view/accessibility/AccessibilityServiceInfo;');
+    info.$peer = {
+      id: `${packageName}/${manifestClassName(manifestAttrText(node, 'android:name', 'name'), packageName)}`,
+      packageName,
+      eventTypes: numberOrZero(meta.get('android:accessibilityEventTypes')),
+      feedbackType: numberOrZero(meta.get('android:accessibilityFeedbackType')),
+      notificationTimeout: numberOrZero(meta.get('android:notificationTimeout')),
+      flags: numberOrZero(meta.get('android:accessibilityFlags')),
+      canRetrieveWindowContent: String(meta.get('android:canRetrieveWindowContent') ?? '').toLowerCase() !== 'false',
+      description: meta.get('android:description') ?? '',
+      settingsActivityName: meta.get('android:settingsActivity') ?? '',
+    };
+    infos.push(info);
+  }
+  return infos;
+}
+
 /** 按 AOSP IntentFilter.match 的 action / category 语义匹配清单节点。 */
 function intentFilterMatches(intent, filter) {
   const actions = (filter?.findAll?.('action') || [])
@@ -1014,8 +1230,70 @@ function dialogLayout(peer, screen) {
   const itemHeight = Math.min(Math.round(sh * 0.56), itemCount * 48 * density);
   const buttons = [peer.neutralText, peer.negativeText, peer.positiveText].filter(Boolean).length;
   const buttonHeight = buttons ? 52 * density : 0;
-  const height = Math.min(sh - margin * 2, Math.max(96 * density, titleHeight + messageHeight + contentHeight + itemHeight + buttonHeight + 24 * density));
-  return { width, height, left: Math.round((sw - width) / 2), top: Math.round((sh - height) / 2), density, titleHeight, messageHeight, buttonHeight, contentHeight, itemHeight };
+  const progressHeight = peer.progressMax !== undefined ? (peer.indeterminate ? 56 : 32) * density : 0;
+  const height = Math.min(sh - margin * 2, Math.max(96 * density, titleHeight + messageHeight + contentHeight + itemHeight + progressHeight + buttonHeight + 24 * density));
+  return {
+    width, height,
+    left: Math.round((sw - width) / 2),
+    top: Math.round((sh - height) / 2),
+    density, titleHeight, messageHeight, buttonHeight, contentHeight, itemHeight, progressHeight,
+    contentTop: Math.round((sh - height) / 2) + titleHeight + messageHeight + 8 * density,
+  };
+}
+/** 按 ProgressDialog 的状态（水平/不确定、progress/secondary）绘制对话框内的进度条。 */
+function drawDialogProgress(ctx, layout, peer, theme) {
+  const density = layout.density || 1;
+  const left = layout.left + 24 * density;
+  const width = layout.width - 48 * density;
+  const top = layout.contentTop;
+  const max = Math.max(1, Number(peer.progressMax) || 100);
+  const progress = Math.max(0, Math.min(max, Number(peer.progress) || 0));
+  const secondary = Math.max(0, Math.min(max, Number(peer.secondaryProgress) || 0));
+  if (peer.indeterminate) {
+    const size = 40 * density;
+    const cx = left + width / 2;
+    const cy = top + size / 2;
+    ctx.save();
+    ctx.strokeStyle = theme.accentCss;
+    ctx.lineWidth = 4 * density;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, size / 2 - 2 * density, -Math.PI / 2, Math.PI * 0.65);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  const barTop = top + 10 * density;
+  const barHeight = 4 * density;
+  const radius = barHeight / 2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+  dialogRoundRect(ctx, left, barTop, width, barHeight, radius);
+  ctx.fill();
+  if (secondary > 0) {
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = theme.accentCss;
+    dialogRoundRect(ctx, left, barTop, Math.max(radius * 2, width * (secondary / max)), barHeight, radius);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (progress > 0) {
+    ctx.fillStyle = theme.accentCss;
+    dialogRoundRect(ctx, left, barTop, Math.max(radius * 2, width * (progress / max)), barHeight, radius);
+    ctx.fill();
+  }
+  const format = peer.progressNumberFormat;
+  if (typeof format === 'string' && format) {
+    const text = format
+      .replace(/%1\$[ds]/g, String(Math.round(progress)))
+      .replace(/%2\$[ds]/g, String(Math.round(max)));
+    ctx.fillStyle = theme.onSurfaceCss;
+    ctx.font = `${Math.round(12 * density)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(text, left + width / 2, barTop + barHeight + 16 * density);
+    ctx.textAlign = 'left';
+  }
+  ctx.restore();
 }
 function dialogDismiss(peer) {
   if (!peer.showing) return;
@@ -1059,6 +1337,7 @@ function dialogShow(peer) {
         else line = next;
       }
       if (line) ctx.fillText(line, layout.left + 20, y);
+      if (layout.progressHeight) drawDialogProgress(ctx, layout, peer, theme);
       if (peer.contentView) {
         const view = unwrapView(peer.contentView);
         if (view) {
@@ -1506,6 +1785,96 @@ function jsonUnbox(vm, value) {
   return value;
 }
 
+/** 模拟器启动时刻，与 SystemClock.elapsedRealtime 使用同一时间基准。 */
+const PROCESS_START_ELAPSED = Math.round(
+  typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+);
+
+/** 执行 ArrayAdapter 的过滤：以原始数据集为基准，按 toString().contains 过滤并回调监听器。 */
+function runArrayFilter(self, constraint, listener, vm) {
+  const adapter = self?.adapter;
+  if (!adapter) return;
+  if (!Array.isArray(adapter.allObjects)) adapter.allObjects = Array.isArray(adapter.objects) ? adapter.objects.slice() : [];
+  const needle = String(jsString(constraint) ?? '').toLowerCase();
+  adapter.objects = needle
+    ? adapter.allObjects.filter((item) => String(jsString(item) ?? '').toLowerCase().includes(needle))
+    : adapter.allObjects.slice();
+  if (adapter.$notifyOnChange !== false) adapter.$dirty = (adapter.$dirty | 0) + 1;
+  if (listener) invokeOptional(vm, listener, 'onFilterComplete', '(I)V', [adapter.objects.length]);
+}
+
+/** 调 Dex 覆写的方法；未声明时静默跳过（对应 AOSP 里基类的空实现）。 */
+function invokeOptional(vm, target, name, signature, args) {
+  if (!target || !vm || typeof vm.findVirtual !== 'function') return undefined;
+  try {
+    return vm.invokeByName(name, signature, target, args);
+  } catch (error) {
+    try {
+      vm.log?.('debug', 'invokeOptional', `${name}${signature}: ${error?.message ?? error}`);
+    } catch {
+      // 日志失败不影响主流程。
+    }
+    return undefined;
+  }
+}
+
+/** AsyncTask$Status 是单例枚举，按 AOSP 语义每个取值只存在一个实例。 */
+function asyncTaskStatusObject(vm, name) {
+  const cache = (vm.$asyncTaskStatus ??= Object.create(null));
+  if (cache[name]) return cache[name];
+  const object = vm.allocateRawObject('Landroid/os/AsyncTask$Status;');
+  const peer = vm.registry.getPeer(object, 'Landroid/os/AsyncTask$Status;');
+  const target = peer && peer !== object ? peer : object;
+  target.name = name;
+  target.ordinal = name === 'PENDING' ? 0 : (name === 'RUNNING' ? 1 : 2);
+  if (object.$fields instanceof Map) {
+    object.$fields.set('Landroid/os/AsyncTask$Status;->name:Ljava/lang/String;', target.name);
+    object.$fields.set('Landroid/os/AsyncTask$Status;->ordinal:I', target.ordinal);
+  }
+  cache[name] = object;
+  return object;
+}
+
+/** 执行 AsyncTask 的完整生命周期：onPreExecute → doInBackground → onPostExecute/onCancelled。 */
+function runAsyncTask(vm, self, args, executor) {
+  if (self.$asyncStatus === 'RUNNING') throw new Error('IllegalStateException: Cannot execute task: the task is already running.');
+  if (self.$asyncStatus === 'FINISHED') throw new Error('IllegalStateException: Cannot execute task: the task has already been executed (a task can be executed only once)');
+  const params = Array.isArray(args?.$data) ? args : (args ?? vm.newArray('[Ljava/lang/Object;', 0, []));
+  self.$asyncStatus = 'RUNNING';
+  invokeOptional(vm, self, 'onPreExecute', '()V', []);
+  let result = null;
+  try {
+    result = vm.invokeByName('doInBackground', '([Ljava/lang/Object;)Ljava/lang/Object;', self, [params]) ?? null;
+  } catch (error) {
+    self.$asyncStatus = 'FINISHED';
+    throw error;
+  }
+  self.$asyncResult = result;
+  self.$asyncStatus = 'FINISHED';
+  if (self.$asyncCancelled) invokeOptional(vm, self, 'onCancelled', '(Ljava/lang/Object;)V', [result]);
+  else invokeOptional(vm, self, 'onPostExecute', '(Ljava/lang/Object;)V', [result]);
+  void executor;
+  return self;
+}
+
+/** 按 AOSP 的 uid 命名规则把账号名映射成 uid/gid；未知名字返回 -1。 */
+function processIdForName(name, appBase) {
+  const account = String(name ?? '');
+  if (!account) return -1;
+  const fixed = {
+    root: 0,
+    system: 1000,
+    radio: 1001,
+    shell: 2000,
+    cache: 2001,
+    nobody: 9999,
+  };
+  if (Object.prototype.hasOwnProperty.call(fixed, account)) return fixed[account];
+  const match = /^u(\d+)_a(\d+)$/.exec(account);
+  if (match) return appBase + (Number(match[2]) | 0) + (Number(match[1]) | 0) * 100000;
+  return -1;
+}
+
 export function nativeClass(descriptor, options) {
   return new NativeClassDef(descriptor, options);
 }
@@ -1619,6 +1988,50 @@ function metricsValue(metrics, name, fallback = 0) {
   }
   const direct = Number(metrics[name]);
   return Number.isFinite(direct) ? direct : fallback;
+}
+
+const DISPLAY_METRIC_FIELDS = ['widthPixels', 'heightPixels', 'density', 'densityDpi', 'xdpi', 'ydpi', 'scaledDensity'];
+const DISPLAY_METRIC_FLOAT = new Set(['density', 'scaledDensity', 'xdpi', 'ydpi']);
+
+/** 读取 DisplayMetrics 字段：优先 Java 对象 $fields，其次 peer，最后直接属性。 */
+function displayMetricGet(source, name, fallback = 0) {
+  if (!source) return fallback;
+  const object = source.$object ?? (source.$fields ? source : null);
+  if (object) return metricsValue(object, name, fallback);
+  const value = Number(source[name]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+/** 写入 DisplayMetrics 字段，同时同步 peer 与 Java 对象 $fields，保证 DEX 侧读取一致。 */
+function displayMetricSet(self, name, value) {
+  const numeric = Number(value) || 0;
+  self[name] = numeric;
+  const fields = self.$object?.$fields;
+  if (!(fields instanceof Map)) return;
+  const type = DISPLAY_METRIC_FLOAT.has(name) ? 'F' : 'I';
+  const stored = type === 'F' ? numberToFloatBits(numeric) : numeric | 0;
+  const directKey = `Landroid/util/DisplayMetrics;->${name}:${type}`;
+  if (fields.has(directKey)) fields.set(directKey, stored);
+  for (const key of fields.keys()) {
+    if (key.endsWith(`->${name}:${type}`)) fields.set(key, stored);
+  }
+}
+
+function displayMetricsReset(self, width, height) {
+  displayMetricSet(self, 'widthPixels', width);
+  displayMetricSet(self, 'heightPixels', height);
+  displayMetricSet(self, 'density', 1);
+  displayMetricSet(self, 'densityDpi', 160);
+  displayMetricSet(self, 'scaledDensity', 1);
+  displayMetricSet(self, 'xdpi', 160);
+  displayMetricSet(self, 'ydpi', 160);
+}
+
+function displayMetricsEquals(left, right) {
+  for (const name of DISPLAY_METRIC_FIELDS) {
+    if (displayMetricGet(left, name, 0) !== displayMetricGet(right, name, 0)) return false;
+  }
+  return true;
 }
 
 function rectFNumber(bits) {
@@ -2584,6 +2997,44 @@ export function buildFrameworkDefinitions(vm) {
         'getDimensionPixelSize(II)I': (self, [index, fallback]) => self.getDimensionPixelSize?.(index | 0, fallback | 0) ?? 0,
         'getDimensionPixelOffset(II)I': (self, [index, fallback]) => self.getDimensionPixelOffset?.(index | 0, fallback | 0) ?? 0,
         'getLayoutDimension(II)I': (self, [index, fallback]) => self.getLayoutDimension?.(index | 0, fallback | 0) ?? 0,
+        'getLayoutDimension(ILjava/lang/String;)I': (self, [index, name]) => {
+          if (!self.hasValue?.(index | 0)) {
+            throw new Error(`IllegalArgumentException: Required attribute '${jsString(name) ?? ''}' not found`);
+          }
+          return self.getDimensionPixelSize?.(index | 0, -1) ?? -1;
+        },
+        'getIndex(I)I': (self, [index]) => typedArrayAttrId(self, index | 0),
+        'getResources()Landroid/content/res/Resources;': (self, _args, vm) => self.$vm?.resources ?? vm.resources,
+        'getFraction(IIIF)F': (self, [index, base, pBase, fallback]) => (
+          self.getFraction?.(index | 0, base | 0, pBase | 0, Number(fallback) || 0) ?? (Number(fallback) || 0)
+        ),
+        'getFont(I)Landroid/graphics/Typeface;': (self, [index], vm) => {
+          if (!self.hasValue?.(index | 0)) return null;
+          const family = self.getString?.(index | 0) || 'sans-serif';
+          const typeface = vm.allocateRawObject('Landroid/graphics/Typeface;');
+          typeface.$peer = { vm, family, style: 0, weight: 400, italic: false };
+          return typeface;
+        },
+        'getTextArray(I)[Ljava/lang/CharSequence;': (self, [index], vm) => {
+          const resId = self.getResourceId?.(index | 0, 0) ?? 0;
+          if (!resId) return null;
+          const value = vm.resources.resolve(resId >>> 0);
+          if (!Array.isArray(value)) return null;
+          return vm.newArray('[Ljava/lang/CharSequence;', value.length, value.map((item) => String(item ?? '')));
+        },
+        'getType(I)I': (self, [index]) => typedArrayValueType(self, index | 0),
+        'getSourceResourceId(II)I': (self, [index, fallback]) => {
+          const attrId = typedArrayAttrId(self, index | 0);
+          return self.hasValue?.(index | 0) && attrId ? attrId : fallback;
+        },
+        'hasValueOrEmpty(I)Z': (self, [index]) => {
+          if (self.hasValue?.(index | 0)) return 1;
+          const value = self.values?.get?.(typedArrayAttrId(self, index | 0));
+          return value === '' ? 1 : 0;
+        },
+        'getPositionDescription()Ljava/lang/String;': () => '?',
+        'getChangingConfigurations()I': () => 0,
+        'toString()Ljava/lang/String;': (self) => `TypedArray{length=${self.length?.() ?? self.values?.size ?? 0}}`,
         'getColor(II)I': (self, [index, fallback]) => (self.getColor?.(index | 0, fallback >>> 0) ?? fallback) >>> 0,
         'getDrawable(I)Landroid/graphics/drawable/Drawable;': (self, [index]) => self.getDrawable?.(index | 0) ?? null,
         'getColorStateList(I)Landroid/content/res/ColorStateList;': (self, [index]) => {
@@ -3241,6 +3692,15 @@ export function buildFrameworkDefinitions(vm) {
       super: 'Ljava/lang/Object;',
       ctor: MessagePeer,
       methods: {
+        '<init>()V': (self) => {
+          self.what = 0;
+          self.arg1 = 0;
+          self.arg2 = 0;
+          self.obj = null;
+          self.data = null;
+          self.callback = null;
+          self.when = 0;
+        },
         'toString()Ljava/lang/String;': (self) => `Message{what=${self.what}}`,
         'setAsynchronous(Z)V': (self, [value]) => { self.asynchronous = !!value; },
         'isAsynchronous()Z': (self) => !!self.asynchronous,
@@ -3250,6 +3710,19 @@ export function buildFrameworkDefinitions(vm) {
         'sendToTarget()V': (self) => { self.target?.sendMessage?.(self); },
         'recycle()V': () => undefined,
         'copyFrom(Landroid/os/Message;)V': (self, [other]) => Object.assign(self, other || {}),
+        'getCallback()Ljava/lang/Runnable;': (self) => messageField(self, 'callback') ?? null,
+        'getData()Landroid/os/Bundle;': (self, _args, vm) => {
+          let data = messageField(self, 'data');
+          if (!data) {
+            data = vm.instantiate('Landroid/os/Bundle;', []);
+            self.data = data;
+          }
+          return data;
+        },
+        'peekData()Landroid/os/Bundle;': (self) => messageField(self, 'data') ?? null,
+        'setData(Landroid/os/Bundle;)V': (self, [bundle]) => { self.data = bundle ?? null; },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
       },
       staticMethods: {
         'obtain()Landroid/os/Message;': (_self, _args, vm) => new MessagePeer(vm),
@@ -3279,6 +3752,23 @@ export function buildFrameworkDefinitions(vm) {
           const message = new MessagePeer(vm);
           message.target = handler ?? null;
           message.what = what | 0;
+          message.obj = obj ?? null;
+          return message;
+        },
+        'obtain(Landroid/os/Handler;III)Landroid/os/Message;': (_self, [handler, what, arg1, arg2], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          message.what = what | 0;
+          message.arg1 = arg1 | 0;
+          message.arg2 = arg2 | 0;
+          return message;
+        },
+        'obtain(Landroid/os/Handler;IIILjava/lang/Object;)Landroid/os/Message;': (_self, [handler, what, arg1, arg2, obj], vm) => {
+          const message = new MessagePeer(vm);
+          message.target = handler ?? null;
+          message.what = what | 0;
+          message.arg1 = arg1 | 0;
+          message.arg2 = arg2 | 0;
           message.obj = obj ?? null;
           return message;
         },
@@ -3544,55 +4034,91 @@ export function buildFrameworkDefinitions(vm) {
           this.duration = 0;
           this.visible = false;
           this.overlay = null;
+          this.view = null;
+          this.gravity = 81;
+          this.xOffset = 0;
+          this.yOffset = 0;
+          this.horizontalMargin = 0;
+          this.verticalMargin = 0;
+          this.callbacks = [];
         }
       },
       methods: {
+        '<init>(Landroid/content/Context;)V': (self, [context]) => {
+          self.context = context ?? null;
+          self.gravity = 81;
+          self.xOffset = 0;
+          self.yOffset = 0;
+          self.horizontalMargin = 0;
+          self.verticalMargin = 0;
+          self.callbacks = [];
+        },
         'setText(Ljava/lang/CharSequence;)V': (self, [text]) => {
           self.text = jsString(text);
+          self.view = null;
         },
         'setText(I)V': (self, [resId]) => {
           self.text = self.vm.resources.getString(resId >>> 0);
+          self.view = null;
         },
         'setDuration(I)V': (self, [duration]) => {
           self.duration = Number(duration) || 0;
         },
+        'getDuration()I': (self) => Number(self.duration) | 0,
+        'setView(Landroid/view/View;)V': (self, [view]) => {
+          self.view = view ?? null;
+          if (view) self.text = '';
+        },
+        'getView()Landroid/view/View;': (self) => self.view ?? null,
+        'setMargin(FF)V': (self, [horizontal, vertical]) => {
+          self.horizontalMargin = Number(horizontal) || 0;
+          self.verticalMargin = Number(vertical) || 0;
+        },
+        'getHorizontalMargin()F': (self) => Number(self.horizontalMargin) || 0,
+        'getVerticalMargin()F': (self) => Number(self.verticalMargin) || 0,
+        'setGravity(III)V': (self, [gravity, xOffset, yOffset]) => {
+          self.gravity = gravity | 0;
+          self.xOffset = xOffset | 0;
+          self.yOffset = yOffset | 0;
+        },
+        'getGravity()I': (self) => Number(self.gravity) | 0,
+        'getXOffset()I': (self) => Number(self.xOffset) | 0,
+        'getYOffset()I': (self) => Number(self.yOffset) | 0,
+        'addCallback(Landroid/widget/Toast$Callback;)V': (self, [callback]) => {
+          if (callback && !self.callbacks.includes(callback)) self.callbacks.push(callback);
+        },
+        'removeCallback(Landroid/widget/Toast$Callback;)V': (self, [callback]) => {
+          self.callbacks = (self.callbacks || []).filter((item) => item !== callback);
+        },
         'show()V': (self) => {
-          Toast.show(self.vm, self.text, self.duration);
+          const callbacks = self.callbacks || [];
+          for (const callback of callbacks) {
+            const fn = callback?.$dexClass ? null : callback?.$peer?.onToastShown;
+            if (fn) fn.call(callback.$peer);
+          }
+          Toast.show(self.vm, self.text, self.duration, {
+            view: self.view ? unwrapView(self.view) : null,
+            gravity: self.gravity,
+            xOffset: self.xOffset,
+            yOffset: self.yOffset,
+            horizontalMargin: self.horizontalMargin,
+            verticalMargin: self.verticalMargin,
+          });
         },
         'cancel()V': (self) => {
           Toast.cancel(self.vm);
         },
       },
       staticMethods: {
-        'makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;': (_self, [context, text, duration], vm) => {
-          const toast = vm.allocateRawObject('Landroid/widget/Toast;');
-          toast.$peer = {
-            vm,
-            text: jsString(text),
-            duration: Number(duration) || 0,
-            constructor: { $descriptor: 'Landroid/widget/Toast;' },
-            show() {
-              Toast.show(vm, this.text, this.duration);
-            },
-            cancel() {
-              Toast.cancel(vm);
-            },
-          };
-          return toast;
-        },
-        'makeText(Landroid/content/Context;I)Landroid/widget/Toast;': (_self, [context, resId], vm) => {
-          const toast = vm.allocateRawObject('Landroid/widget/Toast;');
-          toast.$peer = {
-            vm,
-            text: vm.resources.getString(resId >>> 0),
-            duration: 0,
-            constructor: { $descriptor: 'Landroid/widget/Toast;' },
-            show() {
-              Toast.show(vm, this.text, this.duration);
-            },
-          };
-          return toast;
-        },
+        'makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;': (_self, [context, text, duration], vm) => (
+          createToast(vm, text, duration)
+        ),
+        'makeText(Landroid/content/Context;II)Landroid/widget/Toast;': (_self, [context, resId, duration], vm) => (
+          createToast(vm, vm.resources.getString(resId >>> 0), duration)
+        ),
+        'makeText(Landroid/content/Context;I)Landroid/widget/Toast;': (_self, [context, resId], vm) => (
+          createToast(vm, vm.resources.getString(resId >>> 0), 0)
+        ),
       },
       staticFields: new Map([
         ['LENGTH_SHORT:I', 0],
@@ -4230,6 +4756,13 @@ export function buildFrameworkDefinitions(vm) {
           this.onGlobalLayoutListeners = [];
           this.onPreDrawListeners = [];
           this.onDrawListeners = [];
+          this.onScrollChangedListeners = [];
+          this.onTouchModeChangeListeners = [];
+          this.onWindowAttachListeners = [];
+          this.onWindowFocusChangeListeners = [];
+          this.onGlobalFocusChangeListeners = [];
+          this.frameCommitCallbacks = new Set();
+          this.gestureExclusionRectListeners = [];
           this.alive = true;
         }
       },
@@ -4255,10 +4788,58 @@ export function buildFrameworkDefinitions(vm) {
           const index = self.onDrawListeners.indexOf(listener);
           if (index >= 0) self.onDrawListeners.splice(index, 1);
         },
-        'addOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': () => undefined,
-        'removeOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': () => undefined,
-        'addOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': () => undefined,
-        'removeOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': () => undefined,
+        'addOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': (self, [listener]) => {
+          if (listener) self.onScrollChangedListeners.push(listener);
+        },
+        'removeOnScrollChangedListener(Landroid/view/ViewTreeObserver$OnScrollChangedListener;)V': (self, [listener]) => {
+          const index = self.onScrollChangedListeners.indexOf(listener);
+          if (index >= 0) self.onScrollChangedListeners.splice(index, 1);
+        },
+        'addOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': (self, [listener]) => {
+          if (listener) self.onTouchModeChangeListeners.push(listener);
+        },
+        'removeOnTouchModeChangeListener(Landroid/view/ViewTreeObserver$OnTouchModeChangeListener;)V': (self, [listener]) => {
+          const index = self.onTouchModeChangeListeners.indexOf(listener);
+          if (index >= 0) self.onTouchModeChangeListeners.splice(index, 1);
+        },
+        'addOnWindowAttachListener(Landroid/view/ViewTreeObserver$OnWindowAttachListener;)V': (self, [listener]) => {
+          if (listener) self.onWindowAttachListeners.push(listener);
+        },
+        'removeOnWindowAttachListener(Landroid/view/ViewTreeObserver$OnWindowAttachListener;)V': (self, [listener]) => {
+          const index = self.onWindowAttachListeners.indexOf(listener);
+          if (index >= 0) self.onWindowAttachListeners.splice(index, 1);
+        },
+        'addOnWindowFocusChangeListener(Landroid/view/ViewTreeObserver$OnWindowFocusChangeListener;)V': (self, [listener]) => {
+          if (listener) self.onWindowFocusChangeListeners.push(listener);
+        },
+        'removeOnWindowFocusChangeListener(Landroid/view/ViewTreeObserver$OnWindowFocusChangeListener;)V': (self, [listener]) => {
+          const index = self.onWindowFocusChangeListeners.indexOf(listener);
+          if (index >= 0) self.onWindowFocusChangeListeners.splice(index, 1);
+        },
+        'addOnGlobalFocusChangeListener(Landroid/view/ViewTreeObserver$OnGlobalFocusChangeListener;)V': (self, [listener]) => {
+          if (listener) self.onGlobalFocusChangeListeners.push(listener);
+        },
+        'removeOnGlobalFocusChangeListener(Landroid/view/ViewTreeObserver$OnGlobalFocusChangeListener;)V': (self, [listener]) => {
+          const index = self.onGlobalFocusChangeListeners.indexOf(listener);
+          if (index >= 0) self.onGlobalFocusChangeListeners.splice(index, 1);
+        },
+        'removeGlobalOnLayoutListener(Landroid/view/ViewTreeObserver$OnGlobalLayoutListener;)V': (self, [listener]) => {
+          const index = self.onGlobalLayoutListeners.indexOf(listener);
+          if (index >= 0) self.onGlobalLayoutListeners.splice(index, 1);
+        },
+        'registerFrameCommitCallback(Ljava/lang/Runnable;)V': (self, [callback]) => {
+          if (callback) self.frameCommitCallbacks.add(callback);
+        },
+        'unregisterFrameCommitCallback(Ljava/lang/Runnable;)Z': (self, [callback]) => (
+          self.frameCommitCallbacks.delete(callback) ? 1 : 0
+        ),
+        'addOnSystemGestureExclusionRectsChangedListener(Ljava/util/function/Consumer;)V': (self, [listener]) => {
+          if (listener) self.gestureExclusionRectListeners.push(listener);
+        },
+        'removeOnSystemGestureExclusionRectsChangedListener(Ljava/util/function/Consumer;)V': (self, [listener]) => {
+          const index = self.gestureExclusionRectListeners.indexOf(listener);
+          if (index >= 0) self.gestureExclusionRectListeners.splice(index, 1);
+        },
         'isAlive()Z': (self) => !!self.alive,
         'dispatchOnGlobalLayout()V': (self, _args, vm) => {
           for (const listener of [...self.onGlobalLayoutListeners]) {
@@ -5296,17 +5877,69 @@ export function buildFrameworkDefinitions(vm) {
   defs.push(
     nativeDef('Landroid/view/LayoutInflater;', {
       super: 'Ljava/lang/Object;',
+      ctor: class LayoutInflaterPeer {
+        constructor(vm) {
+          this.vm = vm;
+          this.context = vm?.contextObject ?? null;
+          this.factory = null;
+          this.filter = null;
+        }
+      },
       methods: {
+        '<init>(Landroid/content/Context;)V': (self, [context], vm) => {
+          self.vm = vm;
+          self.context = vm?.contextObject ?? context ?? null;
+          self.factory = null;
+          self.filter = null;
+        },
+        '<init>(Landroid/view/LayoutInflater;Landroid/content/Context;)V': (self, [original, context], vm) => {
+          self.vm = vm;
+          self.context = vm?.contextObject ?? context ?? null;
+          self.factory = original?.$peer?.factory ?? null;
+          self.filter = original?.$peer?.filter ?? null;
+        },
+        'getContext()Landroid/content/Context;': (self, _args, vm) => self.context ?? vm.contextObject ?? null,
+        'getFilter()Landroid/view/LayoutInflater$Filter;': (self) => self.filter ?? null,
+        'setFilter(Landroid/view/LayoutInflater$Filter;)V': (self, [filter]) => {
+          self.filter = filter ?? null;
+        },
         'inflate(ILandroid/view/ViewGroup;)Landroid/view/View;': (self, [resId, root]) => {
-          const inflater = new LayoutInflater(self.vm.contextObject);
-          inflater.vm = self.vm;
+          const inflater = layoutInflaterFor(self);
           return viewObject(self.vm, inflater.inflate(resId, unwrapView(root) || null, !!unwrapView(root)));
         },
         'inflate(ILandroid/view/ViewGroup;Z)Landroid/view/View;': (self, [resId, root, attach]) => {
-          const inflater = new LayoutInflater(self.vm.contextObject);
-          inflater.vm = self.vm;
+          const inflater = layoutInflaterFor(self);
           const result = inflater.inflate(resId, unwrapView(root) || null, !!attach);
           return viewObject(self.vm, result);
+        },
+        'inflate(Lorg/xmlpull/v1/XmlPullParser;Landroid/view/ViewGroup;)Landroid/view/View;': (self, [parser, root]) =>
+          inflateFromParser(self, parser, root, !!unwrapView(root)),
+        'inflate(Lorg/xmlpull/v1/XmlPullParser;Landroid/view/ViewGroup;Z)Landroid/view/View;': (self, [parser, root, attach]) =>
+          inflateFromParser(self, parser, root, !!attach),
+        'createView(Ljava/lang/String;Ljava/lang/String;Landroid/util/AttributeSet;)Landroid/view/View;': (self, [name, prefix, attrs]) => {
+          const inflater = layoutInflaterFor(self);
+          const view = inflater.createViewFromName(jsString(name), prefix ? jsString(prefix) : null, attrs);
+          return view ? viewObject(self.vm, view) : null;
+        },
+        'createView(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Landroid/util/AttributeSet;)Landroid/view/View;': (self, [context, name, prefix, attrs]) => {
+          const inflater = layoutInflaterFor(self);
+          const view = inflater.createViewFromName(jsString(name), prefix ? jsString(prefix) : null, attrs);
+          return view ? viewObject(self.vm, view) : null;
+        },
+        'onCreateView(Ljava/lang/String;Landroid/util/AttributeSet;)Landroid/view/View;': (self, [name, attrs]) => {
+          const inflater = layoutInflaterFor(self);
+          const view = inflater.createViewFromName(jsString(name), null, attrs);
+          return view ? viewObject(self.vm, view) : null;
+        },
+        'onCreateView(Landroid/view/View;Ljava/lang/String;Landroid/util/AttributeSet;)Landroid/view/View;': (self, [parent, name, attrs]) => {
+          const inflater = layoutInflaterFor(self);
+          const view = inflater.createViewFromName(jsString(name), null, attrs);
+          return view ? viewObject(self.vm, view) : null;
+        },
+        'onCreateView(Landroid/content/Context;Landroid/view/View;Ljava/lang/String;Landroid/util/AttributeSet;)Landroid/view/View;': (self, [context, parent, name, attrs]) => {
+          const inflater = layoutInflaterFor(self);
+          const view = inflater.createViewFromName(jsString(name), null, attrs);
+          return view ? viewObject(self.vm, view) : null;
         },
         'setFactory(Landroid/view/LayoutInflater$Factory;)V': (self, [factory]) => {
           self.factory = factory ?? null;
@@ -6150,6 +6783,35 @@ export function buildFrameworkDefinitions(vm) {
       },
       'isVarArgs()Z': () => false,
       'getModifiers()I': (self) => self.$target?.accessFlags ?? 1,
+      'getTypeParameters()[Ljava/lang/reflect/TypeVariable;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/reflect/TypeVariable;', 0, []),
+      'getParameterCount()I': (self) => (self.proto?.parameters || []).length,
+      'getGenericReturnType()Ljava/lang/reflect/Type;': (self, _args, vm) => {
+        const type = self.proto?.returnType;
+        return type ? vm.getClassObject(type) : null;
+      },
+      'getGenericParameterTypes()[Ljava/lang/reflect/Type;': (self, _args, vm) =>
+        reflectionParameterTypes(vm, self, '[Ljava/lang/reflect/Type;'),
+      'getExceptionTypes()[Ljava/lang/Class;': (_self, _args, vm) => vm.newArray('[Ljava/lang/Class;', 0, []),
+      'getGenericExceptionTypes()[Ljava/lang/reflect/Type;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/reflect/Type;', 0, []),
+      'toGenericString()Ljava/lang/String;': (self) => {
+        const params = (self.proto?.parameters || []).map(descriptorTypeName).join(',');
+        const prefix = modifierText(self.$target?.accessFlags ?? 1);
+        return `${prefix ? `${prefix} ` : ''}${descriptorTypeName(self.proto?.returnType)} ${descriptorTypeName(self.classDesc)}.${self.name}(${params})`;
+      },
+      'isDefault()Z': (self, _args, vm) => {
+        const owner = self.classDesc ? vm.registry.resolve(self.classDesc) : null;
+        const dexClass = owner?.dexClass;
+        if (!dexClass || !(dexClass.accessFlags & 0x0200)) return 0;
+        return self.$target?.code ? 1 : 0;
+      },
+      'getDefaultValue()Ljava/lang/Object;': () => null,
+      'getAnnotation(Ljava/lang/Class;)Ljava/lang/annotation/Annotation;': () => null,
+      'getDeclaredAnnotations()[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/annotation/Annotation;', 0, []),
+      'getParameterAnnotations()[[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        emptyParameterAnnotations(vm),
       'isBridge()Z': () => false,
       'isSynthetic()Z': () => false,
       'equals(Ljava/lang/Object;)Z': (self, [other]) =>
@@ -6237,6 +6899,23 @@ export function buildFrameworkDefinitions(vm) {
       'setBoolean(Ljava/lang/Object;Z)V': (self, [target, value], vm) => setFieldValue(vm, self, target, value ? 1 : 0),
       'setFloat(Ljava/lang/Object;F)V': (self, [target, value], vm) => setFieldValue(vm, self, target, Number(value) || 0),
       'setDouble(Ljava/lang/Object;D)V': (self, [target, value], vm) => setFieldValue(vm, self, target, Number(value) || 0),
+      'getByte(Ljava/lang/Object;)B': (self, args, vm) => ((toIntValue(vm, self, args) << 24) >> 24),
+      'getChar(Ljava/lang/Object;)C': (self, args, vm) => (toIntValue(vm, self, args) & 0xffff),
+      'getShort(Ljava/lang/Object;)S': (self, args, vm) => ((toIntValue(vm, self, args) << 16) >> 16),
+      'setByte(Ljava/lang/Object;B)V': (self, [target, value], vm) => setFieldValue(vm, self, target, (value | 0) & 0xff),
+      'setChar(Ljava/lang/Object;C)V': (self, [target, value], vm) => setFieldValue(vm, self, target, (value | 0) & 0xffff),
+      'setShort(Ljava/lang/Object;S)V': (self, [target, value], vm) => setFieldValue(vm, self, target, (value | 0) & 0xffff),
+      'getGenericType()Ljava/lang/reflect/Type;': (self, _args, vm) => (self.type && vm ? vm.getClassObject(self.type) : null),
+      'toGenericString()Ljava/lang/String;': (self) => {
+        const prefix = modifierText(1);
+        return `${prefix} ${descriptorTypeName(self.type)} ${descriptorTypeName(self.classDesc)}.${self.name}`;
+      },
+      'getAnnotation(Ljava/lang/Class;)Ljava/lang/annotation/Annotation;': () => null,
+      'getAnnotationsByType(Ljava/lang/Class;)[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/annotation/Annotation;', 0, []),
+      'isAnnotationPresent(Ljava/lang/Class;)Z': () => 0,
+      'getDeclaredAnnotations()[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/annotation/Annotation;', 0, []),
     },
   }));
   defs.push(nativeDef('Ljava/lang/reflect/Constructor;', {
@@ -6260,6 +6939,26 @@ export function buildFrameworkDefinitions(vm) {
       'getModifiers()I': (self) => self.$target?.accessFlags ?? 1,
       'isVarArgs()Z': () => false,
       'isSynthetic()Z': () => false,
+      'getTypeParameters()[Ljava/lang/reflect/TypeVariable;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/reflect/TypeVariable;', 0, []),
+      'getParameterCount()I': (self) => (self.proto?.parameters || []).length,
+      'getGenericParameterTypes()[Ljava/lang/reflect/Type;': (self, _args, vm) =>
+        reflectionParameterTypes(vm, self, '[Ljava/lang/reflect/Type;'),
+      'getExceptionTypes()[Ljava/lang/Class;': (_self, _args, vm) => vm.newArray('[Ljava/lang/Class;', 0, []),
+      'getGenericExceptionTypes()[Ljava/lang/reflect/Type;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/reflect/Type;', 0, []),
+      'equals(Ljava/lang/Object;)Z': (self, [other]) =>
+        !!other && other.classDesc === self.classDesc && other.proto?.descriptor === self.proto?.descriptor,
+      'hashCode()I': (self) => hashCode(`${self.classDesc}#<init>${self.proto?.descriptor || ''}`),
+      'toString()Ljava/lang/String;': (self) =>
+        `${modifierText(self.$target?.accessFlags ?? 1)} ${descriptorTypeName(self.classDesc)}(${(self.proto?.parameters || []).map(descriptorTypeName).join(',')})`,
+      'toGenericString()Ljava/lang/String;': (self) =>
+        `${modifierText(self.$target?.accessFlags ?? 1)} ${descriptorTypeName(self.classDesc)}(${(self.proto?.parameters || []).map(descriptorTypeName).join(',')})`,
+      'getAnnotation(Ljava/lang/Class;)Ljava/lang/annotation/Annotation;': () => null,
+      'getDeclaredAnnotations()[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        vm.newArray('[Ljava/lang/annotation/Annotation;', 0, []),
+      'getParameterAnnotations()[[Ljava/lang/annotation/Annotation;': (_self, _args, vm) =>
+        emptyParameterAnnotations(vm),
       'newInstance([Ljava/lang/Object;)Ljava/lang/Object;': (self, [args], vm) => {
         const targetMethod = self.$target;
         if (!targetMethod) return null;
@@ -6843,15 +7542,90 @@ function vmShowChild(self, index) {
       methods: {
         '<init>(Landroid/content/Context;)V': () => undefined,
         '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
-        'setMinValue(I)V': (self, [value]) => { self.minValue = value | 0; },
-        'setMaxValue(I)V': (self, [value]) => { self.maxValue = value | 0; },
-        'getMinValue()I': (self) => self.minValue | 0,
-        'getMaxValue()I': (self) => self.maxValue | 0,
-        'setValue(I)V': (self, [value]) => { self.value = value | 0; self.view?.setValue?.(self.value); },
-        'getValue()I': (self) => self.value | 0,
-        'setWrapSelectorWheel(Z)V': (self, [value]) => { self.wrapSelector = !!value; },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'setMinValue(I)V': (self, [value]) => {
+          self.minValue = value | 0;
+          if (self.view) {
+            self.view.minValue = value | 0;
+            self.view.setValue(self.view.value | 0);
+            self.view.requestLayout?.();
+          }
+        },
+        'setMaxValue(I)V': (self, [value]) => {
+          self.maxValue = value | 0;
+          if (self.view) {
+            self.view.maxValue = value | 0;
+            self.view.setValue(self.view.value | 0);
+            self.view.requestLayout?.();
+          }
+        },
+        'getMinValue()I': (self) => (self.view?.minValue ?? self.minValue) | 0,
+        'getMaxValue()I': (self) => (self.view?.maxValue ?? self.maxValue) | 0,
+        'setValue(I)V': (self, [value]) => {
+          self.value = value | 0;
+          if (self.view) {
+            self.view.setValue(value | 0);
+            self.value = self.view.value | 0;
+          }
+        },
+        'getValue()I': (self) => (self.view?.value ?? self.value) | 0,
+        'setWrapSelectorWheel(Z)V': (self, [value]) => {
+          self.wrapSelector = !!value;
+          if (self.view) {
+            self.view.wrapSelectorWheel = !!value;
+            self.view.setValue(self.view.value | 0);
+          }
+        },
+        'getWrapSelectorWheel()Z': (self) => ((self.view?.wrapSelectorWheel ?? self.wrapSelector) ? 1 : 0),
         'setFormatter(Landroid/widget/NumberPicker$Formatter;)V': (self, [formatter]) => { self.formatter = formatter; },
         'setOnValueChangedListener(Landroid/widget/NumberPicker$OnValueChangeListener;)V': (self, [listener]) => { self.valueListener = listener; },
+        'setOnScrollListener(Landroid/widget/NumberPicker$OnScrollListener;)V': (self, [listener]) => {
+          self.scrollListener = listener ?? null;
+          if (self.view) self.view.onScrollListener = listener ?? null;
+        },
+        'setOnLongPressUpdateInterval(J)V': (self, [interval]) => {
+          self.longPressUpdateInterval = Number(interval) || 0;
+          if (self.view) self.view.onLongPressUpdateInterval = self.longPressUpdateInterval;
+        },
+        'setDisplayedValues([Ljava/lang/String;)V': (self, [values]) => {
+          const list = values === null || values === undefined
+            ? null
+            : Array.from(values.$data || values).map((item) => jsString(item) ?? '');
+          if (self.view) {
+            self.view.displayedValues = list;
+            self.view.setText(self.view.label(self.view.value | 0));
+            self.view.requestLayout?.();
+          }
+        },
+        'getDisplayedValues()[Ljava/lang/String;': (self, _args, vm) => {
+          const list = self.view?.displayedValues;
+          if (!Array.isArray(list)) return null;
+          return vm.newArray('[Ljava/lang/String;', list.length, list.map((item) => String(item ?? '')));
+        },
+        'setSelectionDividerHeight(I)V': (self, [value]) => {
+          self.selectionDividerHeight = value | 0;
+          if (self.view) {
+            self.view.selectionDividerHeight = value | 0;
+            self.view.requestLayout?.();
+          }
+        },
+        'getSelectionDividerHeight()I': (self) => (self.view?.selectionDividerHeight ?? self.selectionDividerHeight) | 0,
+        'setTextColor(I)V': (self, [value]) => {
+          self.textColor = value >>> 0;
+          if (self.view) {
+            self.view.pickerTextColor = value >>> 0;
+            self.view.invalidate?.();
+          }
+        },
+        'getTextColor()I': (self) => ((self.view?.pickerTextColor ?? self.textColor) | 0) >>> 0,
+        'setTextSize(F)V': (self, [value]) => {
+          self.textSize = Number(value) || 0;
+          if (self.view) {
+            self.view.pickerTextSize = Number(value) || 0;
+            self.view.requestLayout?.();
+          }
+        },
+        'getTextSize()F': (self) => Number(self.view?.pickerTextSize || self.textSize) || 0,
       },
     })
   );
@@ -6961,8 +7735,49 @@ function vmShowChild(self, index) {
       methods: {
         'setChecked(Z)V': (self, [value]) => { if (self.view) self.view.checked = !!value; },
         'isChecked()Z': (self) => (self.view?.checked ? 1 : 0),
+        'toggle()V': (self) => {
+          if (!self.view) return;
+          self.view.checked = !self.view.checked;
+          const listener = self.view.onCheckedChangeListener;
+          const vm = self.vm;
+          if (listener && vm) {
+            try {
+              vm.invokeByName('onCheckedChanged', '(Landroid/widget/CompoundButton;Z)V', listener, [
+                viewObject(vm, self.view),
+                self.view.checked ? 1 : 0,
+              ]);
+            } catch {
+              // 监听器由 DEX 实现，调用失败不影响视图状态。
+            }
+          }
+          self.view.invalidate?.();
+        },
         'setDuplicateParentStateEnabled(Z)V': () => undefined,
-        'setCheckMarkDrawable(Landroid/graphics/drawable/Drawable;)V': () => undefined,
+        'setCheckMarkDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+          if (self.view) self.view.checkMarkDrawable = drawable ?? null;
+          self.view?.invalidate?.();
+        },
+        'setCheckMarkDrawable(I)V': (self, [resId]) => {
+          if (self.view) self.view.checkMarkDrawable = drawableObject(self.vm, self.vm.resources.getDrawable(resId >>> 0));
+          self.view?.invalidate?.();
+        },
+        'getCheckMarkDrawable()Landroid/graphics/drawable/Drawable;': (self) => (
+          drawableObject(self.vm, self.view?.checkMarkDrawable ?? null)
+        ),
+        'setCheckMarkTintList(Landroid/content/res/ColorStateList;)V': (self, [list]) => {
+          if (self.view) self.view.checkMarkTintList = list ?? null;
+          self.view?.invalidate?.();
+        },
+        'getCheckMarkTintList()Landroid/content/res/ColorStateList;': (self) => self.view?.checkMarkTintList ?? null,
+        'setCheckMarkTintMode(Landroid/graphics/PorterDuff$Mode;)V': (self, [mode]) => {
+          if (self.view) self.view.checkMarkTintMode = mode ?? null;
+          self.view?.invalidate?.();
+        },
+        'getCheckMarkTintMode()Landroid/graphics/PorterDuff$Mode;': (self) => self.view?.checkMarkTintMode ?? null,
+        'setCheckMarkTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => {
+          if (self.view) self.view.checkMarkTintBlendMode = mode ?? null;
+        },
+        'getCheckMarkTintBlendMode()Landroid/graphics/BlendMode;': (self) => self.view?.checkMarkTintBlendMode ?? null,
       },
     })
   );
@@ -6990,6 +7805,35 @@ function vmShowChild(self, index) {
         'setOnCheckedChangeListener(Landroid/widget/CompoundButton$OnCheckedChangeListener;)V': (self, [listener]) => {
           if (self.view) self.view.onCheckedChangeListener = listener ?? null;
         },
+        'setButtonDrawable(I)V': (self, [resId]) => {
+          if (self.view) self.view.buttonDrawable = drawableObject(self.vm, self.vm.resources.getDrawable(resId >>> 0));
+          self.view?.invalidate?.();
+        },
+        'setButtonDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => {
+          if (self.view) self.view.buttonDrawable = drawable ?? null;
+          self.view?.invalidate?.();
+        },
+        'getButtonDrawable()Landroid/graphics/drawable/Drawable;': (self) => (
+          drawableObject(self.vm, self.view?.buttonDrawable ?? null)
+        ),
+        'setButtonIcon(Landroid/graphics/drawable/Icon;)V': (self, [icon]) => {
+          if (self.view) self.view.buttonIcon = icon ?? null;
+          self.view?.invalidate?.();
+        },
+        'setButtonTintList(Landroid/content/res/ColorStateList;)V': (self, [list]) => {
+          if (self.view) self.view.buttonTintList = list ?? null;
+          self.view?.invalidate?.();
+        },
+        'getButtonTintList()Landroid/content/res/ColorStateList;': (self) => self.view?.buttonTintList ?? null,
+        'setButtonTintMode(Landroid/graphics/PorterDuff$Mode;)V': (self, [mode]) => {
+          if (self.view) self.view.buttonTintMode = mode ?? null;
+          self.view?.invalidate?.();
+        },
+        'getButtonTintMode()Landroid/graphics/PorterDuff$Mode;': (self) => self.view?.buttonTintMode ?? null,
+        'setButtonTintBlendMode(Landroid/graphics/BlendMode;)V': (self, [mode]) => {
+          if (self.view) self.view.buttonTintBlendMode = mode ?? null;
+        },
+        'getButtonTintBlendMode()Landroid/graphics/BlendMode;': (self) => self.view?.buttonTintBlendMode ?? null,
       },
     })
   );
@@ -7125,14 +7969,76 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/view/accessibility/AccessibilityManager;', {
       super: 'Ljava/lang/Object;',
+      ctor: class AccessibilityManagerPeer {
+        constructor() {
+          this.$stateListeners = new Set();
+          this.$touchListeners = new Set();
+          this.$preparers = new Set();
+          this.$lastEvent = null;
+        }
+      },
       methods: {
         'isEnabled()Z': () => 0,
         'isTouchExplorationEnabled()Z': () => 0,
         'isRequestFromAccessibilityTool()Z': () => 0,
         'getRecommendedTimeoutMillis(I)I': (_self, [original]) => original | 0,
-        'getEnabledAccessibilityServiceList(I)Ljava/util/List;': (_self, _args, vm) => makeList(vm, []),
-        'addAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': () => false,
-        'removeAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': () => false,
+        'getRecommendedTimeoutMillis(II)I': (_self, [original, uiContentFlags]) => {
+          // 无障碍关闭时 AOSP 在第一个短路分支直接返回原值，与 uiContentFlags 无关。
+          void uiContentFlags;
+          return original | 0;
+        },
+        'getEnabledAccessibilityServiceList(I)Ljava/util/List;': (self, [feedbackType], vm) => {
+          // 无障碍总开关关闭时 AOSP 也会返回空列表：服务被安装但没有启用。
+          self.$lastAccessibilityFeedbackType = feedbackType | 0;
+          return makeList(vm, []);
+        },
+        'getAccessibilityServiceList()Ljava/util/List;': (_self, _args, vm) => makeList(vm, accessibilityServiceInfos(vm)),
+        'getInstalledAccessibilityServiceList()Ljava/util/List;': (_self, _args, vm) => makeList(vm, accessibilityServiceInfos(vm)),
+        'interrupt()V': () => {
+          // 无障碍总开关关闭，没有任何已启用的服务可以接收中断请求。
+        },
+        'sendAccessibilityEvent(Landroid/view/accessibility/AccessibilityEvent;)V': (self, [event], vm) => {
+          self.$lastEvent = event ?? null;
+          const recorder = vm.$accessibilityEventRecorder;
+          if (typeof recorder === 'function') recorder(event);
+        },
+        'addAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': (self, [listener]) => {
+          if (!listener) return 0;
+          self.$stateListeners.add(listener);
+          return 1;
+        },
+        'removeAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;)Z': (self, [listener]) => (
+          self.$stateListeners.delete(listener) ? 1 : 0
+        ),
+        'addAccessibilityStateChangeListener(Landroid/view/accessibility/AccessibilityManager$AccessibilityStateChangeListener;Landroid/os/Handler;)V': (self, [listener, handler]) => {
+          if (!listener) return;
+          self.$stateListeners.add(listener);
+          self.$stateListenerHandler = handler ?? null;
+        },
+        'addTouchExplorationStateChangeListener(Landroid/view/accessibility/AccessibilityManager$TouchExplorationStateChangeListener;)Z': (self, [listener]) => {
+          if (!listener) return 0;
+          self.$touchListeners.add(listener);
+          return 1;
+        },
+        'removeTouchExplorationStateChangeListener(Landroid/view/accessibility/AccessibilityManager$TouchExplorationStateChangeListener;)Z': (self, [listener]) => (
+          self.$touchListeners.delete(listener) ? 1 : 0
+        ),
+        'addTouchExplorationStateChangeListener(Landroid/view/accessibility/AccessibilityManager$TouchExplorationStateChangeListener;Landroid/os/Handler;)V': (self, [listener, handler]) => {
+          if (!listener) return;
+          self.$touchListeners.add(listener);
+          self.$touchHandler = handler ?? null;
+        },
+        'addAccessibilityRequestPreparer(Landroid/view/accessibility/AccessibilityRequestPreparer;)V': (self, [preparer]) => {
+          if (preparer) self.$preparers.add(preparer);
+        },
+        'removeAccessibilityRequestPreparer(Landroid/view/accessibility/AccessibilityRequestPreparer;)V': (self, [preparer]) => {
+          self.$preparers.delete(preparer);
+        },
+        'getAccessibilityFocusStrokeWidth()I': () => 0,
+        'getAccessibilityFocusColor()I': () => 0,
+      },
+      staticMethods: {
+        'isAccessibilityButtonSupported()Z': () => 1,
       },
     })
   );
@@ -7400,6 +8306,20 @@ function vmShowChild(self, index) {
         },
         'hasOverlappingRendering()Z': () => true,
         'getBaseline()I': (self) => self.view?.baseline ?? -1,
+        'setBaseline(I)V': (self, [baseline]) => { if (self.view) { self.view.baseline = toInt(baseline); self.view.requestLayout?.(); } },
+        'setBaselineAlignBottom(Z)V': (self, [value]) => self.view?.setBaselineAlignBottom?.(!!value),
+        'getBaselineAlignBottom()Z': (self) => !!self.view?.baselineAlignBottom,
+        'setImageState([IZ)V': (self, [state, merge]) => self.view?.setImageState?.(state, !!merge),
+        'setFrame(IIII)Z': (self, [left, top, right, bottom]) => (
+          self.view?.setFrame?.(toInt(left), toInt(top), toInt(right), toInt(bottom)) ? 1 : 0
+        ),
+        'animateTransform(Landroid/graphics/Matrix;)V': (self, [matrix]) => self.view?.animateTransform?.(matrix),
+        'setColorFilter(ILandroid/graphics/PorterDuff$Mode;)V': (self, [color, mode]) => self.view?.setColorFilter?.(toInt(color) >>> 0, mode),
+        'setColorFilter(I)V': (self, [color]) => self.view?.setColorFilter?.(toInt(color) >>> 0, null),
+        'setColorFilter(Landroid/graphics/ColorFilter;)V': (self, [filter]) => self.view?.setColorFilter?.(filter),
+        'clearColorFilter()V': (self) => self.view?.clearColorFilter?.(),
+        'getColorFilter()Landroid/graphics/ColorFilter;': (self) => self.view?.getColorFilter?.() ?? null,
+        'setAlpha(I)V': (self, [alpha]) => self.view?.setAlpha?.(toInt(alpha)),
         'getAccessibilityClassName()Ljava/lang/CharSequence;': () => 'android.widget.ImageView',
       },
     })
@@ -7486,6 +8406,16 @@ function vmShowChild(self, index) {
       ctor: viewPeerConstructor('Landroid/widget/TableRow;'),
       methods: {
         ...viewMethods(),
+        'getVirtualChildAt(I)Landroid/view/View;': (self, [index], vm) => {
+          const child = self.view?.children?.[index | 0];
+          return child ? viewObject(vm, child) : null;
+        },
+        'getVirtualChildCount()I': (self) => self.view?.children?.length ?? 0,
+        'generateLayoutParams(Landroid/util/AttributeSet;)Landroid/widget/TableRow$LayoutParams;': (_self, [attrs], vm) => {
+          const out = vm.allocateRawObject('Landroid/widget/TableRow$LayoutParams;');
+          out.$peer = { width: -2, height: -2, column: -1, span: 1, attributeSet: attrs ?? null };
+          return out;
+        },
       },
     })
   );
@@ -7496,6 +8426,47 @@ function vmShowChild(self, index) {
       ctor: viewPeerConstructor('Landroid/widget/TableLayout;'),
       methods: {
         ...viewMethods(),
+        'isShrinkAllColumns()Z': (self) => (self.view?.mShrinkAllColumns ? 1 : 0),
+        'setShrinkAllColumns(Z)V': (self, [value]) => {
+          if (!self.view) return;
+          self.view.mShrinkAllColumns = !!value;
+          self.view.requestLayout?.();
+        },
+        'isStretchAllColumns()Z': (self) => (self.view?.mStretchAllColumns ? 1 : 0),
+        'setStretchAllColumns(Z)V': (self, [value]) => {
+          if (!self.view) return;
+          self.view.mStretchAllColumns = !!value;
+          self.view.requestLayout?.();
+        },
+        'setColumnCollapsed(IZ)V': (self, [column, collapsed]) => {
+          if (!self.view) return;
+          const index = column | 0;
+          const list = (self.view.mCollapsedColumnList ??= new Set());
+          if (collapsed) list.add(index); else list.delete(index);
+          self.view.requestLayout?.();
+        },
+        'isColumnCollapsed(I)Z': (self, [column]) => (self.view?.mCollapsedColumnList?.has?.(column | 0) ? 1 : 0),
+        'setColumnStretchable(IZ)V': (self, [column, stretchable]) => {
+          if (!self.view) return;
+          const index = column | 0;
+          const list = (self.view.mStretchableColumnList ??= new Set());
+          if (stretchable) list.add(index); else list.delete(index);
+          self.view.requestLayout?.();
+        },
+        'isColumnStretchable(I)Z': (self, [column]) => (self.view?.mStretchableColumnList?.has?.(column | 0) ? 1 : 0),
+        'setColumnShrinkable(IZ)V': (self, [column, shrinkable]) => {
+          if (!self.view) return;
+          const index = column | 0;
+          const list = (self.view.mShrinkableColumnList ??= new Set());
+          if (shrinkable) list.add(index); else list.delete(index);
+          self.view.requestLayout?.();
+        },
+        'isColumnShrinkable(I)Z': (self, [column]) => (self.view?.mShrinkableColumnList?.has?.(column | 0) ? 1 : 0),
+        'generateLayoutParams(Landroid/util/AttributeSet;)Landroid/widget/TableLayout$LayoutParams;': (_self, [attrs], vm) => {
+          const out = vm.allocateRawObject('Landroid/widget/TableLayout$LayoutParams;');
+          out.$peer = { width: -2, height: -2, column: -1, span: 1, attributeSet: attrs ?? null };
+          return out;
+        },
       },
     })
   );
@@ -7883,33 +8854,99 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/app/ProgressDialog;', {
       super: 'Landroid/app/AlertDialog;',
-      ctor: class ProgressDialogPeer { constructor() { this.showing = false; this.cancelable = true; this.indeterminate = true; } },
+      ctor: class ProgressDialogPeer {
+        constructor() {
+          this.showing = false;
+          this.cancelable = true;
+          this.indeterminate = true;
+          this.progressMax = 100;
+          this.progress = 0;
+          this.secondaryProgress = 0;
+          this.progressStyle = 0;
+        }
+      },
       staticMethods: {
         'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/app/ProgressDialog;': (_self, [context, title, message], vm) => {
           const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
-          dialog.$peer = { vm, showing: false, cancelable: true, title: jsString(title), message: jsString(message), dialogObject: dialog };
+          dialog.$peer = new ProgressDialogPeer();
+          Object.assign(dialog.$peer, { vm, title: jsString(title), message: jsString(message), dialogObject: dialog });
           dialogShow(dialog.$peer);
           return dialog;
         },
         'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Z)Landroid/app/ProgressDialog;': (_self, [context, title, message, indeterminate], vm) => {
           const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
-          dialog.$peer = { vm, showing: false, cancelable: true, title: jsString(title), message: jsString(message), indeterminate: !!indeterminate, dialogObject: dialog };
+          dialog.$peer = new ProgressDialogPeer();
+          Object.assign(dialog.$peer, { vm, title: jsString(title), message: jsString(message), indeterminate: !!indeterminate, dialogObject: dialog });
+          dialogShow(dialog.$peer);
+          return dialog;
+        },
+        'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ZZ)Landroid/app/ProgressDialog;': (_self, [context, title, message, indeterminate, cancelable], vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
+          dialog.$peer = new ProgressDialogPeer();
+          Object.assign(dialog.$peer, { vm, title: jsString(title), message: jsString(message), indeterminate: !!indeterminate, cancelable: !!cancelable, dialogObject: dialog });
+          dialogShow(dialog.$peer);
+          return dialog;
+        },
+        'show(Landroid/content/Context;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ZZLandroid/content/DialogInterface$OnCancelListener;)Landroid/app/ProgressDialog;': (_self, [context, title, message, indeterminate, cancelable, listener], vm) => {
+          const dialog = vm.allocateRawObject('Landroid/app/ProgressDialog;');
+          dialog.$peer = new ProgressDialogPeer();
+          Object.assign(dialog.$peer, {
+            vm,
+            title: jsString(title),
+            message: jsString(message),
+            indeterminate: !!indeterminate,
+            cancelable: !!cancelable,
+            cancelListener: listener,
+            dialogObject: dialog,
+          });
           dialogShow(dialog.$peer);
           return dialog;
         },
       },
       methods: {
-        '<init>(Landroid/content/Context;)V': (self) => { self.showing = false; self.cancelable = true; },
+        '<init>(Landroid/content/Context;)V': (self) => {
+          self.showing = false;
+          self.cancelable = true;
+          self.indeterminate = true;
+          self.progressMax = 100;
+          self.progress = 0;
+          self.secondaryProgress = 0;
+          self.progressStyle = 0;
+        },
         'show()V': (self, _args, vm) => { self.vm = vm; self.dialogObject = self.$object ?? self; dialogShow(self); },
         'dismiss()V': (self) => dialogDismiss(self),
         'isShowing()Z': (self) => (self.showing ? 1 : 0),
         'setTitle(Ljava/lang/CharSequence;)V': (self, [title]) => { self.title = jsString(title); },
         'setMessage(Ljava/lang/CharSequence;)V': (self, [message]) => { self.message = jsString(message); },
         'setIndeterminate(Z)V': (self, [value]) => { self.indeterminate = !!value; },
-        'setProgressStyle(I)V': () => undefined,
-        'setMax(I)V': (self, [max]) => { self.max = max | 0; },
-        'setProgress(I)V': (self, [value]) => { self.progress = value | 0; },
+        'isIndeterminate()Z': (self) => (self.indeterminate ? 1 : 0),
+        'setProgressStyle(I)V': (self, [style]) => {
+          self.progressStyle = style | 0;
+          // STYLE_SPINNER 对应不确定态，STYLE_HORIZONTAL 才是可度量的进度条。
+          self.indeterminate = (style | 0) === 0;
+        },
+        'setMax(I)V': (self, [max]) => {
+          self.progressMax = Math.max(1, max | 0);
+          if ((self.progress | 0) > self.progressMax) self.progress = self.progressMax;
+          if ((self.secondaryProgress | 0) > self.progressMax) self.secondaryProgress = self.progressMax;
+        },
+        'getMax()I': (self) => self.progressMax | 0,
+        'setProgress(I)V': (self, [value]) => { self.progress = Math.max(0, Math.min(self.progressMax | 0, value | 0)); },
         'getProgress()I': (self) => self.progress | 0,
+        'setSecondaryProgress(I)V': (self, [value]) => {
+          self.secondaryProgress = Math.max(0, Math.min(self.progressMax | 0, value | 0));
+        },
+        'getSecondaryProgress()I': (self) => self.secondaryProgress | 0,
+        'incrementProgressBy(I)V': (self, [delta]) => {
+          self.progress = Math.max(0, Math.min(self.progressMax | 0, (self.progress | 0) + (delta | 0)));
+        },
+        'incrementSecondaryProgressBy(I)V': (self, [delta]) => {
+          self.secondaryProgress = Math.max(0, Math.min(self.progressMax | 0, (self.secondaryProgress | 0) + (delta | 0)));
+        },
+        'setProgressDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => { self.progressDrawable = drawable ?? null; },
+        'setIndeterminateDrawable(Landroid/graphics/drawable/Drawable;)V': (self, [drawable]) => { self.indeterminateDrawable = drawable ?? null; },
+        'setProgressNumberFormat(Ljava/lang/String;)V': (self, [format]) => { self.progressNumberFormat = format === null ? null : jsString(format); },
+        'setProgressPercentFormat(Ljava/text/NumberFormat;)V': (self, [format]) => { self.progressPercentFormat = format ?? null; },
       },
     })
   );
@@ -8387,6 +9424,62 @@ function vmShowChild(self, index) {
         '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
         'setSpacing(I)V': (self, [value]) => { self.spacing = value | 0; },
         'setUnselectedAlpha(F)V': (self, [value]) => { self.unselectedAlpha = Number(value) || 0; },
+        'setCallbackDuringFling(Z)V': (self, [value]) => { self.callbackDuringFling = !!value; },
+        'setAnimationDuration(I)V': (self, [value]) => { self.animationDuration = value | 0; },
+        'getChildStaticTransformation(Landroid/view/View;Landroid/view/animation/Transformation;)Z': (self, [child, transformation]) => {
+          if (!self.staticTransformationsEnabled) return 0;
+          const alpha = Number(self.unselectedAlpha ?? 1);
+          if (transformation?.$fields instanceof Map) {
+            transformation.$fields.set('Landroid/view/animation/Transformation;->mAlpha:F', numberToFloatBits(alpha));
+          }
+          if (transformation?.$peer) transformation.$peer.alpha = alpha;
+          void child;
+          return 1;
+        },
+        'checkLayoutParams(Landroid/view/ViewGroup$LayoutParams;)Z': (_self, [params]) => {
+          const descriptor = params?.$descriptor ?? params?.$peer?.$descriptor ?? '';
+          return String(descriptor).endsWith('Gallery$LayoutParams;') || String(descriptor).endsWith('ViewGroup$LayoutParams;') ? 1 : 0;
+        },
+        'generateLayoutParams(Landroid/view/ViewGroup$LayoutParams;)Landroid/view/ViewGroup$LayoutParams;': (_self, [params], vm) => {
+          const out = vm.allocateRawObject('Landroid/widget/Gallery$LayoutParams;');
+          out.$peer = { width: params?.$peer?.width ?? params?.width ?? -2, height: params?.$peer?.height ?? params?.height ?? -2 };
+          return out;
+        },
+        'generateLayoutParams(Landroid/util/AttributeSet;)Landroid/view/ViewGroup$LayoutParams;': (_self, [attrs], vm) => {
+          const out = vm.allocateRawObject('Landroid/widget/Gallery$LayoutParams;');
+          out.$peer = { width: -2, height: -2, attributeSet: attrs ?? null };
+          return out;
+        },
+        'generateDefaultLayoutParams()Landroid/view/ViewGroup$LayoutParams;': (_self, _args, vm) => {
+          const out = vm.allocateRawObject('Landroid/widget/Gallery$LayoutParams;');
+          out.$peer = { width: -2, height: -2 };
+          return out;
+        },
+        'onDown(Landroid/view/MotionEvent;)Z': () => 0,
+        'onShowPress(Landroid/view/MotionEvent;)V': () => undefined,
+        'onLongPress(Landroid/view/MotionEvent;)V': () => undefined,
+        'onSingleTapUp(Landroid/view/MotionEvent;)Z': () => 0,
+        'onScroll(Landroid/view/MotionEvent;Landroid/view/MotionEvent;FF)Z': (self, [first, second, distanceX, distanceY]) => {
+          // Gallery 的滚动由子项布局完成：这里把水平位移转成视图滚动，并阻止父级拦截。
+          self.view?.scrollBy?.(Math.round(Number(distanceX) || 0), 0);
+          self.view?.invalidate?.();
+          void first; void second; void distanceY;
+          return 1;
+        },
+        'onFling(Landroid/view/MotionEvent;Landroid/view/MotionEvent;FF)Z': (self) => {
+          // 关闭 Fling 回调时消费手势以停止惯性滚动，与 AOSP 的 setCallbackDuringFling 语义一致。
+          return self.callbackDuringFling === false ? 1 : 0;
+        },
+        'showContextMenuForChild(Landroid/view/View;)Z': () => 0,
+        'showContextMenuForChild(Landroid/view/View;FF)Z': () => 0,
+        'getChildDrawingOrder(II)I': (self, [childCount, index]) => {
+          const count = childCount | 0;
+          const position = index | 0;
+          const selected = (self.selectedPosition | 0) - (self.firstVisiblePosition | 0);
+          if (selected < 0 || selected >= count) return position;
+          if (position === count - 1) return selected;
+          return position >= selected ? position + 1 : position;
+        },
       },
     })
   );
@@ -8647,6 +9740,18 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
+    nativeDef('Landroid/widget/Filter;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        'filter(Ljava/lang/CharSequence;)V': (self, [constraint], vm) => runArrayFilter(self, constraint, null, vm),
+        'filter(Ljava/lang/CharSequence;Landroid/widget/Filter$FilterListener;)V': (self, [constraint, listener], vm) =>
+          runArrayFilter(self, constraint, listener, vm),
+        'convertResultToString(Ljava/lang/Object;)Ljava/lang/CharSequence;': (_self, [value]) => jsString(value) ?? '',
+      },
+    })
+  );
+
+  defs.push(
     nativeDef('Landroid/widget/ArrayAdapter;', {
       super: 'Landroid/widget/BaseAdapter;',
       ctor: class ArrayAdapterPeer {
@@ -8662,6 +9767,14 @@ function vmShowChild(self, index) {
         '<init>(Landroid/content/Context;I[Ljava/lang/Object;)V': (self, [context, _resource, array]) => {
           self.context = context ?? null;
           self.objects = Array.from(array?.$data || array || []);
+        },
+        '<init>(Landroid/content/Context;II[Ljava/lang/Object;)V': (self, [context, _resource, _textViewResourceId, array]) => {
+          self.context = context ?? null;
+          self.objects = Array.from(array?.$data || array || []);
+        },
+        'addAll(Ljava/util/Collection;)V': (self, [collection]) => {
+          self.objects.push(...(collection?.$peer?.items || collection?.items || []));
+          if (self.$notifyOnChange !== false) self.$dirty++;
         },
         '<init>(Landroid/content/Context;IILjava/util/List;)V': (self, [context, _resource, _textViewResourceId, list]) => {
           self.context = context ?? null;
@@ -8681,15 +9794,74 @@ function vmShowChild(self, index) {
           view.setText?.(value === null || value === undefined ? '' : jsString(value));
           return viewObject(vm, view);
         },
-        'add(Ljava/lang/Object;)V': (self, [value]) => { self.objects.push(value); self.$dirty++; },
-        'addAll(Ljava/util/Collection;)V': (self, [collection]) => { self.objects.push(...(collection?.$peer?.items || [])); self.$dirty++; },
+        'add(Ljava/lang/Object;)V': (self, [value]) => {
+          self.objects.push(value);
+          if (self.$notifyOnChange !== false) self.$dirty++;
+        },
+        'addAll([Ljava/lang/Object;)V': (self, [values]) => {
+          self.objects.push(...Array.from(values?.$data || values || []));
+          if (self.$notifyOnChange !== false) self.$dirty++;
+        },
+        'sort(Ljava/util/Comparator;)V': (self, [comparator], vm) => {
+          if (!comparator) {
+            self.objects.sort((a, b) => (jsString(a) ?? '').localeCompare(jsString(b) ?? ''));
+          } else {
+            self.objects.sort((a, b) => {
+              try {
+                return Number(vm.invokeByName('compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', comparator, [a, b])) | 0;
+              } catch {
+                return 0;
+              }
+            });
+          }
+          if (self.$notifyOnChange !== false) self.$dirty++;
+        },
+        'getContext()Landroid/content/Context;': (self, _args, vm) => self.context ?? vm.contextObject ?? null,
+        'setDropDownViewResource(I)V': (self, [resId]) => { self.dropDownViewResource = resId >>> 0; },
+        'setDropDownViewTheme(Landroid/content/res/Resources$Theme;)V': (self, [theme]) => { self.dropDownViewTheme = theme ?? null; },
+        'getDropDownViewTheme()Landroid/content/res/Resources$Theme;': (self) => self.dropDownViewTheme ?? null,
+        'getAutofillOptions()[Ljava/lang/CharSequence;': (self, _args, vm) => {
+          const count = (self.objects || []).length;
+          if (!count) return null;
+          const options = (self.objects || []).map((item) => jsString(item) ?? '');
+          return vm.newArray('[Ljava/lang/CharSequence;', options.length, options);
+        },
+        'getDropDownView(ILandroid/view/View;Landroid/view/ViewGroup;)Landroid/view/View;': (self, [position, convertView], vm) => {
+          let view = unwrapView(convertView);
+          if (!view) {
+            view = new TextView(self.context?.$peer ?? self.context ?? null);
+            view.setPadding?.(16, 12, 16, 12);
+            view.setTextSize?.(16);
+          }
+          const value = (self.objects || [])[position | 0];
+          view.setText?.(value === null || value === undefined ? '' : jsString(value));
+          return viewObject(vm, view);
+        },
+        'getFilter()Landroid/widget/Filter;': (self, _args, vm) => {
+          if (!self.filterObject) {
+            self.filterObject = vm.allocateRawObject('Landroid/widget/Filter;');
+            self.filterObject.$peer = { vm, adapter: self };
+          }
+          return self.filterObject;
+        },
+        'setNotifyOnChange(Z)V': (self, [value]) => { self.$notifyOnChange = !!value; },
         'insert(Ljava/lang/Object;I)V': (self, [value, index]) => { self.objects.splice(index | 0, 0, value); self.$dirty++; },
         'remove(Ljava/lang/Object;)V': (self, [value]) => { const i = self.objects.indexOf(value); if (i >= 0) self.objects.splice(i, 1); self.$dirty++; },
         'clear()V': (self) => { self.objects = []; self.$dirty++; },
         'getPosition(Ljava/lang/Object;)I': (self, [value]) => self.objects.indexOf(value),
-        'getFilter()Landroid/widget/Filter;': () => null,
         'notifyDataSetChanged()V': (self) => { self.$dirty++; },
-        'setNotifyOnChange(Z)V': () => undefined,
+      },
+      staticMethods: {
+        'createFromResource(Landroid/content/Context;II)Landroid/widget/ArrayAdapter;': (_self, [context, textArrayResId, textViewResId], vm) => {
+          const resolved = vm.resources.resolve(textArrayResId >>> 0);
+          const items = Array.isArray(resolved) ? resolved.map((item) => String(item ?? '')) : [];
+          const adapter = vm.allocateRawObject('Landroid/widget/ArrayAdapter;');
+          adapter.$peer = new ArrayAdapterPeer();
+          adapter.$peer.context = vm.contextObject ?? context ?? null;
+          adapter.$peer.objects = items;
+          adapter.$peer.textViewResourceId = textViewResId >>> 0;
+          return adapter;
+        },
       },
     })
   );
@@ -9925,27 +11097,6 @@ function vmShowChild(self, index) {
   );
 
   defs.push(
-    nativeDef('Landroid/provider/Settings$Global;', {
-      super: 'Ljava/lang/Object;',
-      staticMethods: {
-        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;)I': (_self, [_resolver, key]) => {
-          const values = { adb_enabled: 0, development_settings_enabled: 0, device_provisioned: 1, stay_on_while_plugged_in: 0 };
-          return values[jsString(key)] ?? 0;
-        },
-        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;I)I': (_self, [_resolver, key, fallback]) => {
-          const values = { adb_enabled: 0, development_settings_enabled: 0, device_provisioned: 1, stay_on_while_plugged_in: 0 };
-          return values[jsString(key)] ?? (fallback | 0);
-        },
-        'getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;': (_self, [_resolver, key]) => {
-          const values = { device_name: 'apk.js' };
-          return values[jsString(key)] ?? null;
-        },
-        'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': () => true,
-      },
-    })
-  );
-
-  defs.push(
     nativeDef('Landroid/view/View$AccessibilityDelegate;', {
       super: 'Ljava/lang/Object;',
       methods: {
@@ -9960,14 +11111,53 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/graphics/PointF;', {
       super: 'Ljava/lang/Object;',
-      ctor: class PointFPeer { constructor() { this.x = 0; this.y = 0; } },
+      ctor: class PointFPeer {
+        constructor() {
+          this.f = { x: 0, y: 0 };
+          for (const name of ['x', 'y']) {
+            Object.defineProperty(this, name, {
+              configurable: true,
+              enumerable: true,
+              get: () => this.f[name],
+              set: (value) => { this.f[name] = value | 0; },
+            });
+          }
+        }
+      },
       methods: {
         '<init>()V': (self) => { self.x = 0; self.y = 0; },
         '<init>(FF)V': (self, [x, y]) => { self.x = numberToFloatBits(Number(x) || 0); self.y = numberToFloatBits(Number(y) || 0); },
         '<init>(Landroid/graphics/PointF;)V': (self, [other]) => { self.x = other?.$peer?.x ?? 0; self.y = other?.$peer?.y ?? 0; },
+        '<init>(Landroid/graphics/Point;)V': (self, [other]) => {
+          const source = other?.$peer || other || {};
+          self.x = numberToFloatBits(Number(source.x) || 0);
+          self.y = numberToFloatBits(Number(source.y) || 0);
+        },
         'set(FF)V': (self, [x, y]) => { self.x = numberToFloatBits(Number(x) || 0); self.y = numberToFloatBits(Number(y) || 0); },
         'set(Landroid/graphics/PointF;)V': (self, [other]) => { self.x = Number(other?.$peer?.x) || 0; self.y = Number(other?.$peer?.y) || 0; },
         'length()F': (self) => Math.hypot(floatBitsToNumber(self.x | 0), floatBitsToNumber(self.y | 0)),
+        'length(FF)F': (_self, [x, y]) => Math.hypot(Number(x) || 0, Number(y) || 0),
+        'negate()V': (self) => {
+          self.x = numberToFloatBits(-floatBitsToNumber(self.x | 0));
+          self.y = numberToFloatBits(-floatBitsToNumber(self.y | 0));
+        },
+        'offset(FF)V': (self, [dx, dy]) => {
+          self.x = numberToFloatBits(floatBitsToNumber(self.x | 0) + (Number(dx) || 0));
+          self.y = numberToFloatBits(floatBitsToNumber(self.y | 0) + (Number(dy) || 0));
+        },
+        'equals(FF)Z': (self, [x, y]) => (
+          (self.x | 0) === numberToFloatBits(Number(x) || 0) && (self.y | 0) === numberToFloatBits(Number(y) || 0) ? 1 : 0
+        ),
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/graphics/PointF;') return 0;
+          const peer = other.$peer || {};
+          return (peer.x | 0) === (self.x | 0) && (peer.y | 0) === (self.y | 0) ? 1 : 0;
+        },
+        'hashCode()I': (self) => ((31 * (self.x | 0)) + (self.y | 0)) | 0,
+        'toString()Ljava/lang/String;': (self) => `PointF(${floatBitsToNumber(self.x | 0)}, ${floatBitsToNumber(self.y | 0)})`,
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'readFromParcel(Landroid/os/Parcel;)V': () => undefined,
       },
       instanceFields: new Map([['x:F', 0], ['y:F', 0]]),
     })
@@ -10195,6 +11385,49 @@ function vmShowChild(self, index) {
         'size()I': (self) => self.map.size,
         'keyAt(I)I': (self, [index]) => [...self.map.keys()][index | 0] ?? 0,
         'valueAt(I)Z': (self, [index]) => ([...self.map.values()][index | 0] ? 1 : 0),
+        'get(IZ)Z': (self, [key, fallback]) => (self.map.has(key | 0) ? (self.map.get(key | 0) ? 1 : 0) : (fallback ? 1 : 0)),
+        'removeAt(I)V': (self, [index]) => {
+          const keys = [...self.map.keys()];
+          const key = keys[index | 0];
+          if (key !== undefined) self.map.delete(key);
+        },
+        'setValueAt(IZ)V': (self, [index, value]) => {
+          const key = [...self.map.keys()][index | 0];
+          if (key !== undefined) self.map.set(key, !!value);
+        },
+        'indexOfKey(I)I': (self, [key]) => [...self.map.keys()].indexOf(key | 0),
+        'indexOfValue(Z)I': (self, [value]) => {
+          let index = 0;
+          for (const item of self.map.values()) {
+            if (!!item === !!value) return index;
+            index++;
+          }
+          return -1;
+        },
+        'append(IZ)V': (self, [key, value]) => { self.map.set(key | 0, !!value); },
+        'clone()Landroid/util/SparseBooleanArray;': (self, _args, vm) => {
+          const copy = vm.allocateRawObject('Landroid/util/SparseBooleanArray;');
+          copy.$peer = { map: new Map(self.map) };
+          return copy;
+        },
+        'toString()Ljava/lang/String;': (self) => {
+          const entries = [...self.map.entries()].map(([key, value]) => `${key}=${value ? 'true' : 'false'}`);
+          return `{${entries.join(', ')}}`;
+        },
+        'hashCode()I': (self) => {
+          let hash = 0;
+          for (const [key, value] of self.map) hash ^= (key | 0) ^ (value ? 1 : 0);
+          return hash;
+        },
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/util/SparseBooleanArray;') return 0;
+          const otherMap = other.$peer?.map;
+          if (!otherMap || otherMap.size !== self.map.size) return 0;
+          for (const [key, value] of self.map) {
+            if (otherMap.get(key) !== value) return 0;
+          }
+          return 1;
+        },
       },
     })
   );
@@ -10452,13 +11685,47 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/os/Process;', {
       super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>()V': () => undefined,
+      },
       staticMethods: {
         'myPid()I': () => 4242,
         'myTid()I': () => 4242,
         'myUid()I': () => 10000,
-        'getElapsedCpuTime()J': () => BigInt(Date.now()),
+        'getElapsedCpuTime()J': (_self, _args, vm) => BigInt(Date.now() - (vm.$processWallStart ??= Date.now())),
         'getThreadPriority(I)I': () => 0,
         'setThreadPriority(I)V': () => undefined,
+        'setThreadPriority(II)V': (_self, [tid, priority]) => {
+          // 模拟器没有真实调度器；要求非负优先级与 AOSP 的入参校验保持一致。
+          const value = priority | 0;
+          if (value < -20 || value > 19) throw new Error(`IllegalArgumentException: Priority out of range: ${value}`);
+          void tid;
+        },
+        'getStartElapsedRealtime()J': () => BigInt(PROCESS_START_ELAPSED),
+        'getStartUptimeMillis()J': () => BigInt(PROCESS_START_ELAPSED),
+        'is64Bit()Z': () => 1,
+        'isIsolated()Z': () => 0,
+        'supportsProcesses()Z': () => 1,
+        'isApplicationUid(I)Z': (_self, [uid]) => {
+          const value = uid | 0;
+          return (value >= 10000 && value < 20000) ? 1 : 0;
+        },
+        'myUserHandle()Landroid/os/UserHandle;': (_self, _args, vm) => {
+          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
+          handle.$peer = { vm, id: 0 };
+          return handle;
+        },
+        'getUidForName(Ljava/lang/String;)I': (_self, [name]) => processIdForName(jsString(name), 10000),
+        'getGidForName(Ljava/lang/String;)I': (_self, [name]) => processIdForName(jsString(name), 10000),
+        'getExclusiveCores()[I': (_self, _args, vm) => vm.newArray('[I', 0, null),
+        'killProcess(I)V': (_self, [pid], vm) => {
+          if ((pid | 0) !== 4242) return;
+          vm.log('warn', 'Process', 'killProcess(自身 pid) 被忽略');
+        },
+        'sendSignal(II)V': (_self, [pid, signal], vm) => {
+          if ((pid | 0) !== 4242) return;
+          vm.log('warn', 'Process', `sendSignal(${signal | 0}) 被忽略`);
+        },
       },
     })
   );
@@ -10779,15 +12046,64 @@ function vmShowChild(self, index) {
       super: 'Ljava/lang/Object;',
       ctor: class RangePeer { constructor(lower, upper) { this.lower = lower; this.upper = upper; } },
       methods: {
+        '<init>(Ljava/lang/Comparable;Ljava/lang/Comparable;)V': (self, [lower, upper], vm) => {
+          if (compareComparables(vm, lower, upper) > 0) {
+            vm.throwException('Ljava/lang/IllegalArgumentException;', `lower must be less than or equal to upper`);
+          }
+          self.lower = lower;
+          self.upper = upper;
+        },
         'getLower()Ljava/lang/Comparable;': (self) => self.lower,
         'getUpper()Ljava/lang/Comparable;': (self) => self.upper,
+        'contains(Ljava/lang/Comparable;)Z': (self, [value], vm) => (
+          compareComparables(vm, self.lower, value) <= 0 && compareComparables(vm, value, self.upper) <= 0 ? 1 : 0
+        ),
+        'contains(Landroid/util/Range;)Z': (self, [other], vm) => {
+          const peer = other?.$peer || {};
+          return compareComparables(vm, self.lower, peer.lower) <= 0 && compareComparables(vm, peer.upper, self.upper) <= 0 ? 1 : 0;
+        },
+        'clamp(Ljava/lang/Comparable;)Ljava/lang/Comparable;': (self, [value], vm) => {
+          if (compareComparables(vm, value, self.lower) < 0) return self.lower;
+          if (compareComparables(vm, value, self.upper) > 0) return self.upper;
+          return value;
+        },
+        'intersect(Landroid/util/Range;)Landroid/util/Range;': (self, [other], vm) => {
+          const peer = other?.$peer || {};
+          return rangeIntersect(vm, self.lower, self.upper, peer.lower, peer.upper);
+        },
+        'intersect(Ljava/lang/Comparable;Ljava/lang/Comparable;)Landroid/util/Range;': (self, [lower, upper], vm) => (
+          rangeIntersect(vm, self.lower, self.upper, lower, upper)
+        ),
+        'extend(Landroid/util/Range;)Landroid/util/Range;': (self, [other], vm) => {
+          const peer = other?.$peer || {};
+          const lower = compareComparables(vm, peer.lower, self.lower) < 0 ? peer.lower : self.lower;
+          const upper = compareComparables(vm, peer.upper, self.upper) > 0 ? peer.upper : self.upper;
+          return rangeCreate(vm, lower, upper);
+        },
+        'extend(Ljava/lang/Comparable;Ljava/lang/Comparable;)Landroid/util/Range;': (self, [lower, upper], vm) => {
+          const min = compareComparables(vm, lower, self.lower) < 0 ? lower : self.lower;
+          const max = compareComparables(vm, upper, self.upper) > 0 ? upper : self.upper;
+          return rangeCreate(vm, min, max);
+        },
+        'extend(Ljava/lang/Comparable;)Landroid/util/Range;': (self, [value], vm) => {
+          const lower = compareComparables(vm, value, self.lower) < 0 ? value : self.lower;
+          const upper = compareComparables(vm, value, self.upper) > 0 ? value : self.upper;
+          return rangeCreate(vm, lower, upper);
+        },
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/util/Range;') return 0;
+          const peer = other.$peer || {};
+          const sameLower = compareComparables(vm, self.lower, peer.lower) === 0;
+          const sameUpper = compareComparables(vm, self.upper, peer.upper) === 0;
+          return sameLower && sameUpper ? 1 : 0;
+        },
+        'hashCode()I': (self) => (hashComparable(self.lower) * 31 + hashComparable(self.upper)) | 0,
+        'toString()Ljava/lang/String;': (self) => `[${comparableText(self.lower)}, ${comparableText(self.upper)}]`,
       },
       staticMethods: {
-        'create(Ljava/lang/Comparable;Ljava/lang/Comparable;)Landroid/util/Range;': (_self, [lower, upper], vm) => {
-          const range = vm.allocateRawObject('Landroid/util/Range;');
-          range.$peer = { lower, upper };
-          return range;
-        },
+        'create(Ljava/lang/Comparable;Ljava/lang/Comparable;)Landroid/util/Range;': (_self, [lower, upper], vm) => (
+          rangeCreate(vm, lower, upper)
+        ),
       },
     }),
     nativeDef('Landroid/hardware/camera2/params/StreamConfigurationMap;', {
@@ -11023,10 +12339,126 @@ function vmShowChild(self, index) {
       ctor: class JSONObjectPeer {
         constructor() { this.map = Object.create(null); }
       },
+      staticMethods: {
+        'numberToString(Ljava/lang/Number;)Ljava/lang/String;': (_self, [value]) => {
+          if (value === null || value === undefined) throw new Error('JSONException: Number must not be null');
+          const number = Number(value?.$peer?.value ?? value);
+          if (Number.isNaN(number)) throw new Error('JSONException: Forbidden numeric value: NaN');
+          if (!Number.isFinite(number)) throw new Error(`JSONException: Forbidden numeric value: ${number}`);
+          if (Object.is(number, -0)) return '-0';
+          if (Number.isInteger(number)) return String(number);
+          const text = String(number);
+          return /e/i.test(text) ? Number(number).toPrecision(17).replace(/0+$/, '').replace(/\.$/, '') : text;
+        },
+        'quote(Ljava/lang/String;)Ljava/lang/String;': (_self, [value]) => {
+          const text = String(jsString(value) ?? '');
+          let out = '"';
+          for (const char of text) {
+            switch (char) {
+              case '"': out += '\\"'; break;
+              case '\\': out += '\\\\'; break;
+              case '\b': out += '\\b'; break;
+              case '\f': out += '\\f'; break;
+              case '\n': out += '\\n'; break;
+              case '\r': out += '\\r'; break;
+              case '\t': out += '\\t'; break;
+              default: out += (char < ' ' ? '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0') : char);
+            }
+          }
+          return out + '"';
+        },
+        'wrap(Ljava/lang/Object;)Ljava/lang/Object;': (_self, [value], vm) => {
+          if (value === null || value === undefined) return null;
+          if (Array.isArray(value?.$peer?.items)) return jsonMake(vm, 'Lorg/json/JSONArray;', 'items', value.$peer.items);
+          if (value?.$peer?.map) return jsonMake(vm, 'Lorg/json/JSONObject;', 'map', value.$peer.map);
+          if (Array.isArray(value)) return jsonMake(vm, 'Lorg/json/JSONArray;', 'items', value);
+          return value;
+        },
+      },
       methods: {
         '<init>()V': (self) => { self.map = Object.create(null); },
         '<init>(Ljava/lang/String;)V': (self, [text]) => {
           try { const value = JSON.parse(jsString(text)); self.map = value && typeof value === 'object' && !Array.isArray(value) ? value : Object.create(null); } catch { self.map = Object.create(null); }
+        },
+        '<init>(Ljava/util/Map;)V': (self, [source], vm) => {
+          self.map = Object.create(null);
+          const entries = source?.map;
+          if (!entries || typeof entries.forEach !== 'function') return;
+          for (const [slot, value] of entries) {
+            const rawKey = source.rawKeys?.get?.(slot) ?? slot;
+            self.map[jsString(rawKey)] = jsonUnbox(vm, value);
+          }
+        },
+        '<init>(Lorg/json/JSONTokener;)V': (self, [tokener]) => {
+          self.map = Object.create(null);
+          const text = tokener?.$peer?.source ?? tokener?.$peer?.text;
+          if (typeof text !== 'string') return;
+          try {
+            const value = JSON.parse(text);
+            if (value && typeof value === 'object' && !Array.isArray(value)) self.map = value;
+          } catch {
+            // JSONTokener 语法错误时 AOSP 会抛 JSONException；这里保持空对象，交由调用方沿 nextValue 处理。
+          }
+        },
+        '<init>(Lorg/json/JSONObject;[Ljava/lang/String;)V': (self, [source, names]) => {
+          self.map = Object.create(null);
+          const sourceMap = source?.$peer?.map || {};
+          const keys = names?.$data ?? names ?? [];
+          for (const name of keys) {
+            const key = jsString(name);
+            if (key in sourceMap) self.map[key] = sourceMap[key];
+          }
+        },
+        'put(Ljava/lang/String;Z)Lorg/json/JSONObject;': (self, [key, value]) => {
+          self.map[jsString(key)] = !!value;
+          return self.$object ?? self;
+        },
+        'put(Ljava/lang/String;D)Lorg/json/JSONObject;': (self, [key, value]) => {
+          const number = Number(value);
+          self.map[jsString(key)] = Number.isFinite(number) ? number : null;
+          return self.$object ?? self;
+        },
+        'put(Ljava/lang/String;I)Lorg/json/JSONObject;': (self, [key, value]) => {
+          self.map[jsString(key)] = value | 0;
+          return self.$object ?? self;
+        },
+        'put(Ljava/lang/String;J)Lorg/json/JSONObject;': (self, [key, value]) => {
+          self.map[jsString(key)] = Number(value) || 0;
+          return self.$object ?? self;
+        },
+        'putOpt(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;': (self, [key, value], vm) => {
+          if (key === null || key === undefined || value === null || value === undefined) return self.$object ?? self;
+          self.map[jsString(key)] = jsonUnbox(vm, value);
+          return self.$object ?? self;
+        },
+        'accumulate(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;': (self, [key, value], vm) => {
+          const name = jsString(key);
+          const current = self.map[name];
+          if (current === undefined || current === null) {
+            self.map[name] = jsonUnbox(vm, value);
+          } else if (Array.isArray(current)) {
+            self.map[name] = current.concat(jsonUnbox(vm, value));
+          } else {
+            self.map[name] = [current, jsonUnbox(vm, value)];
+          }
+          return self.$object ?? self;
+        },
+        'opt(Ljava/lang/String;)Ljava/lang/Object;': (self, [key], vm) => {
+          const value = (self.map || {})[jsString(key)];
+          return value === undefined ? null : jsonBox(vm, value);
+        },
+        'toJSONArray(Lorg/json/JSONArray;)Lorg/json/JSONArray;': (self, [names], vm) => {
+          if (!names) return null;
+          const items = names?.$peer?.items || [];
+          const list = items.map((name) => {
+            const value = (self.map || {})[jsString(name)];
+            return value === undefined ? null : value;
+          });
+          return jsonMake(vm, 'Lorg/json/JSONArray;', 'items', list);
+        },
+        'toString(I)Ljava/lang/String;': (self, [indent]) => {
+          const spaces = Math.max(0, indent | 0);
+          return spaces === 0 ? JSON.stringify(self.map || {}) : JSON.stringify(self.map || {}, null, spaces);
         },
         'has(Ljava/lang/String;)Z': (self, [key]) => (Object.prototype.hasOwnProperty.call(self.map || {}, jsString(key)) ? 1 : 0),
         'isNull(Ljava/lang/String;)Z': (self, [key]) => ((self.map || {})[jsString(key)] == null ? 1 : 0),
@@ -11101,20 +12533,40 @@ function vmShowChild(self, index) {
         }
       },
       staticMethods: {
-        'forLanguageTags(Ljava/lang/String;)Landroid/os/LocaleList;': () => ({
-          $descriptor: 'Landroid/os/LocaleList;',
-          locales: [],
-        }),
-        'getDefault()Landroid/os/LocaleList;': (self, _args, vm) => ({
-          $descriptor: 'Landroid/os/LocaleList;',
-          locales: [makeDefaultLocaleObject(vm)],
-        }),
+        'forLanguageTags(Ljava/lang/String;)Landroid/os/LocaleList;': (_self, [tags], vm) => {
+          const text = String(jsString(tags) ?? '');
+          const locales = text
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+            .map((tag) => localeFromTag(vm, tag));
+          return localeListObject(vm, locales);
+        },
+        'getDefault()Landroid/os/LocaleList;': (_self, _args, vm) => localeListObject(vm, [makeDefaultLocaleObject(vm)]),
+        'getEmptyLocaleList()Landroid/os/LocaleList;': (_self, _args, vm) => localeListObject(vm, []),
+        'getAdjustedDefault()Landroid/os/LocaleList;': (_self, _args, vm) => (
+          defaultLocaleList ?? localeListObject(vm, [makeDefaultLocaleObject(vm)])
+        ),
+        'setDefault(Landroid/os/LocaleList;)V': (_self, [list]) => { defaultLocaleList = list ?? null; },
+        'isPseudoLocale(Landroid/icu/util/ULocale;)Z': (_self, [locale]) => {
+          const tag = localeTagOf(locale).toLowerCase();
+          return (tag === 'en-xa' || tag === 'ar-xb') ? 1 : 0;
+        },
+        'isPseudoLocale(Ljava/lang/String;)Z': (_self, [tag]) => {
+          const text = String(jsString(tag) ?? '').toLowerCase();
+          return (text === 'en-xa' || text === 'ar-xb') ? 1 : 0;
+        },
       },
       methods: {
         '<init>([Ljava/util/Locale;)V': (self, [locales]) => {
           self.locales = Array.isArray(locales) ? locales : [];
         },
-        'isEmpty()Z': (self) => !self.locales || self.locales.length === 0,
+        '<init>([Ljava/util/Locale;Ljava/util/Locale;)V': (self, [locales, primary]) => {
+          const list = Array.isArray(locales) ? [...locales] : [];
+          if (primary && !list.includes(primary)) list.unshift(primary);
+          self.locales = list;
+        },
+        'isEmpty()Z': (self) => ((self.locales || []).length === 0 ? 1 : 0),
         'size()I': (self) => (self.locales ? self.locales.length : 1),
         'get(I)Ljava/util/Locale;': (self, [index], vm) => {
           if (self.locales && self.locales.length) {
@@ -11122,13 +12574,48 @@ function vmShowChild(self, index) {
           }
           return makeDefaultLocaleObject(vm);
         },
-        'toLanguageTags()Ljava/lang/String;': (self) => {
-          const list = Array.isArray(self.locales) ? self.locales : [];
-          return list
-            .map((locale) => (locale && locale.$peer && locale.$peer.tag) || locale?.$fields?.tag || '')
-            .filter(Boolean)
-            .join(',');
+        'getFirstMatch([Ljava/lang/String;)Ljava/util/Locale;': (self, [tags]) => {
+          const wanted = (tags?.$data ?? tags ?? []).map((tag) => String(tag).toLowerCase());
+          for (const tag of wanted) {
+            for (const locale of self.locales || []) {
+              const identity = localeTagOf(locale).toLowerCase();
+              if (identity === tag || identity.startsWith(`${tag}-`) || identity.startsWith(`${tag}_`)) return locale;
+            }
+          }
+          return null;
         },
+        'indexOf(Ljava/util/Locale;)I': (self, [locale]) => {
+          const identity = localeTagOf(locale);
+          return (self.locales || []).findIndex((item) => localeTagOf(item) === identity);
+        },
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/os/LocaleList;') return 0;
+          const left = self.locales || [];
+          const right = other.$peer?.locales || [];
+          if (left.length !== right.length) return 0;
+          for (let i = 0; i < left.length; i++) {
+            if (localeTagOf(left[i]) !== localeTagOf(right[i])) return 0;
+          }
+          return 1;
+        },
+        'hashCode()I': (self) => {
+          let hash = 1;
+          for (const locale of self.locales || []) {
+            const tag = localeTagOf(locale);
+            let localeHash = 0;
+            for (let i = 0; i < tag.length; i++) localeHash = (Math.imul(localeHash, 31) + tag.charCodeAt(i)) | 0;
+            hash = (Math.imul(hash, 31) + localeHash) | 0;
+          }
+          return hash;
+        },
+        'toString()Ljava/lang/String;': (self) => (
+          `LocaleList[${(self.locales || []).map((locale) => localeTagOf(locale)).join(',')}]`
+        ),
+        'toLanguageTags()Ljava/lang/String;': (self) => (
+          (self.locales || []).map((locale) => localeTagOf(locale)).filter(Boolean).join(',')
+        ),
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
       },
     })
   );
@@ -12819,6 +14306,52 @@ function vmShowChild(self, index) {
           self.pkg = vm.packageName || '';
           self.cls = klass?.$dexClass?.name || '';
         },
+        '<init>(Landroid/content/Context;Ljava/lang/String;)V': (self, [context, cls], vm) => {
+          const pkg = (context?.$peer?.getPackageName?.() ?? vm.packageName) || '';
+          const name = jsString(cls);
+          self.pkg = pkg;
+          self.cls = name.startsWith('.') ? `${pkg}${name}` : name;
+        },
+        '<init>(Landroid/os/Parcel;)V': (self) => { self.pkg = ''; self.cls = ''; },
+        'createRelative(Ljava/lang/String;Ljava/lang/String;)Landroid/content/ComponentName;': (_self, [pkg, cls], vm) => {
+          const name = jsString(cls);
+          if (!name) return null;
+          const packageName = jsString(pkg);
+          const resolved = name.startsWith('.') ? `${packageName}${name}` : (name.includes('.') ? name : `${packageName}.${name}`);
+          return componentNameObject(vm, packageName, resolved);
+        },
+        'createRelative(Landroid/content/Context;Ljava/lang/String;)Landroid/content/ComponentName;': (_self, [context, cls], vm) => {
+          const pkg = (context?.$peer?.getPackageName?.() ?? vm.packageName) || '';
+          const name = jsString(cls);
+          if (!name) return null;
+          const resolved = name.startsWith('.') ? `${pkg}${name}` : (name.includes('.') ? name : `${pkg}.${name}`);
+          return componentNameObject(vm, pkg, resolved);
+        },
+        'unflattenFromString(Ljava/lang/String;)Landroid/content/ComponentName;': (_self, [value], vm) => {
+          const text = jsString(value);
+          const slash = text.indexOf('/');
+          if (slash <= 0) return null;
+          const pkg = text.slice(0, slash);
+          let cls = text.slice(slash + 1);
+          if (cls.startsWith('.')) cls = `${pkg}${cls}`;
+          return componentNameObject(vm, pkg, cls);
+        },
+        'clone()Landroid/content/ComponentName;': (self, _args, vm) => componentNameObject(vm, self.pkg, self.cls),
+        'toShortString()Ljava/lang/String;': (self) => {
+          if (self.cls?.startsWith(`${self.pkg}.`)) return `${self.pkg}${self.cls.slice(self.pkg.length)}`;
+          return `${self.pkg}/${self.cls}`;
+        },
+        'compareTo(Landroid/content/ComponentName;)I': (self, [other]) => {
+          const peer = other?.$peer || {};
+          const pkgOrder = String(self.pkg).localeCompare(String(peer.pkg));
+          if (pkgOrder !== 0) return pkgOrder < 0 ? -1 : 1;
+          const clsOrder = String(self.cls).localeCompare(String(peer.cls));
+          return clsOrder < 0 ? -1 : (clsOrder > 0 ? 1 : 0);
+        },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'writeToParcel(Landroid/content/ComponentName;Landroid/os/Parcel;)V': () => undefined,
+        'readFromParcel(Landroid/os/Parcel;)Landroid/content/ComponentName;': () => null,
         'getPackageName()Ljava/lang/String;': (self, _args, vm) => vm.toJavaString(self.pkg),
         'getClassName()Ljava/lang/String;': (self, _args, vm) => vm.toJavaString(self.cls),
         'getShortClassName()Ljava/lang/String;': (self, _args, vm) => {
@@ -12865,9 +14398,52 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/content/pm/PackageItemInfo;', {
       super: 'Ljava/lang/Object;',
+      ctor: class PackageItemInfoPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.name = null;
+          this.packageName = null;
+          this.labelRes = 0;
+          this.nonLocalizedLabel = null;
+          this.icon = 0;
+          this.banner = 0;
+          this.logo = 0;
+          this.descriptionRes = 0;
+        }
+      },
       methods: {
+        '<init>()V': (self) => {
+          self.name = null;
+          self.packageName = null;
+          self.labelRes = 0;
+          self.nonLocalizedLabel = null;
+          self.icon = 0;
+          self.banner = 0;
+          self.logo = 0;
+        },
+        '<init>(Landroid/content/pm/PackageItemInfo;)V': (self, [other]) => {
+          const peer = other?.$peer || {};
+          for (const name of PACKAGE_ITEM_FIELDS) {
+            if (peer[name] !== undefined) self[name] = peer[name];
+          }
+        },
+        '<init>(Landroid/os/Parcel;)V': () => undefined,
+        'loadBanner(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': (self, _args, vm) => {
+          const resId = Number(peerField(self, 'banner')) | 0;
+          if (resId) return drawableObject(vm, vm.resources.getDrawable(resId >>> 0));
+          const iconId = Number(peerField(self, 'icon')) | 0;
+          if (iconId) return drawableObject(vm, vm.resources.getDrawable(iconId >>> 0));
+          return null;
+        },
+        'dumpFront(Landroid/util/Printer;Ljava/lang/String;)V': (self, [printer, prefix]) => {
+          const target = printer?.$peer ?? printer;
+          target?.println?.(`${jsString(prefix) ?? ''}PackageItemInfo{${peerField(self, 'name') || ''}}`);
+        },
+        'dumpBack(Landroid/util/Printer;Ljava/lang/String;)V': () => undefined,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
         'loadLabel(Landroid/content/pm/PackageManager;)Ljava/lang/CharSequence;': (self) =>
-          self.label || self.name || self.packageName || '',
+          peerField(self, 'label') || peerField(self, 'name') || peerField(self, 'packageName') || '',
         'loadIcon(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': () => null,
         'loadLogo(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': () => null,
         'loadUnbadgedIcon(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': () => null,
@@ -13176,18 +14752,162 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Landroid/content/pm/ResolveInfo;', {
       super: 'Ljava/lang/Object;',
+      ctor: class ResolveInfoPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.activityInfo = null;
+          this.serviceInfo = null;
+          this.providerInfo = null;
+          this.filter = null;
+          this.priority = 0;
+          this.preferredOrder = 0;
+          this.match = 0;
+          this.specificIndex = -1;
+          this.isDefault = false;
+          this.labelRes = 0;
+          this.nonLocalizedLabel = null;
+          this.icon = 0;
+          this.resolvePackageName = null;
+        }
+      },
       methods: {
+        '<init>()V': () => undefined,
+        '<init>(Landroid/content/pm/ResolveInfo;)V': (self, [other]) => {
+          const peer = other?.$peer || {};
+          for (const name of RESOLVE_INFO_FIELDS) {
+            if (peer[name] !== undefined) self[name] = peer[name];
+          }
+        },
         'loadLabel(Landroid/content/pm/PackageManager;)Ljava/lang/CharSequence;': (self, _args, vm) =>
-          self?.nonLocalizedLabel ?? applicationLabel(vm, self?.resolvePackageName ?? vm?.packageName ?? ''),
+          peerField(self, 'nonLocalizedLabel') ?? applicationLabel(vm, peerField(self, 'resolvePackageName') ?? vm?.packageName ?? ''),
         'loadIcon(Landroid/content/pm/PackageManager;)Landroid/graphics/drawable/Drawable;': (_self, _args, vm) =>
           applicationIconDrawable(vm),
+        'getIconResource()I': (self) => {
+          const info = peerField(self, 'activityInfo') ?? peerField(self, 'serviceInfo') ?? peerField(self, 'providerInfo');
+          if (info) {
+            const icon = Number(peerField(info?.$peer ?? info, 'icon')) | 0;
+            if (icon) return icon;
+          }
+          return Number(peerField(self, 'icon')) | 0;
+        },
+        'isCrossProfileIntentForwarderActivity()Z': (self) => {
+          const info = self.activityInfo?.$peer ?? self.activityInfo;
+          return info?.name === 'com.android.internal.app.CrossProfileIntentForwarderActivity' ? 1 : 0;
+        },
+        'dump(Landroid/util/Printer;Ljava/lang/String;)V': (self, [printer, prefix]) => {
+          const target = printer?.$peer ?? printer;
+          const name = peerField(self, 'resolvePackageName') || peerField(self, 'activityInfo')?.name || '';
+          target?.println?.(`${jsString(prefix) ?? ''}ResolveInfo{${name}}`);
+        },
         'toString()Ljava/lang/String;': (self) =>
           `ResolveInfo{${self?.activityInfo?.name ?? self?.resolvePackageName ?? ''}}`,
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
       },
     })
   );
   defs.push(
-    nativeDef('Landroid/content/pm/ApplicationInfo;', { super: 'Landroid/content/pm/PackageItemInfo;' })
+    nativeDef('Landroid/content/pm/ApplicationInfo;', {
+      super: 'Landroid/content/pm/PackageItemInfo;',
+      ctor: class ApplicationInfoPeer {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
+          this.flags = 0;
+          this.uid = -1;
+          this.packageName = '';
+          this.processName = null;
+          this.className = null;
+          this.sourceDir = null;
+          this.publicSourceDir = null;
+          this.dataDir = null;
+          this.nativeLibraryDir = null;
+          this.taskAffinity = null;
+          this.targetSdkVersion = 0;
+          this.minSdkVersion = 0;
+          this.theme = 0;
+          this.category = -1;
+          this.descriptionRes = 0;
+          this.gwpAsanMode = -1;
+          this.memtagMode = -1;
+          this.nativeHeapZeroInitialized = 0;
+          this.virtualPreload = false;
+          this.profileableByShell = false;
+          this.profileable = false;
+          this.attributionsUserVisible = false;
+          this.resourceOverlay = false;
+          this.rawExternalStorageAccess = 0;
+        }
+      },
+      methods: {
+        '<init>()V': (self) => {
+          self.flags = 0;
+          self.uid = -1;
+          self.category = -1;
+          self.gwpAsanMode = -1;
+          self.memtagMode = -1;
+          self.nativeHeapZeroInitialized = 0;
+        },
+        '<init>(Landroid/content/pm/ApplicationInfo;)V': (self, [other]) => {
+          const peer = other?.$peer || {};
+          for (const name of APPLICATION_INFO_FIELDS) {
+            const value = peer[name];
+            if (value !== undefined) self[name] = value;
+          }
+        },
+        'loadDescription(Landroid/content/pm/PackageManager;)Ljava/lang/CharSequence;': (self, _args, vm) => {
+          const resId = Number(peerField(self, 'descriptionRes')) | 0;
+          if (!resId) return null;
+          return vm.resources?.getString?.(resId >>> 0) ?? null;
+        },
+        'getRequestRawExternalStorageAccess()I': (self) => Number(peerField(self, 'rawExternalStorageAccess')) | 0,
+        'isVirtualPreload()Z': (self) => (peerField(self, 'virtualPreload') ? 1 : 0),
+        'isProfileableByShell()Z': (self) => (peerField(self, 'profileableByShell') ? 1 : 0),
+        'isProfileable()Z': (self) => (peerField(self, 'profileable') ? 1 : 0),
+        'areAttributionsUserVisible()Z': (self) => (peerField(self, 'attributionsUserVisible') ? 1 : 0),
+        'isResourceOverlay()Z': (self) => (peerField(self, 'resourceOverlay') ? 1 : 0),
+        'getGwpAsanMode()I': (self) => {
+          const value = Number(peerField(self, 'gwpAsanMode'));
+          return Number.isFinite(value) ? value : -1;
+        },
+        'getMemtagMode()I': (self) => {
+          const value = Number(peerField(self, 'memtagMode'));
+          return Number.isFinite(value) ? value : -1;
+        },
+        'getNativeHeapZeroInitialized()I': (self) => Number(peerField(self, 'nativeHeapZeroInitialized')) | 0,
+        'toString()Ljava/lang/String;': (self) => (
+          `ApplicationInfo{${peerField(self, 'packageName') || ''}}`
+        ),
+        'dump(Landroid/util/Printer;Ljava/lang/String;)V': (self, [printer, prefix]) => {
+          const target = printer?.$peer ?? printer;
+          const text = `${jsString(prefix) ?? ''}ApplicationInfo{${peerField(self, 'packageName') || ''} uid=${Number(peerField(self, 'uid')) | 0}}`;
+          target?.println?.(text);
+        },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+      },
+      staticMethods: {
+        'getCategoryTitle(Landroid/content/Context;I)Ljava/lang/CharSequence;': (_self, [context, category]) => {
+          const titles = {
+            '-1': 'Undefined',
+            '0': 'Game',
+            '1': 'Audio',
+            '2': 'Video',
+            '3': 'Image',
+            '4': 'Social',
+            '5': 'News',
+            '6': 'Maps',
+            '7': 'Productivity',
+            '8': 'Accessibility',
+          };
+          const title = titles[String(category | 0)];
+          if (!title) return null;
+          const label = context?.$peer?.getText?.(0x01040000 + 0) ?? null;
+          return typeof label === 'string' && label && label !== 'undefined' ? label : title;
+        },
+      },
+    })
   );
   defs.push(
     nativeDef('Landroid/content/res/Configuration;', {
@@ -13297,13 +15017,42 @@ function vmShowChild(self, index) {
     nativeDef('Landroid/util/DisplayMetrics;', {
       super: 'Ljava/lang/Object;',
       ctor: class MetricsPeer {
-        constructor() {
+        constructor(vm, object) {
+          this.vm = vm;
+          this.$object = object;
           this.widthPixels = 360;
           this.heightPixels = 720;
           this.density = 1;
           this.densityDpi = 160;
           this.scaledDensity = 1;
+          this.xdpi = 160;
+          this.ydpi = 160;
         }
+      },
+      methods: {
+        '<init>()V': (self) => displayMetricsReset(self, 0, 0),
+        'setTo(Landroid/util/DisplayMetrics;)V': (self, [other]) => {
+          for (const name of DISPLAY_METRIC_FIELDS) displayMetricSet(self, name, displayMetricGet(other, name, 0));
+        },
+        'setToDefaults()V': (self) => displayMetricsReset(self, 0, 0),
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/util/DisplayMetrics;') return 0;
+          return displayMetricsEquals(self, other) ? 1 : 0;
+        },
+        'equals(Landroid/util/DisplayMetrics;)Z': (self, [other]) => (displayMetricsEquals(self, other) ? 1 : 0),
+        'hashCode()I': (self) => {
+          let hash = 0;
+          for (const name of DISPLAY_METRIC_FIELDS) {
+            const bits = DISPLAY_METRIC_FLOAT.has(name)
+              ? numberToFloatBits(displayMetricGet(self, name, 0))
+              : (displayMetricGet(self, name, 0) | 0);
+            hash = (Math.imul(hash, 31) + bits) | 0;
+          }
+          return hash;
+        },
+        'toString()Ljava/lang/String;': (self) => (
+          `DisplayMetrics{density=${displayMetricGet(self, 'density', 1)}, width=${displayMetricGet(self, 'widthPixels', 0)}, height=${displayMetricGet(self, 'heightPixels', 0)}, scaledDensity=${displayMetricGet(self, 'scaledDensity', 1)}, xdpi=${displayMetricGet(self, 'xdpi', 0)}, ydpi=${displayMetricGet(self, 'ydpi', 0)}}`
+        ),
       },
       instanceFields: new Map([
         ['widthPixels:I', 360],
@@ -13311,6 +15060,8 @@ function vmShowChild(self, index) {
         ['density:F', 1],
         ['densityDpi:I', 160],
         ['scaledDensity:F', 1],
+        ['xdpi:F', 160],
+        ['ydpi:F', 160],
       ]),
     })
   );
@@ -14457,11 +16208,37 @@ function vmShowChild(self, index) {
   defs.push(
     nativeDef('Ljava/io/InputStream;', {
       super: 'Ljava/lang/Object;',
+      interfaces: ['Ljava/io/Closeable;'],
       methods: {
-        'read()I': (self) => {
-          if (!self.offset) self.offset = 0;
-          return self.offset < self.bytes.length ? self.bytes[self.offset++] : -1;
+        '<init>()V': (self) => {
+          self.$streamData = null;
+          self.$streamCursor = 0;
+          self.$streamMark = 0;
+          self.$streamMarkLimit = 0;
         },
+        'read()I': (self) => {
+          const data = inputStreamData(self);
+          const cursor = inputStreamCursor(self);
+          if (cursor >= data.length) return -1;
+          self.$streamCursor = cursor + 1;
+          return data[cursor];
+        },
+        'read([B)I': (self, [buffer]) => readInputStreamInto(self, buffer, 0, -1),
+        'read([BII)I': (self, [buffer, offset, length]) => readInputStreamInto(self, buffer, offset | 0, length | 0),
+        'skip(J)J': (self, [count]) => {
+          const data = inputStreamData(self);
+          const cursor = inputStreamCursor(self);
+          const target = Math.min(data.length, cursor + Math.max(0, Number(count) || 0));
+          self.$streamCursor = target;
+          return BigInt(target - cursor);
+        },
+        'available()I': (self) => Math.max(0, inputStreamData(self).length - inputStreamCursor(self)),
+        'mark(I)V': (self, [limit]) => {
+          self.$streamMark = inputStreamCursor(self);
+          self.$streamMarkLimit = Math.max(0, Number(limit) | 0);
+        },
+        'reset()V': (self) => { self.$streamCursor = Math.max(0, Number(self.$streamMark) || 0); },
+        'markSupported()Z': () => 1,
         'close()V': () => undefined,
       },
     })
@@ -14471,19 +16248,49 @@ function vmShowChild(self, index) {
     nativeDef('Landroid/os/AsyncTask;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'execute([Ljava/lang/Object;)Landroid/os/AsyncTask;': (self, [args], vm) => {
-          if (typeof self.doInBackground === 'function') {
-            try {
-              self.doInBackground(args?.$data || []);
-            } catch (error) {
-              vm.log('error', 'AsyncTask', error.message);
-            }
+        '<init>()V': (self, _args, vm) => {
+          self.$asyncStatus = 'PENDING';
+          self.$asyncCancelled = false;
+          self.$asyncResult = null;
+        },
+        'execute([Ljava/lang/Object;)Landroid/os/AsyncTask;': (self, [args], vm) => runAsyncTask(vm, self, args, null),
+        'executeOnExecutor(Ljava/util/concurrent/Executor;[Ljava/lang/Object;)Landroid/os/AsyncTask;': (self, [executor, args], vm) => {
+          if (executor === null || executor === undefined) throw new Error('NullPointerException: executor');
+          return runAsyncTask(vm, self, args, executor);
+        },
+        'getStatus()Landroid/os/AsyncTask$Status;': (self, _args, vm) => asyncTaskStatusObject(vm, self.$asyncStatus || 'PENDING'),
+        'isCancelled()Z': (self) => (self.$asyncCancelled ? 1 : 0),
+        'cancel(Z)Z': (self, [mayInterrupt], vm) => {
+          if (self.$asyncStatus === 'FINISHED') return 0;
+          self.$asyncCancelled = true;
+          if (self.$asyncStatus === 'PENDING') {
+            self.$asyncStatus = 'FINISHED';
+            invokeOptional(vm, self, 'onCancelled', '(Ljava/lang/Object;)V', [null]);
+            return 1;
           }
-          return self;
+          if (mayInterrupt) invokeOptional(vm, self, 'onCancelled', '(Ljava/lang/Object;)V', [self.$asyncResult ?? null]);
+          return 1;
+        },
+        'get()Ljava/lang/Object;': (self) => self.$asyncResult ?? null,
+        'get(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;': (self) => self.$asyncResult ?? null,
+        'publishProgress([Ljava/lang/Object;)V': (self, [values], vm) => {
+          if (self.$asyncCancelled) return;
+          invokeOptional(vm, self, 'onProgressUpdate', '([Ljava/lang/Object;)V', [values ?? vm.newArray('[Ljava/lang/Object;', 0, [])]);
         },
         'doInBackground([Ljava/lang/Object;)Ljava/lang/Object;': () => null,
         'onPostExecute(Ljava/lang/Object;)V': () => undefined,
         'onPreExecute()V': () => undefined,
+        'onProgressUpdate([Ljava/lang/Object;)V': () => undefined,
+        'onCancelled(Ljava/lang/Object;)V': (self, _args, vm) => {
+          invokeOptional(vm, self, 'onCancelled', '()V', []);
+        },
+        'onCancelled()V': () => undefined,
+      },
+      staticMethods: {
+        'execute(Ljava/lang/Runnable;)V': (_self, [runnable], vm) => {
+          if (runnable === null || runnable === undefined) throw new Error('NullPointerException: runnable');
+          invokeOptional(vm, runnable, 'run', '()V', []);
+        },
       },
     })
   );
@@ -15047,53 +16854,96 @@ function settingsDefs() {
       'date_format': 'yyyy-MM-dd',
     };
   };
-  const readSetting = (name) => {
+  const readSetting = (descriptor, name) => {
     const values = settingsValues();
     const key = jsString(name);
+    const written = settingsWriteStore(descriptor).get(key);
+    if (written !== undefined) return written;
     return values[key] !== undefined ? values[key] : null;
   };
-  const settingDef = (descriptor) => nativeDef(descriptor, {
-    super: 'Ljava/lang/Object;',
-    staticFields: new Map([
-      ['ACTION_ACCESSIBILITY_SETTINGS:Ljava/lang/String;', 'android.settings.ACCESSIBILITY_SETTINGS'],
-      ['ACTION_SETTINGS:Ljava/lang/String;', 'android.settings.SETTINGS'],
-    ]),
-    methods: {
-      'getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;': (_self, [resolver, name]) => {
-        void resolver;
-        return readSetting(name);
+  const writeSetting = (descriptor, name, value) => {
+    const key = jsString(name);
+    const store = settingsWriteStore(descriptor);
+    if (value === null || value === undefined) store.delete(key);
+    else store.set(key, String(value));
+    return true;
+  };
+  const settingDef = (descriptor) => {
+    const namespace = descriptor.endsWith('$Global;') ? 'global'
+      : (descriptor.endsWith('$Secure;') ? 'secure' : 'system');
+    return nativeDef(descriptor, {
+      super: 'Ljava/lang/Object;',
+      staticFields: new Map([
+        ['ACTION_ACCESSIBILITY_SETTINGS:Ljava/lang/String;', 'android.settings.ACCESSIBILITY_SETTINGS'],
+        ['ACTION_SETTINGS:Ljava/lang/String;', 'android.settings.SETTINGS'],
+      ]),
+      methods: {
+        '<init>()V': () => undefined,
+        'getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;': (_self, [_resolver, name]) =>
+          readSetting(descriptor, name),
+        'getString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (_self, [_resolver, name, fallback]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? jsString(fallback) : value;
+        },
+        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;)I': (_self, [_resolver, name]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? 0 : Number.parseInt(value, 10) || 0;
+        },
+        'getInt(Landroid/content/ContentResolver;Ljava/lang/String;I)I': (_self, [_resolver, name, fallback]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? toInt(fallback) : (Number.parseInt(value, 10) || 0);
+        },
+        'getLong(Landroid/content/ContentResolver;Ljava/lang/String;)J': (_self, [_resolver, name]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? 0n : BigInt(Number.parseInt(value, 10) || 0);
+        },
+        'getLong(Landroid/content/ContentResolver;Ljava/lang/String;J)J': (_self, [_resolver, name, fallback]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? BigInt(fallback ?? 0) : BigInt(Number.parseInt(value, 10) || 0);
+        },
+        'getFloat(Landroid/content/ContentResolver;Ljava/lang/String;)F': (_self, [_resolver, name]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? 0 : (Number.parseFloat(value) || 0);
+        },
+        'getFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)F': (_self, [_resolver, name, fallback]) => {
+          const value = readSetting(descriptor, name);
+          return value === null ? Number(fallback) : (Number.parseFloat(value) || 0);
+        },
+        'getUriFor(Ljava/lang/String;)Landroid/net/Uri;': (_self, [name], vm) =>
+          uriObject(vm, `content://settings/${namespace}/${jsString(name) ?? ''}`),
+        'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': (_self, [_resolver, name, value]) =>
+          writeSetting(descriptor, name, value | 0),
+        'putString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Z': (_self, [_resolver, name, value]) =>
+          writeSetting(descriptor, name, jsString(value)),
+        'putLong(Landroid/content/ContentResolver;Ljava/lang/String;J)Z': (_self, [_resolver, name, value]) =>
+          writeSetting(descriptor, name, String(BigInt(value ?? 0))),
+        'putFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)Z': (_self, [_resolver, name, value]) =>
+          writeSetting(descriptor, name, String(Number(value) || 0)),
+        'getConfiguration(Landroid/content/ContentResolver;Landroid/content/res/Configuration;)V': (_self, [_resolver, config], vm) => {
+          const source = vm.resources?.getConfiguration?.() || {};
+          if (!(config?.$fields instanceof Map)) return;
+          for (const [field, value] of Object.entries(source)) {
+            if (typeof value === 'number') config.$fields.set(`Landroid/content/res/Configuration;->${field}:I`, value | 0);
+            else if (typeof value === 'string' && field === 'locale') {
+              config.$fields.set('Landroid/content/res/Configuration;->locale:Ljava/util/Locale;', value);
+            }
+          }
+        },
+        'putConfiguration(Landroid/content/ContentResolver;Landroid/content/res/Configuration;)Z': (_self, [_resolver, config]) => {
+          if (!(config?.$fields instanceof Map)) return true;
+          const density = config.$fields.get('Landroid/content/res/Configuration;->densityDpi:I');
+          if (typeof density === 'number') writeSetting(descriptor, 'density_dpi', density | 0);
+          return true;
+        },
+        'canWrite(Landroid/content/Context;)Z': () => 1,
+        'getShowGTalkServiceStatus(Landroid/content/ContentResolver;)Z': (_self, [_resolver]) =>
+          (readSetting(descriptor, 'gtalk_service_status') === '1' ? 1 : 0),
+        'setShowGTalkServiceStatus(Landroid/content/ContentResolver;Z)V': (_self, [_resolver, value]) => {
+          writeSetting(descriptor, 'gtalk_service_status', value ? 1 : 0);
+        },
       },
-      'getString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (_self, [resolver, name, fallback]) => {
-        void resolver;
-        const value = readSetting(name);
-        return value === null ? jsString(fallback) : value;
-      },
-      'getInt(Landroid/content/ContentResolver;Ljava/lang/String;)I': (_self, [resolver, name]) => {
-        void resolver;
-        const value = readSetting(name);
-        return value === null ? 0 : Number.parseInt(value, 10) || 0;
-      },
-      'getInt(Landroid/content/ContentResolver;Ljava/lang/String;I)I': (_self, [resolver, name, fallback]) => {
-        void resolver;
-        const value = readSetting(name);
-        return value === null ? toInt(fallback) : (Number.parseInt(value, 10) || 0);
-      },
-      'getLong(Landroid/content/ContentResolver;Ljava/lang/String;J)J': (_self, [resolver, name, fallback]) => {
-        void resolver;
-        const value = readSetting(name);
-        return value === null ? fallback : (Number.parseInt(value, 10) || 0);
-      },
-      'getFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)F': (_self, [resolver, name, fallback]) => {
-        void resolver;
-        const value = readSetting(name);
-        return value === null ? Number(fallback) : (Number.parseFloat(value) || 0);
-      },
-      'putInt(Landroid/content/ContentResolver;Ljava/lang/String;I)Z': () => true,
-      'putString(Landroid/content/ContentResolver;Ljava/lang/String;Ljava/lang/String;)Z': () => true,
-      'putLong(Landroid/content/ContentResolver;Ljava/lang/String;J)Z': () => true,
-      'putFloat(Landroid/content/ContentResolver;Ljava/lang/String;F)Z': () => true,
-    },
-  });
+    });
+  };
   return [
     settingDef('Landroid/provider/Settings;'),
     settingDef('Landroid/provider/Settings$Global;'),
@@ -15505,6 +17355,23 @@ function coreGraphicDefs() {
           this.stableTop = 0;
           this.stableRight = 0;
           this.stableBottom = 0;
+          this.gestureLeft = 0;
+          this.gestureTop = 0;
+          this.gestureRight = 0;
+          this.gestureBottom = 0;
+          this.mandatoryLeft = 0;
+          this.mandatoryTop = 0;
+          this.mandatoryRight = 0;
+          this.mandatoryBottom = 0;
+          this.tappableLeft = 0;
+          this.tappableTop = 0;
+          this.tappableRight = 0;
+          this.tappableBottom = 0;
+          this.insetsTypes = new Map();
+          this.insetsIgnoringVisibilityTypes = new Map();
+          this.visibleTypes = new Map();
+          this.roundedCorners = new Map();
+          this.privacyIndicatorBounds = null;
           this.consumed = false;
         }
       },
@@ -15520,6 +17387,24 @@ function coreGraphicDefs() {
           self.stableTop = peer.stableTop | 0;
           self.stableRight = peer.stableRight | 0;
           self.stableBottom = peer.stableBottom | 0;
+          self.gestureLeft = peer.gestureLeft | 0;
+          self.gestureTop = peer.gestureTop | 0;
+          self.gestureRight = peer.gestureRight | 0;
+          self.gestureBottom = peer.gestureBottom | 0;
+          self.mandatoryLeft = peer.mandatoryLeft | 0;
+          self.mandatoryTop = peer.mandatoryTop | 0;
+          self.mandatoryRight = peer.mandatoryRight | 0;
+          self.mandatoryBottom = peer.mandatoryBottom | 0;
+          self.tappableLeft = peer.tappableLeft | 0;
+          self.tappableTop = peer.tappableTop | 0;
+          self.tappableRight = peer.tappableRight | 0;
+          self.tappableBottom = peer.tappableBottom | 0;
+          self.insetsTypes = new Map(peer.insetsTypes || []);
+          self.insetsIgnoringVisibilityTypes = new Map(peer.insetsIgnoringVisibilityTypes || []);
+          self.visibleTypes = new Map(peer.visibleTypes || []);
+          self.roundedCorners = new Map(peer.roundedCorners || []);
+          self.privacyIndicatorBounds = peer.privacyIndicatorBounds ?? null;
+          self.consumed = !!peer.consumed;
         },
         'getSystemWindowInsetLeft()I': (self) => (self.consumed ? 0 : self.left | 0),
         'getSystemWindowInsetTop()I': (self) => (self.consumed ? 0 : self.top | 0),
@@ -15541,19 +17426,38 @@ function coreGraphicDefs() {
           self.consumed ? 0 : self.stableRight | 0,
           self.consumed ? 0 : self.stableBottom | 0,
         ]),
-        'getInsets(I)Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
-          self.consumed ? 0 : self.left | 0,
-          self.consumed ? 0 : self.top | 0,
-          self.consumed ? 0 : self.right | 0,
-          self.consumed ? 0 : self.bottom | 0,
+        'getInsets(I)Landroid/graphics/Insets;': (self, [type], vm) => {
+          const merged = windowInsetsForType(self, type | 0, false);
+          return vm.instantiate('Landroid/graphics/Insets;', [merged.left, merged.top, merged.right, merged.bottom]);
+        },
+        'getInsetsIgnoringVisibility(I)Landroid/graphics/Insets;': (self, [type], vm) => {
+          const merged = windowInsetsForType(self, type | 0, true);
+          return vm.instantiate('Landroid/graphics/Insets;', [merged.left, merged.top, merged.right, merged.bottom]);
+        },
+        'getMandatorySystemGestureInsets()Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.mandatoryLeft | 0,
+          self.consumed ? 0 : self.mandatoryTop | 0,
+          self.consumed ? 0 : self.mandatoryRight | 0,
+          self.consumed ? 0 : self.mandatoryBottom | 0,
         ]),
-        'getInsetsIgnoringVisibility(I)Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
-          self.stableLeft | 0, self.stableTop | 0, self.stableRight | 0, self.stableBottom | 0,
+        'getTappableElementInsets()Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.tappableLeft | 0,
+          self.consumed ? 0 : self.tappableTop | 0,
+          self.consumed ? 0 : self.tappableRight | 0,
+          self.consumed ? 0 : self.tappableBottom | 0,
         ]),
-        'getMandatorySystemGestureInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
-        'getTappableElementInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
-        'getSystemGestureInsets()Landroid/graphics/Insets;': (_self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [0, 0, 0, 0]),
-        'isVisible(I)Z': (self) => !self.consumed && (self.left | self.top | self.right | self.bottom) !== 0,
+        'getSystemGestureInsets()Landroid/graphics/Insets;': (self, _args, vm) => vm.instantiate('Landroid/graphics/Insets;', [
+          self.consumed ? 0 : self.gestureLeft | 0,
+          self.consumed ? 0 : self.gestureTop | 0,
+          self.consumed ? 0 : self.gestureRight | 0,
+          self.consumed ? 0 : self.gestureBottom | 0,
+        ]),
+        'isVisible(I)Z': (self, [type]) => {
+          const key = type | 0;
+          if (self.visibleTypes?.has(key)) return self.visibleTypes.get(key) ? 1 : 0;
+          const merged = windowInsetsForType(self, key, false);
+          return self.consumed || !(merged.left | merged.top | merged.right | merged.bottom) ? 0 : 1;
+        },
         'isConsumed()Z': (self) => !!self.consumed,
         'getDisplayCutout()Landroid/view/DisplayCutout;': () => null,
         'consumeSystemWindowInsets()Landroid/view/WindowInsets;': (self) => {
@@ -15571,6 +17475,67 @@ function coreGraphicDefs() {
           self.right = right | 0;
           self.bottom = bottom | 0;
           return self.$object ?? self;
+        },
+        'replaceSystemWindowInsets(Landroid/graphics/Rect;)Landroid/view/WindowInsets;': (self, [rect]) => {
+          const peer = rect?.$peer || rect;
+          if (peer) {
+            self.left = peer.left | 0;
+            self.top = peer.top | 0;
+            self.right = peer.right | 0;
+            self.bottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'hasSystemWindowInsets()Z': (self) => ((self.left | self.top | self.right | self.bottom) !== 0 ? 1 : 0),
+        'hasStableInsets()Z': (self) => ((self.stableLeft | self.stableTop | self.stableRight | self.stableBottom) !== 0 ? 1 : 0),
+        'hasInsets()Z': (self) => (
+          (self.left | self.top | self.right | self.bottom | self.stableLeft | self.stableTop | self.stableRight | self.stableBottom) !== 0 ? 1 : 0
+        ),
+        'getRoundedCorner(I)Landroid/view/RoundedCorner;': (self, [position]) => self.roundedCorners?.get(position | 0) ?? null,
+        'getPrivacyIndicatorBounds()Landroid/graphics/Rect;': (self) => self.privacyIndicatorBounds ?? null,
+        'isRound()Z': () => 0,
+        'inset(IIII)Landroid/view/WindowInsets;': (self, [left, top, right, bottom], vm) => {
+          const next = vm.instantiate('Landroid/view/WindowInsets;', []);
+          const peer = vm.registry.getPeer(next, 'Landroid/view/WindowInsets;') || next.$peer;
+          if (peer) {
+            peer.left = Math.max(0, (self.left | 0) - (left | 0));
+            peer.top = Math.max(0, (self.top | 0) - (top | 0));
+            peer.right = Math.max(0, (self.right | 0) - (right | 0));
+            peer.bottom = Math.max(0, (self.bottom | 0) - (bottom | 0));
+            peer.stableLeft = Math.max(0, (self.stableLeft | 0) - (left | 0));
+            peer.stableTop = Math.max(0, (self.stableTop | 0) - (top | 0));
+            peer.stableRight = Math.max(0, (self.stableRight | 0) - (right | 0));
+            peer.stableBottom = Math.max(0, (self.stableBottom | 0) - (bottom | 0));
+            peer.insetsTypes = new Map(self.insetsTypes || []);
+            peer.insetsIgnoringVisibilityTypes = new Map(self.insetsIgnoringVisibilityTypes || []);
+            peer.visibleTypes = new Map(self.visibleTypes || []);
+            peer.roundedCorners = new Map(self.roundedCorners || []);
+            peer.privacyIndicatorBounds = self.privacyIndicatorBounds ?? null;
+          }
+          return next;
+        },
+        'inset(Landroid/graphics/Insets;)Landroid/view/WindowInsets;': (self, [insets], vm) => {
+          const peer = insets?.$peer || insets || {};
+          return vm.invokeByName('inset', '(IIII)Landroid/view/WindowInsets;', self.$object ?? self, [
+            peer.left | 0, peer.top | 0, peer.right | 0, peer.bottom | 0,
+          ]);
+        },
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/view/WindowInsets;') return 0;
+          const peer = other.$peer || {};
+          return (
+            (peer.left | 0) === (self.left | 0) && (peer.top | 0) === (self.top | 0)
+            && (peer.right | 0) === (self.right | 0) && (peer.bottom | 0) === (self.bottom | 0)
+            && (peer.stableLeft | 0) === (self.stableLeft | 0) && (peer.stableTop | 0) === (self.stableTop | 0)
+            && (peer.stableRight | 0) === (self.stableRight | 0) && (peer.stableBottom | 0) === (self.stableBottom | 0)
+          ) ? 1 : 0;
+        },
+        'hashCode()I': (self) => {
+          let hash = 17;
+          for (const side of [self.left, self.top, self.right, self.bottom, self.stableLeft, self.stableTop, self.stableRight, self.stableBottom]) {
+            hash = (Math.imul(hash, 31) + (side | 0)) | 0;
+          }
+          return hash;
         },
         'toString()Ljava/lang/String;': (self) => `WindowInsets{left=${self.left | 0}, top=${self.top | 0}, right=${self.right | 0}, bottom=${self.bottom | 0}}`,
       },
@@ -15605,6 +17570,23 @@ function coreGraphicDefs() {
           this.stableTop = 0;
           this.stableRight = 0;
           this.stableBottom = 0;
+          this.gestureLeft = 0;
+          this.gestureTop = 0;
+          this.gestureRight = 0;
+          this.gestureBottom = 0;
+          this.mandatoryLeft = 0;
+          this.mandatoryTop = 0;
+          this.mandatoryRight = 0;
+          this.mandatoryBottom = 0;
+          this.tappableLeft = 0;
+          this.tappableTop = 0;
+          this.tappableRight = 0;
+          this.tappableBottom = 0;
+          this.insetsTypes = new Map();
+          this.insetsIgnoringVisibilityTypes = new Map();
+          this.visibleTypes = new Map();
+          this.roundedCorners = new Map();
+          this.privacyIndicatorBounds = null;
         }
       },
       methods: {
@@ -15629,6 +17611,23 @@ function coreGraphicDefs() {
           self.stableTop = peer.stableTop | 0;
           self.stableRight = peer.stableRight | 0;
           self.stableBottom = peer.stableBottom | 0;
+          self.gestureLeft = peer.gestureLeft | 0;
+          self.gestureTop = peer.gestureTop | 0;
+          self.gestureRight = peer.gestureRight | 0;
+          self.gestureBottom = peer.gestureBottom | 0;
+          self.mandatoryLeft = peer.mandatoryLeft | 0;
+          self.mandatoryTop = peer.mandatoryTop | 0;
+          self.mandatoryRight = peer.mandatoryRight | 0;
+          self.mandatoryBottom = peer.mandatoryBottom | 0;
+          self.tappableLeft = peer.tappableLeft | 0;
+          self.tappableTop = peer.tappableTop | 0;
+          self.tappableRight = peer.tappableRight | 0;
+          self.tappableBottom = peer.tappableBottom | 0;
+          self.insetsTypes = new Map(peer.insetsTypes || []);
+          self.insetsIgnoringVisibilityTypes = new Map(peer.insetsIgnoringVisibilityTypes || []);
+          self.visibleTypes = new Map(peer.visibleTypes || []);
+          self.roundedCorners = new Map(peer.roundedCorners || []);
+          self.privacyIndicatorBounds = peer.privacyIndicatorBounds ?? null;
         },
         'setSystemWindowInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
           const peer = insets?.$peer || insets;
@@ -15661,6 +17660,61 @@ function coreGraphicDefs() {
           return self.$object ?? self;
         },
         'setDisplayCutout(Landroid/view/DisplayCutout;)Landroid/view/WindowInsets$Builder;': (self) => self.$object ?? self,
+        'setSystemGestureInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.gestureLeft = peer.left | 0;
+            self.gestureTop = peer.top | 0;
+            self.gestureRight = peer.right | 0;
+            self.gestureBottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setMandatorySystemGestureInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.mandatoryLeft = peer.left | 0;
+            self.mandatoryTop = peer.top | 0;
+            self.mandatoryRight = peer.right | 0;
+            self.mandatoryBottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setTappableElementInsets(Landroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.tappableLeft = peer.left | 0;
+            self.tappableTop = peer.top | 0;
+            self.tappableRight = peer.right | 0;
+            self.tappableBottom = peer.bottom | 0;
+          }
+          return self.$object ?? self;
+        },
+        'setInsetsIgnoringVisibility(ILandroid/graphics/Insets;)Landroid/view/WindowInsets$Builder;': (self, [type, insets]) => {
+          const peer = insets?.$peer || insets;
+          if (peer) {
+            self.insetsIgnoringVisibilityTypes.set(type | 0, {
+              left: peer.left | 0,
+              top: peer.top | 0,
+              right: peer.right | 0,
+              bottom: peer.bottom | 0,
+            });
+          }
+          return self.$object ?? self;
+        },
+        'setVisible(IZ)Landroid/view/WindowInsets$Builder;': (self, [type, visible]) => {
+          self.visibleTypes.set(type | 0, !!visible);
+          return self.$object ?? self;
+        },
+        'setRoundedCorner(ILandroid/view/RoundedCorner;)Landroid/view/WindowInsets$Builder;': (self, [position, corner]) => {
+          if (corner) self.roundedCorners.set(position | 0, corner);
+          else self.roundedCorners.delete(position | 0);
+          return self.$object ?? self;
+        },
+        'setPrivacyIndicatorBounds(Landroid/graphics/Rect;)Landroid/view/WindowInsets$Builder;': (self, [bounds]) => {
+          self.privacyIndicatorBounds = bounds ?? null;
+          return self.$object ?? self;
+        },
         'build()Landroid/view/WindowInsets;': (self, _args, vm) => {
           const insets = vm.instantiate('Landroid/view/WindowInsets;', []);
           const peer = vm.registry.getPeer(insets, 'Landroid/view/WindowInsets;') || insets?.$peer;
@@ -15673,12 +17727,68 @@ function coreGraphicDefs() {
             peer.stableTop = self.stableTop | 0;
             peer.stableRight = self.stableRight | 0;
             peer.stableBottom = self.stableBottom | 0;
+            peer.gestureLeft = self.gestureLeft | 0;
+            peer.gestureTop = self.gestureTop | 0;
+            peer.gestureRight = self.gestureRight | 0;
+            peer.gestureBottom = self.gestureBottom | 0;
+            peer.mandatoryLeft = self.mandatoryLeft | 0;
+            peer.mandatoryTop = self.mandatoryTop | 0;
+            peer.mandatoryRight = self.mandatoryRight | 0;
+            peer.mandatoryBottom = self.mandatoryBottom | 0;
+            peer.tappableLeft = self.tappableLeft | 0;
+            peer.tappableTop = self.tappableTop | 0;
+            peer.tappableRight = self.tappableRight | 0;
+            peer.tappableBottom = self.tappableBottom | 0;
+            peer.insetsTypes = new Map(self.insetsTypes);
+            peer.insetsIgnoringVisibilityTypes = new Map(self.insetsIgnoringVisibilityTypes);
+            peer.visibleTypes = new Map(self.visibleTypes);
+            peer.roundedCorners = new Map(self.roundedCorners);
+            peer.privacyIndicatorBounds = self.privacyIndicatorBounds;
           }
           return insets;
         },
       },
     }),
-    nativeDef('Landroid/graphics/Point;', { super: 'Ljava/lang/Object;' }),
+    nativeDef('Landroid/graphics/Point;', {
+      super: 'Ljava/lang/Object;',
+      ctor: class PointPeer {
+        constructor() {
+          this.f = { x: 0, y: 0 };
+          for (const name of ['x', 'y']) {
+            Object.defineProperty(this, name, {
+              configurable: true,
+              enumerable: true,
+              get: () => this.f[name],
+              set: (value) => { this.f[name] = value | 0; },
+            });
+          }
+        }
+      },
+      methods: {
+        '<init>()V': (self) => { self.x = 0; self.y = 0; },
+        '<init>(II)V': (self, [x, y]) => { self.x = x | 0; self.y = y | 0; },
+        '<init>(Landroid/graphics/Point;)V': (self, [other]) => {
+          const source = other?.$peer || other || {};
+          self.x = source.x | 0;
+          self.y = source.y | 0;
+        },
+        'set(II)V': (self, [x, y]) => { self.x = x | 0; self.y = y | 0; },
+        'negate()V': (self) => { self.x = -(self.x | 0); self.y = -(self.y | 0); },
+        'offset(II)V': (self, [dx, dy]) => { self.x = (self.x | 0) + (dx | 0); self.y = (self.y | 0) + (dy | 0); },
+        'equals(II)Z': (self, [x, y]) => ((self.x | 0) === (x | 0) && (self.y | 0) === (y | 0) ? 1 : 0),
+        'equals(Ljava/lang/Object;)Z': (self, [other], vm) => {
+          if (!other || vm.registry.classNameOf(other) !== 'Landroid/graphics/Point;') return 0;
+          const peer = other.$peer || {};
+          return ((peer.x | 0) === (self.x | 0) && (peer.y | 0) === (self.y | 0) ? 1 : 0);
+        },
+        'hashCode()I': (self) => ((31 * (self.x | 0)) + (self.y | 0)) | 0,
+        'toString()Ljava/lang/String;': (self) => `Point(${self.x | 0}, ${self.y | 0})`,
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': () => undefined,
+        'readFromParcel(Landroid/os/Parcel;)V': () => undefined,
+      },
+      instanceFields: new Map([['x:I', 0], ['y:I', 0]]),
+    }),
     nativeDef('Landroid/graphics/RectF;', {
       super: 'Ljava/lang/Object;',
       ctor: class RectFPeer {
@@ -18033,8 +20143,11 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
     const attrId = indexAttrId(index);
     return attrId === undefined ? undefined : values.get(attrId);
   };
-  return {
+  const peer = {
     values,
+    attrIds,
+    present: presentSet,
+    $vm: vm,
     index: 0,
     getIndexCount: () => values.size,
     hasValue: (index) => lookup(index) !== undefined && isPresent(index),
@@ -18103,14 +20216,8 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
       }
       return convertDimension(value, vm.resources?.density || 1);
     },
-    getDimensionPixelSize: (index, fallback) => {
-      const value = makeTypedArrayPeer(vm, values).getDimension(index, fallback);
-      return Math.round(Number(value) || 0);
-    },
-    getDimensionPixelOffset: (index, fallback) => {
-      const value = makeTypedArrayPeer(vm, values).getDimension(index, fallback);
-      return Math.trunc(Number(value) || 0);
-    },
+    getDimensionPixelSize: (index, fallback) => Math.round(Number(peer.getDimension(index, fallback)) || 0),
+    getDimensionPixelOffset: (index, fallback) => Math.trunc(Number(peer.getDimension(index, fallback)) || 0),
     getColor: (index, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
@@ -18202,20 +20309,25 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
       }
       return String(value);
     },
-    getText: (index) => makeTypedArrayPeer(vm, values).getString(index),
-    getLayoutDimension: (index, fallback) => makeTypedArrayPeer(vm, values).getDimensionPixelSize(index, fallback),
-    getFraction: (index, base, fallback) => {
+    getText: (index) => peer.getString(index),
+    getLayoutDimension: (index, fallback) => peer.getDimensionPixelSize(index, fallback),
+    getFraction: (index, base, pBase, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
-      if (typeof value !== 'number') return fallback;
-      return value;
+      if (typeof value === 'number') return value;
+      const spec = value?.fraction;
+      if (!spec) return fallback;
+      const unit = spec.unit ?? 0;
+      const percent = unit === 1 || unit === 2;
+      const scale = unit === 2 ? (Number(pBase) || 1) : (Number(base) || 1);
+      return ((Number(spec.value) || 0) / (percent ? 100 : 1)) * scale;
     },
     getFloat: (index, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
       return typeof value === 'number' ? value : fallback;
     },
-    getNonResourceString: (index) => makeTypedArrayPeer(vm, values).getString(index),
+    getNonResourceString: (index) => peer.getString(index),
     peekValue: (index) => {
       const value = lookup(index);
       return value === undefined ? null : { data: value };
@@ -18224,6 +20336,81 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
     recycle: () => undefined,
     close: () => undefined,
   };
+  return peer;
+}
+
+/** 可写的 Settings 存储：put* 写入后同进程内的 get* 立即读到新值。 */
+const SETTINGS_WRITE_STORES = new Map();
+function settingsWriteStore(descriptor) {
+  const key = String(descriptor || 'Landroid/provider/Settings;');
+  if (!SETTINGS_WRITE_STORES.has(key)) SETTINGS_WRITE_STORES.set(key, new Map());
+  return SETTINGS_WRITE_STORES.get(key);
+}
+
+/** TypedArray 的下标要么是稀疏下标本身，要么是 attrs 数组里的属性 id。 */
+function typedArrayAttrId(self, index) {
+  const attrIds = self?.attrIds;
+  if (!attrIds) return index;
+  if (Array.isArray(attrIds)) return attrIds[index] ?? index;
+  if (typeof attrIds.get === 'function') return attrIds.get(index) ?? index;
+  return index;
+}
+
+/** 按 TypedArray 里的原始值推断 TypedValue 类型（对齐 AOSP 的 getType 语义）。 */
+function typedArrayValueType(self, index) {
+  const value = self?.values?.get?.(typedArrayAttrId(self, index));
+  if (value === undefined) return 0;
+  if (typeof value === 'string') return 0x03;
+  if (typeof value === 'boolean') return 0x12;
+  if (value && typeof value === 'object') {
+    if (value.fraction) return 0x06;
+    if (value.dimension) return 0x05;
+    if (value.reference !== undefined) return 0x01;
+  }
+  const numeric = Number(value) >>> 0;
+  if ((numeric >= 0x01000000 && numeric < 0x02000000) || (numeric >= 0x7f000000 && numeric < 0x80000000)) return 0x01;
+  return 0x10;
+}
+
+/** 把 JVM 描述符转成反射输出用的 Java 类型名（Ljava/lang/String; → java.lang.String）。 */
+function descriptorTypeName(descriptor) {
+  const value = String(descriptor || '');
+  if (value.startsWith('[')) return `${descriptorTypeName(value.slice(1))}[]`;
+  if (value.startsWith('L') && value.endsWith(';')) return value.slice(1, -1).replace(/\//g, '.');
+  const primitives = {
+    Z: 'boolean', B: 'byte', C: 'char', S: 'short', I: 'int', J: 'long', F: 'float', D: 'double', V: 'void',
+  };
+  return primitives[value] || value;
+}
+
+/** 按 DEX accessFlags 还原修饰符文本，供 toGenericString/toString 使用。 */
+function modifierText(flags) {
+  const value = flags | 0;
+  const parts = [];
+  if (value & 0x0001) parts.push('public');
+  else if (value & 0x0004) parts.push('protected');
+  else if (value & 0x0002) parts.push('private');
+  if (value & 0x0008) parts.push('static');
+  if (value & 0x0010) parts.push('final');
+  if (value & 0x0020) parts.push('synchronized');
+  if (value & 0x0100) parts.push('native');
+  if (value & 0x0400) parts.push('abstract');
+  return parts.join(' ');
+}
+
+/** 构造参数类型数组（Class 与 Type 两个重载共用同一批对象）。 */
+function reflectionParameterTypes(vm, self, arrayType) {
+  const params = self.proto?.parameters || [];
+  const array = vm.newArray(arrayType, params.length, null);
+  params.forEach((descriptor, index) => {
+    array.$data[index] = vm.getClassObject(descriptor);
+  });
+  return array;
+}
+
+/** 每个参数一份注解数组；本模拟器不解析注解，因此每项都是空数组。 */
+function emptyParameterAnnotations(vm) {
+  return vm.newArray('[[Ljava/lang/annotation/Annotation;', 0, []);
 }
 
 function coerceReflectionArgs(vm, paramDescriptors, args) {
@@ -18438,6 +20625,37 @@ function makeXmlParserPeer(vm, xml) {
   const object = vm.allocateRawObject('Lorg/xmlpull/v1/XmlPullParser;');
   object.$parserState = { events: flattenXmlEvents(xml), index: 0 };
   return object;
+}
+
+/** 用 LayoutInflater peer 上保存的上下文构造宿主 inflater。 */
+function layoutInflaterFor(self) {
+  const vm = self?.vm;
+  const inflater = new LayoutInflater(vm?.contextObject ?? self?.context ?? null);
+  inflater.vm = vm;
+  return inflater;
+}
+
+/** 把 XmlPullParser 当前（或下一个）START_TAG 节点交给宿主 inflater 建树。 */
+function inflateFromParser(self, parser, root, attach) {
+  const vm = self?.vm;
+  const state = parser?.$parserState;
+  let node = null;
+  if (state) {
+    for (let i = state.index; i < state.events.length; i++) {
+      const event = state.events[i];
+      if (event.event === XML_TYPES.START_TAG && event.node) {
+        node = event.node;
+        state.index = i;
+        break;
+      }
+    }
+  }
+  if (!node) throw new Error('XmlPullParser 未定位到根节点');
+  const inflater = layoutInflaterFor(self);
+  const parent = unwrapView(root) || null;
+  const view = inflater.inflateNode(node, parent);
+  if (parent && attach && parent instanceof ViewGroup) inflater.mountChild(parent, view, node);
+  return view ? viewObject(vm, view) : null;
 }
 
 function xmlParserCurrent(self) {

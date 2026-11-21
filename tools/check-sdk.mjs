@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { buildFrameworkDefinitions } from '../src/framework/registry.js';
+import { JAVA_CORE_CLASSES } from '../src/framework/java-core.js';
 
 const require = createRequire(import.meta.url);
 const JSZip = require('jszip');
@@ -122,7 +123,8 @@ async function main() {
     console.log(`sdk coverage skipped: 未找到 ${options.jar}（可用 --jar= 指定）`);
     return;
   }
-  const defs = buildFrameworkDefinitions({});
+  // 与运行时一致的合并顺序：先 java 核心类，再由 framework 定义覆盖同名类。
+  const defs = [...Object.values(JAVA_CORE_CLASSES), ...buildFrameworkDefinitions({})];
   const byDescriptor = new Map();
   for (const def of defs) byDescriptor.set(def.descriptor, def);
 
@@ -136,7 +138,7 @@ async function main() {
   const absent = [];
   let totalMissing = 0;
   let totalExpected = 0;
-  for (const def of defs) {
+  for (const def of byDescriptor.values()) {
     const className = def.descriptor.slice(1, -1);
     const entry = `${className}.class`;
     if (!available.has(entry)) {
