@@ -4897,6 +4897,24 @@ export function buildFrameworkDefinitions(vm) {
     })
   );
 
+  const cloneMediaUri = (vm, uri, extraQuery) => {
+    const parts = { ...(uri?.$peer ?? {}) };
+    const query = String(parts.$query ?? '');
+    parts.$query = query ? `${query}&${extraQuery}` : extraQuery;
+    const object = vm.allocateRawObject('Landroid/net/Uri;');
+    object.$peer = parts;
+    return object;
+  };
+  const mediaCollectionItems = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (Array.isArray(value.$data)) return value.$data;
+    const peer = value.$peer ?? value;
+    if (Array.isArray(peer.items)) return peer.items;
+    if (Array.isArray(peer.setItems)) return peer.setItems;
+    return [];
+  };
+
   defs.push(
     nativeDef('Landroid/provider/MediaStore;', {
       super: 'Ljava/lang/Object;',
@@ -4910,6 +4928,78 @@ export function buildFrameworkDefinitions(vm) {
         ['EXTRA_SIZE_LIMIT:Ljava/lang/String;', 'android.intent.extra.sizeLimit'],
         ['EXTRA_DURATION_LIMIT:Ljava/lang/String;', 'android.intent.extra.durationLimit'],
       ]),
+      staticMethods: {
+        'setIncludePending(Landroid/net/Uri;)Landroid/net/Uri;': (_self, [uri], vm) =>
+          cloneMediaUri(vm, uri, 'include-pending=true'),
+        'setRequireOriginal(Landroid/net/Uri;)Landroid/net/Uri;': (_self, [uri], vm) =>
+          cloneMediaUri(vm, uri, 'require-original=true'),
+        'getRequireOriginal(Landroid/net/Uri;)Z': (_self, [uri]) =>
+          (String(uri?.$peer?.$query ?? '').includes('require-original=true') ? 1 : 0),
+        'getOriginalMediaFormatFileDescriptor(Landroid/content/Context;Landroid/os/ParcelFileDescriptor;)Landroid/os/ParcelFileDescriptor;':
+          (_self, [context, descriptor]) => descriptor ?? null,
+        'createWriteRequest(Landroid/content/ContentResolver;Ljava/util/Collection;)Landroid/app/PendingIntent;': () => null,
+        'createTrashRequest(Landroid/content/ContentResolver;Ljava/util/Collection;Z)Landroid/app/PendingIntent;': () => null,
+        'createFavoriteRequest(Landroid/content/ContentResolver;Ljava/util/Collection;Z)Landroid/app/PendingIntent;': () => null,
+        'createDeleteRequest(Landroid/content/ContentResolver;Ljava/util/Collection;)Landroid/app/PendingIntent;': () => null,
+        'getExternalVolumeNames(Landroid/content/Context;)Ljava/util/Set;': (_self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/LinkedHashSet;');
+          object.$peer = { setItems: ['external_primary'] };
+          return object;
+        },
+        'getRecentExternalVolumeNames(Landroid/content/Context;)Ljava/util/Set;': (_self, _args, vm) => {
+          const object = vm.allocateRawObject('Ljava/util/LinkedHashSet;');
+          object.$peer = { setItems: ['external_primary'] };
+          return object;
+        },
+        'getVolumeName(Landroid/net/Uri;)Ljava/lang/String;': (_self, [uri]) => {
+          const path = String(uri?.$peer?.$path ?? '');
+          const segment = path.split('/').filter(Boolean)[0];
+          return segment || null;
+        },
+        'getMediaScannerUri()Landroid/net/Uri;': (_self, _args, vm) => {
+          const object = vm.allocateRawObject('Landroid/net/Uri;');
+          object.$peer = {
+            $scheme: 'content',
+            $authority: 'media',
+            $path: '/none/media-scan',
+            $query: null,
+            $fragment: null,
+            $opaque: false,
+            $segments: ['none', 'media-scan'],
+          };
+          return object;
+        },
+        'getVersion(Landroid/content/Context;)Ljava/lang/String;': (_self, _args, vm) =>
+          String(vm.__mediaStoreVersion ?? '1'),
+        'getVersion(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;': (_self, [context, volume], vm) => {
+          if (!vm.__mediaStoreVersions) vm.__mediaStoreVersions = new Map();
+          const name = jsString(volume);
+          if (!vm.__mediaStoreVersions.has(name)) vm.__mediaStoreVersions.set(name, '1');
+          return vm.__mediaStoreVersions.get(name);
+        },
+        'getGeneration(Landroid/content/Context;Ljava/lang/String;)J': (_self, [context, volume], vm) => {
+          if (!vm.__mediaStoreGenerations) vm.__mediaStoreGenerations = new Map();
+          const name = jsString(volume);
+          return BigInt(vm.__mediaStoreGenerations.get(name) ?? 0);
+        },
+        'getDocumentUri(Landroid/content/Context;Landroid/net/Uri;)Landroid/net/Uri;': (_self, [context, uri]) =>
+          uri ?? null,
+        'getMediaUri(Landroid/content/Context;Landroid/net/Uri;)Landroid/net/Uri;': (_self, [context, uri]) =>
+          uri ?? null,
+        'isCurrentSystemGallery(Landroid/content/ContentResolver;ILjava/lang/String;)Z': () => 0,
+        'getRedactedUri(Landroid/content/ContentResolver;Landroid/net/Uri;)Landroid/net/Uri;': (_self, [resolver, uri], vm) =>
+          cloneMediaUri(vm, uri, 'redact=true'),
+        'getRedactedUri(Landroid/content/ContentResolver;Ljava/util/List;)Ljava/util/List;': (_self, [resolver, uris], vm) => {
+          const object = vm.allocateRawObject('Ljava/util/ArrayList;');
+          object.$peer = { items: mediaCollectionItems(uris).map((uri) => cloneMediaUri(vm, uri, 'redact=true')) };
+          return object;
+        },
+        'canManageMedia(Landroid/content/Context;)Z': (_self, _args, vm) => {
+          const permissions = vm.permissions ?? vm.manifest?.usesPermissions ?? [];
+          const values = Array.isArray(permissions) ? permissions : [...(permissions?.values?.() ?? [])];
+          return values.some((permission) => String(permission).includes('MANAGE_MEDIA')) ? 1 : 0;
+        },
+      },
     })
   );
 

@@ -296,4 +296,91 @@ assert.equal(call(instant, 'until(Ljava/time/temporal/Temporal;Ljava/time/tempor
   { id: 'SECONDS' },
 ]), ((BigInt(Date.UTC(2020, 0, 2, 3, 4, 5) / 1000) - 1500n) * 1000000000n + 123456789n - 250000000n) / 1000000000n);
 
+/* 17. SparseArray：有序键、setValueAt/append/removeAtRange 与内容比较 */
+const sparse = vm.instantiate('Landroid/util/SparseArray;', []);
+call(sparse, 'set(ILjava/lang/Object;)V', [7, 'seven']);
+call(sparse, 'set(ILjava/lang/Object;)V', [3, 'three']);
+call(sparse, 'set(ILjava/lang/Object;)V', [5, 'five']);
+assert.equal(Number(call(sparse, 'size()I')), 3);
+assert.equal(Number(call(sparse, 'keyAt(I)I', [0])), 3);
+assert.equal(call(sparse, 'valueAt(I)Ljava/lang/Object;', [1]), 'five');
+assert.equal(Number(call(sparse, 'contains(I)Z', [5])), 1);
+assert.equal(Number(call(sparse, 'contains(I)Z', [4])), 0);
+call(sparse, 'setValueAt(ILjava/lang/Object;)V', [1, 'FIVE']);
+assert.equal(call(sparse, 'get(I)Ljava/lang/Object;', [5]), 'FIVE');
+call(sparse, 'append(ILjava/lang/Object;)V', [9, 'nine']);
+assert.equal(Number(call(sparse, 'keyAt(I)I', [3])), 9);
+const sparseClone = call(sparse, 'clone()Landroid/util/SparseArray;');
+assert.equal(Number(call(sparse, 'contentEquals(Landroid/util/SparseArray;)Z', [sparseClone])), 1);
+assert.equal(call(sparse, 'contentHashCode()I'), call(sparseClone, 'contentHashCode()I'));
+call(sparseClone, 'set(ILjava/lang/Object;)V', [4, 'four']);
+assert.equal(Number(call(sparse, 'contentEquals(Landroid/util/SparseArray;)Z', [sparseClone])), 0);
+call(sparse, 'removeAtRange(II)V', [0, 2]);
+assert.equal(Number(call(sparse, 'size()I')), 2);
+assert.equal(Number(call(sparse, 'keyAt(I)I', [0])), 7);
+
+/* 18. StorageManager：OBB 回调、配额/可分配空间与缓存行为标记 */
+const storage = vm.instantiate('Landroid/os/storage/StorageManager;', []);
+const obbEvents = [];
+const obbListener = { onObbStateChange: (path, state) => obbEvents.push([path, state]) };
+assert.equal(Number(call(storage, 'mountObb(Ljava/lang/String;Ljava/lang/String;Landroid/os/storage/OnObbStateChangeListener;)Z',
+  ['/obb/game.obb', 'key', obbListener])), 1);
+assert.equal(Number(call(storage, 'isObbMounted(Ljava/lang/String;)Z', ['/obb/game.obb'])), 1);
+assert.equal(obbEvents.length, 1);
+assert.equal(obbEvents[0][1], 1);
+assert.equal(call(storage, 'getMountedObbPath(Ljava/lang/String;)Ljava/lang/String;', ['/obb/game.obb']), '/obb/game.obb');
+assert.equal(Number(call(storage, 'unmountObb(Ljava/lang/String;ZLandroid/os/storage/OnObbStateChangeListener;)Z',
+  ['/obb/game.obb', true, obbListener])), 1);
+assert.equal(obbEvents[1][1], 0);
+assert.equal(Number(call(storage, 'isObbMounted(Ljava/lang/String;)Z', ['/obb/game.obb'])), 0);
+const uuidFile = { $peer: { path: '/storage/emulated/0/Android/data/demo' } };
+const pathUuid = call(storage, 'getUuidForPath(Ljava/io/File;)Ljava/util/UUID;', [uuidFile]);
+assert.match(pathUuid.$peer.text, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const uuidFile2 = { $peer: { path: '/storage/emulated/0/Android/data/demo' } };
+assert.equal(call(storage, 'getUuidForPath(Ljava/io/File;)Ljava/util/UUID;', [uuidFile2]).$peer.text, pathUuid.$peer.text);
+assert.ok(call(storage, 'getCacheQuotaBytes(Ljava/util/UUID;)J', [pathUuid]) > 0n);
+const freeBefore = call(storage, 'getAllocatableBytes(Ljava/util/UUID;)J', [pathUuid]);
+call(storage, 'allocateBytes(Ljava/util/UUID;J)V', [pathUuid, 1024n]);
+assert.equal(call(storage, 'getAllocatableBytes(Ljava/util/UUID;)J', [pathUuid]), freeBefore - 1024n);
+const cacheDir = { $peer: { path: '/data/cache/demo' } };
+assert.equal(Number(call(storage, 'isCacheBehaviorGroup(Ljava/io/File;)Z', [cacheDir])), 0);
+call(storage, 'setCacheBehaviorGroup(Ljava/io/File;Z)V', [cacheDir, true]);
+assert.equal(Number(call(storage, 'isCacheBehaviorGroup(Ljava/io/File;)Z', [cacheDir])), 1);
+call(storage, 'setCacheBehaviorTombstone(Ljava/io/File;Z)V', [cacheDir, true]);
+assert.equal(Number(call(storage, 'isCacheBehaviorTombstone(Ljava/io/File;)Z', [cacheDir])), 1);
+
+/* 19. MediaStore：pending/original 标记、卷名与版本号 */
+const mediaUri = { $peer: { $scheme: 'content', $authority: 'media', $path: '/external_primary/images/media/1', $query: null } };
+const pending = stat('Landroid/provider/MediaStore;', 'setIncludePending(Landroid/net/Uri;)Landroid/net/Uri;', [mediaUri]);
+assert.match(String(pending.$peer.$query), /include-pending=true/);
+const original = stat('Landroid/provider/MediaStore;', 'setRequireOriginal(Landroid/net/Uri;)Landroid/net/Uri;', [pending]);
+assert.equal(Number(stat('Landroid/provider/MediaStore;', 'getRequireOriginal(Landroid/net/Uri;)Z', [original])), 1);
+assert.equal(Number(stat('Landroid/provider/MediaStore;', 'getRequireOriginal(Landroid/net/Uri;)Z', [mediaUri])), 0);
+assert.equal(stat('Landroid/provider/MediaStore;', 'getVolumeName(Landroid/net/Uri;)Ljava/lang/String;', [mediaUri]),
+  'external_primary');
+assert.equal(stat('Landroid/provider/MediaStore;', 'getVersion(Landroid/content/Context;)Ljava/lang/String;', [null]), '1');
+const volumeNames = stat('Landroid/provider/MediaStore;', 'getExternalVolumeNames(Landroid/content/Context;)Ljava/util/Set;', [null]);
+assert.equal(Number(call(volumeNames, 'contains(Ljava/lang/Object;)Z', ['external_primary'])), 1);
+
+/* 20. PreferenceManager：命名/模式/存储位置与默认偏好共享实例 */
+const manager = vm.instantiate('Landroid/preference/PreferenceManager;', []);
+assert.match(String(call(manager, 'getSharedPreferencesName()Ljava/lang/String;')), /_preferences$/);
+call(manager, 'setSharedPreferencesName(Ljava/lang/String;)V', ['custom_prefs']);
+assert.equal(call(manager, 'getSharedPreferencesName()Ljava/lang/String;'), 'custom_prefs');
+call(manager, 'setSharedPreferencesMode(I)V', [1]);
+assert.equal(Number(call(manager, 'getSharedPreferencesMode()I')), 1);
+assert.equal(Number(call(manager, 'isStorageDefault()Z')), 1);
+call(manager, 'setStorageDeviceProtected()V');
+assert.equal(Number(call(manager, 'isStorageDeviceProtected()Z')), 1);
+call(manager, 'setStorageDefault()V');
+assert.equal(Number(call(manager, 'isStorageDefault()Z')), 1);
+const prefs = call(manager, 'getSharedPreferences()Landroid/content/SharedPreferences;');
+assert.equal(prefs.$peer.name, 'custom_prefs');
+const store = { getString: () => 'stored' };
+call(manager, 'setPreferenceDataStore(Landroid/preference/PreferenceDataStore;)V', [store]);
+assert.equal(call(manager, 'getPreferenceDataStore()Landroid/preference/PreferenceDataStore;'), store);
+assert.equal(call(manager, 'findPreference(Ljava/lang/CharSequence;)Landroid/preference/Preference;', ['x']), null);
+const screen = call(manager, 'createPreferenceScreen(Landroid/content/Context;)Landroid/preference/PreferenceScreen;', [null]);
+assert.ok(screen && screen.$peer && Array.isArray(screen.$peer.$items));
+
 console.log('jdk-core OK');

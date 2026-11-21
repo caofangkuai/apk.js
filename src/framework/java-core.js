@@ -2274,6 +2274,15 @@ function makeSharedPreferences(vm, name) {
 
 JAVA_CORE_CLASSES['Landroid/preference/PreferenceManager;'] = nativeDef('Landroid/preference/PreferenceManager;', {
   super: 'Ljava/lang/Object;',
+  ctor: peerClass(function (vm) {
+    this.vm = vm;
+    this.preferencesMode = 0;
+    this.storageType = 'default';
+  }, { vm: null, preferencesMode: 0, storageType: 'default' }),
+  staticFields: new Map([
+    ['KEY_HAS_SET_DEFAULT_VALUES:Ljava/lang/String;', '_has_set_default_values'],
+    ['METADATA_KEY_PREFERENCES:Ljava/lang/String;', 'android.preference'],
+  ]),
   staticMethods: {
     'getDefaultSharedPreferences(Landroid/content/Context;)Landroid/content/SharedPreferences;': (_self, _args, vm) =>
       makeSharedPreferences(vm, (vm.packageName || 'app') + '_preferences'),
@@ -5135,8 +5144,7 @@ JAVA_CORE_CLASSES['Landroid/util/SparseArray;'] = nativeDef('Landroid/util/Spars
     'containsKey(I)Z': (self, [key]) => self.entries.has(key | 0),
     'clone()Landroid/util/SparseArray;': (self, _args, vm) => {
       const object = vm.allocateRawObject('Landroid/util/SparseArray;');
-      const copy = new Map(self.entries);
-      if (object.$peer) object.$peer.entries = copy;
+      object.$peer = { entries: new Map(self.entries) };
       return object;
     },
     'toString()Ljava/lang/String;': (self) => {
@@ -14259,4 +14267,269 @@ JAVA_CORE_CLASSES['Ljava/util/concurrent/locks/ReentrantReadWriteLock$WriteLock;
     self.parent = parent ?? null;
     self.holdCount = 0;
     self.held = false;
+  });
+
+/* ===== Android 宿主补全：SparseArray / StorageManager / MediaStore / PreferenceManager ===== */
+
+const SPARSE_METHODS = JAVA_CORE_CLASSES['Landroid/util/SparseArray;'].methods;
+
+function sparseSortedKeys(self) {
+  if (!(self.entries instanceof Map)) self.entries = new Map();
+  return Array.from(self.entries.keys()).sort((left, right) => left - right);
+}
+
+SPARSE_METHODS.set('<init>(I)V', (self) => {
+  self.entries = new Map();
+});
+SPARSE_METHODS.set('contains(I)Z', (self, [key]) => (self.entries.has(key | 0) ? 1 : 0));
+SPARSE_METHODS.set('set(ILjava/lang/Object;)V', (self, [key, value]) => {
+  self.entries.set(key | 0, value);
+});
+SPARSE_METHODS.set('setValueAt(ILjava/lang/Object;)V', (self, [index, value]) => {
+  const keys = sparseSortedKeys(self);
+  const position = toInt(index);
+  if (position >= 0 && position < keys.length) self.entries.set(keys[position], value);
+});
+SPARSE_METHODS.set('append(ILjava/lang/Object;)V', (self, [key, value]) => {
+  self.entries.set(key | 0, value);
+});
+SPARSE_METHODS.set('removeAtRange(II)V', (self, [index, size]) => {
+  const keys = sparseSortedKeys(self);
+  const start = toInt(index);
+  const count = toInt(size);
+  for (let i = start; i < start + count && i < keys.length; i++) self.entries.delete(keys[i]);
+});
+SPARSE_METHODS.set('contentEquals(Landroid/util/SparseArray;)Z', (self, [other], vm) => {
+  if (!other || self.entries.size !== other.$peer?.entries?.size) return 0;
+  const otherEntries = other.$peer?.entries;
+  if (!(otherEntries instanceof Map)) return 0;
+  for (const [key, value] of self.entries) {
+    if (!otherEntries.has(key) || !valuesEqual(value, otherEntries.get(key), vm)) return 0;
+  }
+  return 1;
+});
+SPARSE_METHODS.set('contentHashCode()I', (self) => {
+  let result = 0;
+  for (const key of sparseSortedKeys(self)) {
+    result = (Math.imul(result, 31) + (key | 0)) | 0;
+    const value = self.entries.get(key);
+    result = (Math.imul(result, 31) + (value === null || value === undefined ? 0 : hashCode(value))) | 0;
+  }
+  return result;
+});
+
+const STORAGE_MANAGER_METHODS = JAVA_CORE_CLASSES['Landroid/os/storage/StorageManager;'].methods;
+
+function storageManagerState(self) {
+  if (!(self.obbs instanceof Map)) self.obbs = new Map();
+  if (!Array.isArray(self.volumeCallbacks)) self.volumeCallbacks = [];
+  if (!(self.allocatedBytes instanceof Map)) self.allocatedBytes = new Map();
+  if (!(self.cacheGroups instanceof Set)) self.cacheGroups = new Set();
+  if (!(self.cacheTombstones instanceof Set)) self.cacheTombstones = new Set();
+  return self;
+}
+
+function storageCacheUsage() {
+  let total = 0;
+  for (const [path, bytes] of VIRTUAL_FS.files) {
+    if (path.startsWith('/data/cache') || path.startsWith('/storage/emulated/0/Android/data')) {
+      total += bytes?.length || 0;
+    }
+  }
+  return total;
+}
+
+function storageQuotaBytes(self) {
+  storageManagerState(self);
+  return 256 * 1024 * 1024;
+}
+
+STORAGE_MANAGER_METHODS.set('registerStorageVolumeCallback(Ljava/util/concurrent/Executor;Landroid/os/storage/StorageManager$StorageVolumeCallback;)V',
+  (self, [executor, callback]) => {
+    storageManagerState(self).volumeCallbacks.push({ executor, callback });
+  });
+STORAGE_MANAGER_METHODS.set('unregisterStorageVolumeCallback(Landroid/os/storage/StorageManager$StorageVolumeCallback;)V',
+  (self, [callback]) => {
+    const state = storageManagerState(self);
+    state.volumeCallbacks = state.volumeCallbacks.filter((entry) => entry.callback !== callback);
+  });
+STORAGE_MANAGER_METHODS.set('mountObb(Ljava/lang/String;Ljava/lang/String;Landroid/os/storage/OnObbStateChangeListener;)Z',
+  (self, [rawPath, key, listener], vm) => {
+    const state = storageManagerState(self);
+    const path = String(rawPath ?? '');
+    if (!path) return false;
+    state.obbs.set(path, { mounted: true, key: key ?? null });
+    if (listener) {
+      try {
+        vm.invokeInterface(listener, 'onObbStateChange', '(Ljava/lang/String;I)V', [path, 1]);
+      } catch (_error) {
+        // 监听器异常不影响挂载结果。
+      }
+    }
+    return true;
+  });
+STORAGE_MANAGER_METHODS.set('unmountObb(Ljava/lang/String;ZLandroid/os/storage/OnObbStateChangeListener;)Z',
+  (self, [rawPath, force, listener], vm) => {
+    const state = storageManagerState(self);
+    const path = String(rawPath ?? '');
+    if (!state.obbs.has(path)) return false;
+    state.obbs.delete(path);
+    if (listener) {
+      try {
+        vm.invokeInterface(listener, 'onObbStateChange', '(Ljava/lang/String;I)V', [path, 0]);
+      } catch (_error) {
+        // 同上。
+      }
+    }
+    return true;
+  });
+STORAGE_MANAGER_METHODS.set('isObbMounted(Ljava/lang/String;)Z', (self, [rawPath]) => {
+  const state = storageManagerState(self);
+  return state.obbs.get(String(rawPath ?? ''))?.mounted ? 1 : 0;
+});
+STORAGE_MANAGER_METHODS.set('getMountedObbPath(Ljava/lang/String;)Ljava/lang/String;', (self, [rawPath]) => {
+  const path = String(rawPath ?? '');
+  const state = storageManagerState(self);
+  return state.obbs.get(path)?.mounted ? path : null;
+});
+STORAGE_MANAGER_METHODS.set('getUuidForPath(Ljava/io/File;)Ljava/util/UUID;', (_self, [file], vm) => {
+  const path = VIRTUAL_FS.normalize(filePathOf(file) || '/');
+  let first = 0x811c9dc5;
+  let second = 0x01000193;
+  for (let i = 0; i < path.length; i++) {
+    first = Math.imul(first ^ path.charCodeAt(i), 16777619);
+    second = Math.imul(second + path.charCodeAt(i), 2246822519);
+  }
+  const hex = (value, length) => (value >>> 0).toString(16).padStart(length, '0').slice(-length);
+  const text = `${hex(first, 8)}-${hex(second >>> 16, 4)}-4${hex(second, 3)}-${hex(first >>> 8, 4)}-${hex(first, 4)}${hex(second, 8)}`;
+  const definition = vm.registry.resolve('Ljava/util/UUID;')?.nativeDef;
+  return definition.staticMethods.get('fromString(Ljava/lang/String;)Ljava/util/UUID;')(null, [text], vm);
+});
+STORAGE_MANAGER_METHODS.set('isAllocationSupported(Ljava/io/FileDescriptor;)Z', () => 1);
+STORAGE_MANAGER_METHODS.set('getStorageVolume(Landroid/net/Uri;)Landroid/os/storage/StorageVolume;', (_self, [uri], vm) => {
+  const parts = uri?.$peer ?? {};
+  const path = parts.$path ?? '/';
+  const match = storageVolumePaths()
+    .filter((volume) => path === volume || String(path).startsWith(`${volume}/`))
+    .sort((left, right) => right.length - left.length)[0];
+  if (match) return volumeForStoragePath(vm, match, { primary: match === '/storage/emulated/0' });
+  return null;
+});
+STORAGE_MANAGER_METHODS.set('getRecentStorageVolumes()Ljava/util/List;', (_self, _args, vm) =>
+  makeList(vm, storageVolumePaths().map((path, index) => volumeForStoragePath(vm, path, { primary: index === 0 }))));
+STORAGE_MANAGER_METHODS.set('isEncrypted(Ljava/io/File;)Z', () => 0);
+STORAGE_MANAGER_METHODS.set('openProxyFileDescriptor(ILandroid/os/ProxyFileDescriptorCallback;Landroid/os/Handler;)Landroid/os/ParcelFileDescriptor;',
+  () => null);
+STORAGE_MANAGER_METHODS.set('getCacheQuotaBytes(Ljava/util/UUID;)J', (self) => BigInt(storageQuotaBytes(self)));
+STORAGE_MANAGER_METHODS.set('getCacheSizeBytes(Ljava/util/UUID;)J', () => BigInt(storageCacheUsage()));
+STORAGE_MANAGER_METHODS.set('getAllocatableBytes(Ljava/util/UUID;)J', (self) => {
+  const quota = storageQuotaBytes(self);
+  const usage = storageCacheUsage();
+  let allocated = 0;
+  for (const bytes of storageManagerState(self).allocatedBytes.values()) allocated += bytes;
+  return BigInt(Math.max(0, quota - usage - allocated));
+});
+STORAGE_MANAGER_METHODS.set('allocateBytes(Ljava/util/UUID;J)V', (self, [uuid, bytes], vm) => {
+  const state = storageManagerState(self);
+  const amount = Number(bytes);
+  let allocated = 0;
+  for (const value of state.allocatedBytes.values()) allocated += value;
+  const available = storageQuotaBytes(self) - storageCacheUsage() - allocated;
+  if (amount > available) {
+    vm.throwException('Ljava/io/IOException;', 'Failed to allocate bytes');
+  }
+  state.allocatedBytes.set(String(uuid?.$peer?.text ?? uuid?.text ?? 'default'), amount);
+});
+STORAGE_MANAGER_METHODS.set('allocateBytes(Ljava/io/FileDescriptor;J)V', (self, [fd, bytes], vm) => {
+  const state = storageManagerState(self);
+  const amount = Number(bytes);
+  let allocated = 0;
+  for (const value of state.allocatedBytes.values()) allocated += value;
+  if (amount > storageQuotaBytes(self) - storageCacheUsage() - allocated) {
+    vm.throwException('Ljava/io/IOException;', 'Failed to allocate bytes');
+  }
+  state.allocatedBytes.set(`fd:${fd?.$peer?.fd ?? fd?.fd ?? 'anon'}`, amount);
+});
+STORAGE_MANAGER_METHODS.set('setCacheBehaviorGroup(Ljava/io/File;Z)V', (self, [file, enabled]) => {
+  const state = storageManagerState(self);
+  const path = VIRTUAL_FS.normalize(filePathOf(file) || '/');
+  if (enabled) state.cacheGroups.add(path);
+  else state.cacheGroups.delete(path);
+});
+STORAGE_MANAGER_METHODS.set('isCacheBehaviorGroup(Ljava/io/File;)Z', (self, [file]) => {
+  const state = storageManagerState(self);
+  return state.cacheGroups.has(VIRTUAL_FS.normalize(filePathOf(file) || '/')) ? 1 : 0;
+});
+STORAGE_MANAGER_METHODS.set('setCacheBehaviorTombstone(Ljava/io/File;Z)V', (self, [file, enabled]) => {
+  const state = storageManagerState(self);
+  const path = VIRTUAL_FS.normalize(filePathOf(file) || '/');
+  if (enabled) state.cacheTombstones.add(path);
+  else state.cacheTombstones.delete(path);
+});
+STORAGE_MANAGER_METHODS.set('isCacheBehaviorTombstone(Ljava/io/File;)Z', (self, [file]) => {
+  const state = storageManagerState(self);
+  return state.cacheTombstones.has(VIRTUAL_FS.normalize(filePathOf(file) || '/')) ? 1 : 0;
+});
+STORAGE_MANAGER_METHODS.set('isCheckpointSupported()Z', () => 0);
+
+const PREFERENCE_MANAGER_METHODS = JAVA_CORE_CLASSES['Landroid/preference/PreferenceManager;'].methods;
+const PREFERENCE_MANAGER_STATIC = JAVA_CORE_CLASSES['Landroid/preference/PreferenceManager;'].staticMethods;
+
+function preferenceManagerState(self) {
+  if (!self.preferencesName) {
+    self.preferencesName = self.name ?? `${self.vm?.packageName || 'app'}_preferences`;
+  }
+  if (self.preferencesMode === undefined) self.preferencesMode = 0;
+  if (!self.storageType) self.storageType = 'default';
+  return self;
+}
+
+PREFERENCE_MANAGER_METHODS.set('setPreferenceDataStore(Landroid/preference/PreferenceDataStore;)V', (self, [store]) => {
+  self.dataStore = store ?? null;
+});
+PREFERENCE_MANAGER_METHODS.set('getPreferenceDataStore()Landroid/preference/PreferenceDataStore;', (self) =>
+  self.dataStore ?? null);
+PREFERENCE_MANAGER_METHODS.set('getSharedPreferencesName()Ljava/lang/String;', (self) =>
+  preferenceManagerState(self).preferencesName);
+PREFERENCE_MANAGER_METHODS.set('setSharedPreferencesName(Ljava/lang/String;)V', (self, [name]) => {
+  preferenceManagerState(self).preferencesName = jsString(name);
+});
+PREFERENCE_MANAGER_METHODS.set('getSharedPreferencesMode()I', (self) =>
+  preferenceManagerState(self).preferencesMode);
+PREFERENCE_MANAGER_METHODS.set('setSharedPreferencesMode(I)V', (self, [mode]) => {
+  preferenceManagerState(self).preferencesMode = toInt(mode);
+});
+PREFERENCE_MANAGER_METHODS.set('setStorageDefault()V', (self) => {
+  preferenceManagerState(self).storageType = 'default';
+});
+PREFERENCE_MANAGER_METHODS.set('setStorageDeviceProtected()V', (self) => {
+  preferenceManagerState(self).storageType = 'device_protected';
+});
+PREFERENCE_MANAGER_METHODS.set('isStorageDefault()Z', (self) =>
+  (preferenceManagerState(self).storageType === 'default' ? 1 : 0));
+PREFERENCE_MANAGER_METHODS.set('isStorageDeviceProtected()Z', (self) =>
+  (preferenceManagerState(self).storageType === 'device_protected' ? 1 : 0));
+PREFERENCE_MANAGER_METHODS.set('getSharedPreferences()Landroid/content/SharedPreferences;', (self, _args, vm) => {
+  const state = preferenceManagerState(self);
+  return makeSharedPreferences(self.vm ?? vm, state.preferencesName);
+});
+PREFERENCE_MANAGER_METHODS.set('findPreference(Ljava/lang/CharSequence;)Landroid/preference/Preference;', () => null);
+PREFERENCE_MANAGER_METHODS.set('createPreferenceScreen(Landroid/content/Context;)Landroid/preference/PreferenceScreen;',
+  (self, [context], vm) => {
+    const object = vm.allocateRawObject('Landroid/preference/PreferenceScreen;');
+    object.$peer = {
+      context: context ?? null,
+      manager: self.$object ?? null,
+      $items: [],
+    };
+    return object;
+  });
+
+PREFERENCE_MANAGER_STATIC.set('setDefaultValues(Landroid/content/Context;IZ)V', (_self, [context, resId], vm) => {
+  applyPreferenceDefaults(vm, resId);
+});
+PREFERENCE_MANAGER_STATIC.set('setDefaultValues(Landroid/content/Context;Ljava/lang/String;IIZ)V',
+  (_self, [context, name, mode, resId], vm) => {
+    vm.preferenceDefaultsName = jsString(name);
+    applyPreferenceDefaults(vm, resId);
   });
