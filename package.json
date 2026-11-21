@@ -9,7 +9,7 @@
     "build:dev": "cross-env NODE_ENV=development webpack",
     "test": "node tests/run.js",
     "check": "node tests/check.js",
-    "test:all": "npm run check:coverage && npm run check:duplicates && npm run check:shadowing && npm run check:playground && npm run check:refs && npm run test && npm run check && npm run test:parse && npm run test:api && npm run test:hooks && npm run test:hooks-apk && npm run test:bundles && npm run test:layout-flag && npm run test:list-callbacks && npm run test:recyclerview && npm run test:appbar && npm run test:elevation-overlay && npm run test:dialog-theme && npm run test:progress-animation && npm run test:list-choices && npm run test:appcompat-hosts && npm run test:typed-array && npm run test:measure-constraints && npm run test:style-precedence && npm run test:inflate-dispatch && npm run test:system-service && npm run test:class-object && npm run test:linked-hash-set && npm run test:material-input-color && npm run test:zip && npm run test:listview && npm run test:format && npm run test:diagnose && npm run test:touch && npm run test:interaction && npm run test:widgets && npm run test:drawables && npm run test:scrollbars && npm run test:java-io && npm run test:animation && npm run test:compat && npm run test:browser-io",
+    "test:all": "npm run check:coverage && npm run check:duplicates && npm run check:shadowing && npm run check:playground && npm run check:refs && npm run test && npm run check && npm run test:parse && npm run test:api && npm run test:hooks && npm run test:hooks-apk && npm run test:bundles && npm run test:layout-flag && npm run test:list-callbacks && npm run test:recyclerview && npm run test:appbar && npm run test:elevation-overlay && npm run test:dialog-theme && npm run test:progress-animation && npm run test:list-choices && npm run test:appcompat-hosts && npm run test:typed-array && npm run test:measure-constraints && npm run test:style-precedence && npm run test:inflate-dispatch && npm run test:system-service && npm run test:class-object && npm run test:linked-hash-set && npm run test:material-input-color && npm run test:zip && npm run test:listview && npm run test:format && npm run test:diagnose && npm run test:touch && npm run test:interaction && npm run test:widgets && npm run test:drawables && npm run test:scrollbars && npm run test:java-io && npm run test:animation && npm run test:jdk-core && npm run test:compat && npm run test:browser-io",
     "test:parse": "node tests/parse-smoke.mjs",
     "render": "node tools/render-apk.mjs",
     "hook:apk": "node tools/hook-apk.mjs",
@@ -67,7 +67,8 @@
     "check:sdk": "node tools/check-sdk.mjs",
     "test:browser-io": "node tests/browser-io.mjs",
     "test:animation": "node tests/animation.mjs",
-    "test:java-io": "node tests/java-io.mjs"
+    "test:java-io": "node tests/java-io.mjs",
+    "test:jdk-core": "node tests/jdk-core.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1"

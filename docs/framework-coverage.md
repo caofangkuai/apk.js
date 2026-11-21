@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：460
-- 方法/构造函数键（静态统计）：9645
+- 注册的 native 类：462
+- 方法/构造函数键（静态统计）：9683
 
 ## Native 类清单
 
@@ -403,6 +403,7 @@
 | `Ljava/text/FieldPosition;` | java-core.js |
 | `Ljava/text/ParsePosition;` | java-core.js |
 | `Ljava/time/Instant;` | java-core.js |
+| `Ljava/time/ZoneId;` | java-core.js |
 | `Ljava/util/AbstractList;` | java-core.js |
 | `Ljava/util/ArrayDeque;` | java-core.js |
 | `Ljava/util/ArrayList;` | java-core.js |
@@ -446,6 +447,7 @@
 | `Ljava/util/Map;` | java-core.js |
 | `Ljava/util/Map$Entry;` | java-core.js |
 | `Ljava/util/Objects;` | java-core.js |
+| `Ljava/util/Properties;` | java-core.js |
 | `Ljava/util/Random;` | java-core.js |
 | `Ljava/util/regex/Matcher;` | java-core.js |
 | `Ljava/util/regex/MatchResult;` | java-core.js |

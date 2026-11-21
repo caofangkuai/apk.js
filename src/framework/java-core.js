@@ -3792,10 +3792,10 @@ JAVA_CORE_CLASSES['Ljava/util/Random;'] = nativeDef('Ljava/util/Random;', {
       self.seed = (Math.random() * 0x100000000) | 0;
     },
     '<init>(J)V': (self, [seed]) => {
-      self.seed = toLong(seed) & 0xffff;
+      self.seed = Number(toLong(seed) & 0xffffn);
     },
     'setSeed(J)V': (self, [seed]) => {
-      self.seed = toLong(seed) & 0xffff;
+      self.seed = Number(toLong(seed) & 0xffffn);
     },
     'next(I)I': (self, [bits]) => {
       const n = toInt(bits);
@@ -6676,7 +6676,7 @@ JAVA_CORE_CLASSES['Ljava/net/URL;'] = nativeDef('Ljava/net/URL;', {
     },
     'toURI()Ljava/net/URI;': (self, _args, vm) => {
       const object = vm.allocateRawObject('Ljava/net/URI;');
-      object.$peer = { vm, text: self.text, parts: self.parts };
+      object.$peer = { vm, text: self.text, parts: self.parts, $object: object };
       return object;
     },
     'toString()Ljava/lang/String;': (self) => self.text,
@@ -11823,7 +11823,7 @@ for (const [key, fn] of Object.entries({
   'toURI()Ljava/net/URI;': (self, _args, vm) => {
     const text = `file:${VIRTUAL_FS.normalize(self.path)}`;
     const object = vm.allocateRawObject('Ljava/net/URI;');
-    object.$peer = { vm, text, parts: parseUrlParts(text) };
+    object.$peer = { vm, text, parts: parseUrlParts(text), $object: object };
     return object;
   },
   'isHidden()Z': (self) => (String(self.path ?? '').split('/').pop()?.startsWith('.') ? 1 : 0),
@@ -12222,3 +12222,1377 @@ matchResultDefinition.methods.set('end(I)I', (self, [index]) => {
   const start = String(self.input ?? '').indexOf(value);
   return start < 0 ? -1 : start + String(value).length;
 });
+
+/* ===== JDK 核心类语义补全（Objects/Comparator/Set/Map/Random） ===== */
+
+function objectDeepEquals(left, right, vm) {
+  if (left === right) return true;
+  if (left === null || left === undefined || right === null || right === undefined) return false;
+  if (isJavaArray(left) || isJavaArray(right)) {
+    const a = arrayData(left);
+    const b = arrayData(right);
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!objectDeepEquals(a[i], b[i], vm)) return false;
+    }
+    return true;
+  }
+  return valuesEqual(left, right, vm);
+}
+
+const objectsStatics = JAVA_CORE_CLASSES['Ljava/util/Objects;'].staticMethods;
+objectsStatics.set('deepEquals(Ljava/lang/Object;Ljava/lang/Object;)Z', (_self, [left, right], vm) =>
+  objectDeepEquals(left, right, vm) ? 1 : 0);
+objectsStatics.set('hash([Ljava/lang/Object;)I', (_self, [values]) => {
+  let result = 1;
+  for (const value of values?.$data || []) {
+    result = (Math.imul(result, 31) + (value === null || value === undefined ? 0 : hashCode(value))) | 0;
+  }
+  return result;
+});
+objectsStatics.set('toString(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;', (_self, [value, fallback]) =>
+  value === null || value === undefined ? jsString(fallback) : jsString(value));
+objectsStatics.set('compare(Ljava/lang/Object;Ljava/lang/Object;Ljava/util/Comparator;)I', (_self, [left, right, comparator], vm) => {
+  if (left === right) return 0;
+  return Number(vm.invokeInterface(comparator, 'compare', '(Ljava/lang/Object;Ljava/lang/Object;)I', [left, right])) | 0;
+});
+objectsStatics.set('isNull(Ljava/lang/Object;)Z', (_self, [value]) => (value === null || value === undefined ? 1 : 0));
+objectsStatics.set('nonNull(Ljava/lang/Object;)Z', (_self, [value]) => (value === null || value === undefined ? 0 : 1));
+objectsStatics.set('requireNonNullElse(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', (_self, [value, fallback], vm) => {
+  if (value !== null && value !== undefined) return value;
+  if (fallback === null || fallback === undefined) vm.throwException('Ljava/lang/NullPointerException;', 'defaultObj');
+  return fallback;
+});
+objectsStatics.set('requireNonNullElseGet(Ljava/lang/Object;Ljava/util/function/Supplier;)Ljava/lang/Object;', (_self, [value, supplier], vm) => {
+  if (value !== null && value !== undefined) return value;
+  const supplied = vm.invokeInterface(supplier, 'get', '()Ljava/lang/Object;', []);
+  if (supplied === null || supplied === undefined) vm.throwException('Ljava/lang/NullPointerException;', 'supplier.get()');
+  return supplied;
+});
+objectsStatics.set('checkIndex(II)I', (_self, [index, length], vm) => {
+  const position = toInt(index);
+  const size = toInt(length);
+  if (position < 0 || position >= size) {
+    vm.throwException('Ljava/lang/IndexOutOfBoundsException;', `Index ${position} out of bounds for length ${size}`);
+  }
+  return position;
+});
+objectsStatics.set('checkFromToIndex(III)I', (_self, [from, to, length], vm) => {
+  const start = toInt(from);
+  const end = toInt(to);
+  const size = toInt(length);
+  if (start < 0 || start > end || end > size) {
+    vm.throwException('Ljava/lang/IndexOutOfBoundsException;', `Range [${start}, ${end}) out of bounds for length ${size}`);
+  }
+  return start;
+});
+objectsStatics.set('checkFromIndexSize(III)I', (_self, [from, size, length], vm) => {
+  const start = toInt(from);
+  const count = toInt(size);
+  const total = toInt(length);
+  if (count < 0 || start < 0 || start > total - count) {
+    vm.throwException('Ljava/lang/IndexOutOfBoundsException;', `Range [${start}, ${start + count}) out of bounds for length ${total}`);
+  }
+  return start;
+});
+
+const COMPARATOR_METHODS = JAVA_CORE_CLASSES['Ljava/util/Comparator;'].methods;
+const COMPARATOR_STATIC = JAVA_CORE_CLASSES['Ljava/util/Comparator;'].staticMethods;
+
+function compareWithSortKey(first, second, keyFunction, compare, vm) {
+  if (first === second) return 0;
+  if (typeof keyFunction === 'function') return Number(keyFunction(first, second)) | 0;
+  const leftKey = vm.invokeInterface(keyFunction, 'apply', '(Ljava/lang/Object;)Ljava/lang/Object;', [first]);
+  const rightKey = vm.invokeInterface(keyFunction, 'apply', '(Ljava/lang/Object;)Ljava/lang/Object;', [second]);
+  return compare(leftKey, rightKey);
+}
+
+function chainedComparator(vm, primary, secondary) {
+  return makeComparator(vm, (left, right) => {
+    const order = primary(left, right);
+    return order !== 0 ? order : secondary(left, right);
+  });
+}
+
+COMPARATOR_METHODS.set('thenComparing(Ljava/util/Comparator;)Ljava/util/Comparator;', (self, [other], vm) => {
+  const primary = comparatorFor(self, vm);
+  const secondary = comparatorFor(other, vm);
+  return chainedComparator(vm, primary, secondary);
+});
+COMPARATOR_METHODS.set('thenComparing(Ljava/util/function/Function;Ljava/util/Comparator;)Ljava/util/Comparator;', (self, [keyFunction, other], vm) => {
+  const primary = comparatorFor(self, vm);
+  const secondary = comparatorFor(other, vm);
+  return chainedComparator(vm, primary, (left, right) => compareWithSortKey(left, right, keyFunction, secondary, vm));
+});
+COMPARATOR_METHODS.set('thenComparing(Ljava/util/function/Function;)Ljava/util/Comparator;', (self, [keyFunction], vm) => {
+  const primary = comparatorFor(self, vm);
+  return chainedComparator(vm, primary, (left, right) => compareWithSortKey(left, right, keyFunction, defaultArrayCompare, vm));
+});
+COMPARATOR_METHODS.set('thenComparingInt(Ljava/util/function/ToIntFunction;)Ljava/util/Comparator;', (self, [keyFunction], vm) => {
+  const primary = comparatorFor(self, vm);
+  return chainedComparator(vm, primary, (left, right) => {
+    if (left === right) return 0;
+    const a = toInt(vm.invokeInterface(keyFunction, 'applyAsInt', '(Ljava/lang/Object;)I', [left]));
+    const b = toInt(vm.invokeInterface(keyFunction, 'applyAsInt', '(Ljava/lang/Object;)I', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+});
+COMPARATOR_METHODS.set('thenComparingLong(Ljava/util/function/ToLongFunction;)Ljava/util/Comparator;', (self, [keyFunction], vm) => {
+  const primary = comparatorFor(self, vm);
+  return chainedComparator(vm, primary, (left, right) => {
+    if (left === right) return 0;
+    const a = toLong(vm.invokeInterface(keyFunction, 'applyAsLong', '(Ljava/lang/Object;)J', [left]));
+    const b = toLong(vm.invokeInterface(keyFunction, 'applyAsLong', '(Ljava/lang/Object;)J', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+});
+COMPARATOR_METHODS.set('thenComparingDouble(Ljava/util/function/ToDoubleFunction;)Ljava/util/Comparator;', (self, [keyFunction], vm) => {
+  const primary = comparatorFor(self, vm);
+  return chainedComparator(vm, primary, (left, right) => {
+    if (left === right) return 0;
+    const a = Number(vm.invokeInterface(keyFunction, 'applyAsDouble', '(Ljava/lang/Object;)D', [left]));
+    const b = Number(vm.invokeInterface(keyFunction, 'applyAsDouble', '(Ljava/lang/Object;)D', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+});
+COMPARATOR_STATIC.set('reverseOrder()Ljava/util/Comparator;', (_self, _args, vm) =>
+  makeComparator(vm, (left, right) => defaultArrayCompare(right, left)));
+COMPARATOR_STATIC.set('naturalOrder()Ljava/util/Comparator;', (_self, _args, vm) =>
+  makeComparator(vm, (left, right) => defaultArrayCompare(left, right)));
+COMPARATOR_STATIC.set('nullsFirst(Ljava/util/Comparator;)Ljava/util/Comparator;', (_self, [comparator], vm) => {
+  const forward = comparatorFor(comparator, vm);
+  return makeComparator(vm, (left, right) => {
+    if (left === right) return 0;
+    if (left === null || left === undefined) return -1;
+    if (right === null || right === undefined) return 1;
+    return forward(left, right);
+  });
+});
+COMPARATOR_STATIC.set('nullsLast(Ljava/util/Comparator;)Ljava/util/Comparator;', (_self, [comparator], vm) => {
+  const forward = comparatorFor(comparator, vm);
+  return makeComparator(vm, (left, right) => {
+    if (left === right) return 0;
+    if (left === null || left === undefined) return 1;
+    if (right === null || right === undefined) return -1;
+    return forward(left, right);
+  });
+});
+COMPARATOR_STATIC.set('comparing(Ljava/util/function/Function;Ljava/util/Comparator;)Ljava/util/Comparator;', (_self, [keyFunction, comparator], vm) => {
+  const forward = comparatorFor(comparator, vm);
+  return makeComparator(vm, (left, right) => compareWithSortKey(left, right, keyFunction, forward, vm));
+});
+COMPARATOR_STATIC.set('comparing(Ljava/util/function/Function;)Ljava/util/Comparator;', (_self, [keyFunction], vm) =>
+  makeComparator(vm, (left, right) => compareWithSortKey(left, right, keyFunction, defaultArrayCompare, vm)));
+COMPARATOR_STATIC.set('comparingInt(Ljava/util/function/ToIntFunction;)Ljava/util/Comparator;', (_self, [keyFunction], vm) =>
+  makeComparator(vm, (left, right) => {
+    if (left === right) return 0;
+    const a = toInt(vm.invokeInterface(keyFunction, 'applyAsInt', '(Ljava/lang/Object;)I', [left]));
+    const b = toInt(vm.invokeInterface(keyFunction, 'applyAsInt', '(Ljava/lang/Object;)I', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }));
+COMPARATOR_STATIC.set('comparingLong(Ljava/util/function/ToLongFunction;)Ljava/util/Comparator;', (_self, [keyFunction], vm) =>
+  makeComparator(vm, (left, right) => {
+    if (left === right) return 0;
+    const a = toLong(vm.invokeInterface(keyFunction, 'applyAsLong', '(Ljava/lang/Object;)J', [left]));
+    const b = toLong(vm.invokeInterface(keyFunction, 'applyAsLong', '(Ljava/lang/Object;)J', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }));
+COMPARATOR_STATIC.set('comparingDouble(Ljava/util/function/ToDoubleFunction;)Ljava/util/Comparator;', (_self, [keyFunction], vm) =>
+  makeComparator(vm, (left, right) => {
+    if (left === right) return 0;
+    const a = Number(vm.invokeInterface(keyFunction, 'applyAsDouble', '(Ljava/lang/Object;)D', [left]));
+    const b = Number(vm.invokeInterface(keyFunction, 'applyAsDouble', '(Ljava/lang/Object;)D', [right]));
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }));
+
+function setPeerOf(self) {
+  const peer = self?.$peer ?? self;
+  if (!Array.isArray(peer.setItems)) peer.setItems = [];
+  return peer;
+}
+
+function immutableSetOf(values, vm) {
+  const peer = { setItems: [], immutable: true };
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      vm.throwException('Ljava/lang/NullPointerException;', 'null element in Set.of');
+    }
+    if (findSetIndex(peer, value, vm) < 0) peer.setItems.push(value);
+  }
+  const object = vm.allocateRawObject('Ljava/util/Set;');
+  object.$peer = peer;
+  return object;
+}
+
+const SET_METHODS = JAVA_CORE_CLASSES['Ljava/util/Set;'].methods;
+const SET_STATIC = JAVA_CORE_CLASSES['Ljava/util/Set;'].staticMethods;
+SET_METHODS.set('add(Ljava/lang/Object;)Z', (self, [value], vm) => {
+  const peer = setPeerOf(self);
+  if (peer.immutable) vm.throwException('Ljava/lang/UnsupportedOperationException;', 'immutable set');
+  if (findSetIndex(peer, value, vm) >= 0) return false;
+  peer.setItems.push(value);
+  return true;
+});
+SET_METHODS.set('containsAll(Ljava/util/Collection;)Z', (self, [other], vm) => {
+  const peer = setPeerOf(self);
+  for (const item of collectionItems(other)) {
+    if (findSetIndex(peer, item, vm) < 0) return false;
+  }
+  return true;
+});
+SET_METHODS.set('retainAll(Ljava/util/Collection;)Z', (self, [other], vm) => {
+  const peer = setPeerOf(self);
+  if (peer.immutable) vm.throwException('Ljava/lang/UnsupportedOperationException;', 'immutable set');
+  const keep = collectionItems(other);
+  const before = peer.setItems.length;
+  peer.setItems = peer.setItems.filter((item) => {
+    const present = keep.some((candidate) => valuesEqual(item, candidate, vm));
+    return present;
+  });
+  return peer.setItems.length !== before;
+});
+SET_METHODS.set('spliterator()Ljava/util/Spliterator;', (self, _args, vm) =>
+  makeSpliterator(vm, setPeerOf(self).setItems));
+SET_STATIC.set('of()Ljava/util/Set;', (_self, _args, vm) => immutableSetOf([], vm));
+for (let count = 1; count <= 10; count += 1) {
+  const params = 'Ljava/lang/Object;'.repeat(count);
+  SET_STATIC.set(`of(${params})Ljava/util/Set;`, (_self, args, vm) => immutableSetOf(args, vm));
+}
+SET_STATIC.set('of([Ljava/lang/Object;)Ljava/util/Set;', (_self, [values], vm) =>
+  immutableSetOf(values?.$data || [], vm));
+SET_STATIC.set('copyOf(Ljava/util/Collection;)Ljava/util/Set;', (_self, [collection], vm) =>
+  immutableSetOf(collectionItems(collection), vm));
+
+function hashMapSlot(self, key, vm) {
+  return findValueSlot(self, key, vm) ?? mapKey(key, vm);
+}
+
+function hashMapRemember(self, slot, key) {
+  if (!self.rawKeys) self.rawKeys = new Map();
+  self.rawKeys.set(slot, key);
+}
+
+function hashMapForget(self, slot) {
+  self.map.delete(slot);
+  self.rawKeys?.delete(slot);
+}
+
+const HASH_MAP_METHODS = {
+  'remove(Ljava/lang/Object;Ljava/lang/Object;)Z': (self, [key, value], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    if (!self.map.has(slot) || !valuesEqual(self.map.get(slot), value, vm)) return false;
+    hashMapForget(self, slot);
+    return true;
+  },
+  'replace(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    if (!self.map.has(slot)) return null;
+    const previous = self.map.get(slot);
+    self.map.set(slot, value);
+    hashMapRemember(self, slot, key);
+    return previous ?? null;
+  },
+  'replace(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Z': (self, [key, oldValue, newValue], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    if (!self.map.has(slot) || !valuesEqual(self.map.get(slot), oldValue, vm)) return false;
+    self.map.set(slot, newValue);
+    hashMapRemember(self, slot, key);
+    return true;
+  },
+  'computeIfAbsent(Ljava/lang/Object;Ljava/util/function/Function;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    const current = self.map.get(slot);
+    if (current !== null && current !== undefined) return current;
+    const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;)Ljava/lang/Object;', [key]);
+    if (computed === null || computed === undefined) return null;
+    self.map.set(slot, computed);
+    hashMapRemember(self, slot, key);
+    return computed;
+  },
+  'computeIfPresent(Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    if (!self.map.has(slot) || self.map.get(slot) === null) return null;
+    const current = self.map.get(slot);
+    const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, current]);
+    if (computed === null || computed === undefined) {
+      hashMapForget(self, slot);
+      return null;
+    }
+    self.map.set(slot, computed);
+    hashMapRemember(self, slot, key);
+    return computed;
+  },
+  'compute(Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, fn], vm) => {
+    const slot = hashMapSlot(self, key, vm);
+    const current = self.map.has(slot) ? self.map.get(slot) : null;
+    const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, current]);
+    if (computed === null || computed === undefined) {
+      hashMapForget(self, slot);
+      return null;
+    }
+    self.map.set(slot, computed);
+    hashMapRemember(self, slot, key);
+    return computed;
+  },
+  'merge(Ljava/lang/Object;Ljava/lang/Object;Ljava/util/function/BiFunction;)Ljava/lang/Object;': (self, [key, value, fn], vm) => {
+    if (value === null || value === undefined) {
+      vm.throwException('Ljava/lang/NullPointerException;', 'merge value');
+    }
+    const slot = hashMapSlot(self, key, vm);
+    const current = self.map.has(slot) ? self.map.get(slot) : null;
+    if (current === null || current === undefined) {
+      self.map.set(slot, value);
+      hashMapRemember(self, slot, key);
+      return value;
+    }
+    const computed = vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [current, value]);
+    if (computed === null || computed === undefined) {
+      hashMapForget(self, slot);
+      return null;
+    }
+    self.map.set(slot, computed);
+    hashMapRemember(self, slot, key);
+    return computed;
+  },
+  'forEach(Ljava/util/function/BiConsumer;)V': (self, [consumer], vm) => {
+    for (const [slot, value] of [...self.map]) {
+      const key = self.rawKeys?.has(slot) ? self.rawKeys.get(slot) : slot;
+      vm.invokeInterface(consumer, 'accept', '(Ljava/lang/Object;Ljava/lang/Object;)V', [key, value]);
+    }
+  },
+  'replaceAll(Ljava/util/function/BiFunction;)V': (self, [fn], vm) => {
+    for (const [slot, value] of [...self.map]) {
+      const key = self.rawKeys?.has(slot) ? self.rawKeys.get(slot) : slot;
+      self.map.set(slot, vm.invokeInterface(fn, 'apply', '(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;', [key, value]));
+    }
+  },
+};
+for (const descriptor of ['Ljava/util/HashMap;', 'Ljava/util/LinkedHashMap;', 'Ljava/util/WeakHashMap;']) {
+  const definition = JAVA_CORE_CLASSES[descriptor];
+  if (!definition) continue;
+  for (const [key, fn] of Object.entries(HASH_MAP_METHODS)) definition.methods.set(key, fn);
+}
+
+const RANDOM_METHODS = JAVA_CORE_CLASSES['Ljava/util/Random;'].methods;
+RANDOM_METHODS.set('nextBytes([B)V', (self, [buffer]) => {
+  const bytes = buffer?.$data || buffer || [];
+  for (let i = 0; i < bytes.length; i++) {
+    self.seed = (Math.imul(self.seed, 0x5deece66d) + 0xb) | 0;
+    bytes[i] = self.seed & 0xff;
+  }
+});
+
+/* ===== Reader / TimeZone / Package / System 真实语义 ===== */
+
+const READER_METHODS = JAVA_CORE_CLASSES['Ljava/io/Reader;'].methods;
+
+function readerState(self) {
+  if (typeof self.text !== 'string') self.text = readerText(self.source ?? self);
+  if (typeof self.cursor !== 'number') self.cursor = 0;
+  return self;
+}
+
+function charBufferSlot(buffer) {
+  if (!buffer) return null;
+  const peer = buffer.$peer ?? buffer;
+  if (Array.isArray(peer.chars)) {
+    peer.position = toInt(peer.position ?? 0);
+    if (peer.limit === undefined) peer.limit = peer.chars.length;
+    return { data: peer.chars, peer };
+  }
+  if (Array.isArray(peer.data)) {
+    peer.position = toInt(peer.position ?? 0);
+    if (peer.limit === undefined) peer.limit = peer.data.length;
+    return { data: peer.data, peer };
+  }
+  if (Array.isArray(buffer.$data)) {
+    return { data: buffer.$data, peer: null };
+  }
+  return null;
+}
+
+READER_METHODS.set('<init>(Ljava/lang/Object;)V', (self, [source]) => {
+  self.text = readerText(source);
+  self.cursor = 0;
+  self.closed = false;
+  self.markCursor = 0;
+});
+READER_METHODS.set('read()I', (self) => {
+  readerState(self);
+  if (self.closed || self.cursor >= self.text.length) return -1;
+  return self.text.charCodeAt(self.cursor++);
+});
+READER_METHODS.set('read([C)I', (self, [buffer]) => readCharsInto(readerState(self), buffer, 0, 0));
+READER_METHODS.set('read([CII)I', (self, [buffer, offset, length]) =>
+  readCharsInto(readerState(self), buffer, offset, length));
+READER_METHODS.set('read(Ljava/nio/CharBuffer;)I', (self, [buffer]) => {
+  readerState(self);
+  if (self.closed) return -1;
+  const slot = charBufferSlot(buffer);
+  if (!slot) return -1;
+  const limit = Math.min(toInt(slot.peer?.limit ?? slot.data.length), slot.data.length);
+  let position = toInt(slot.peer?.position ?? 0);
+  if (position >= limit || self.cursor >= self.text.length) return position >= limit ? 0 : -1;
+  let count = 0;
+  while (position < limit && self.cursor < self.text.length) {
+    slot.data[position++] = self.text.charCodeAt(self.cursor++);
+    count += 1;
+  }
+  if (slot.peer) slot.peer.position = position;
+  return count;
+});
+READER_METHODS.set('skip(J)J', (self, [count]) => {
+  readerState(self);
+  if (self.closed) return 0;
+  const step = Math.max(0, Number(count) || 0);
+  const before = self.cursor;
+  self.cursor = Math.min(self.text.length, self.cursor + step);
+  return self.cursor - before;
+});
+READER_METHODS.set('ready()Z', (self) => {
+  readerState(self);
+  return !self.closed && self.cursor < self.text.length;
+});
+READER_METHODS.set('markSupported()Z', (self) => (typeof readerState(self).text === 'string' ? 1 : 0));
+READER_METHODS.set('mark(I)V', (self) => {
+  readerState(self);
+  self.markCursor = self.cursor;
+});
+READER_METHODS.set('reset()V', (self, _args, vm) => {
+  readerState(self);
+  if (self.markCursor === undefined || self.markCursor === null) {
+    vm.throwException('Ljava/io/IOException;', 'Stream not marked');
+  }
+  self.cursor = self.markCursor;
+});
+READER_METHODS.set('close()V', (self) => {
+  self.closed = true;
+  const source = self.source;
+  if (source && typeof source === 'object') source.closed = true;
+});
+
+const TIME_ZONE_METHODS = JAVA_CORE_CLASSES['Ljava/util/TimeZone;'].methods;
+const TIME_ZONE_STATIC = JAVA_CORE_CLASSES['Ljava/util/TimeZone;'].staticMethods;
+
+function timeZoneOffsetMs(id, epochMs) {
+  const name = String(id ?? 'UTC');
+  const fixed = /^(?:GMT|UTC)([+-])(\d{1,2})(?::?(\d{2}))?$/.exec(name);
+  if (fixed) {
+    const sign = fixed[1] === '-' ? -1 : 1;
+    return sign * ((parseInt(fixed[2], 10) * 60 + parseInt(fixed[3] || '0', 10)) * 60000);
+  }
+  if (!/^[A-Za-z]/.test(name) || typeof Intl === 'undefined' || !Intl.DateTimeFormat) {
+    if (name === 'UTC' || name === 'GMT') return 0;
+    return 0;
+  }
+  try {
+    const format = new Intl.DateTimeFormat('en-US', {
+      timeZone: name,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const parts = {};
+    for (const part of format.formatToParts(new Date(Number(epochMs) || 0))) parts[part.type] = part.value;
+    const hour = parts.hour === '24' ? 0 : Number(parts.hour);
+    const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), hour,
+      Number(parts.minute), Number(parts.second));
+    return asUtc - (Number(epochMs) || 0);
+  } catch (_error) {
+    return 0;
+  }
+}
+
+function timeZoneRawOffset(id) {
+  return timeZoneOffsetMs(id, Date.UTC(1970, 0, 1, 12, 0, 0));
+}
+
+function timeZoneObservesDaylight(id) {
+  if (/^(?:GMT|UTC)(?:[+-]|$)/.test(String(id ?? '')) || String(id) === 'UTC') return false;
+  const winter = timeZoneOffsetMs(id, Date.UTC(2020, 0, 15));
+  const summer = timeZoneOffsetMs(id, Date.UTC(2020, 6, 15));
+  return winter !== summer;
+}
+
+TIME_ZONE_METHODS.set('getOffset(J)I', (self, [time]) => {
+  const id = self.id || 'UTC';
+  return timeZoneOffsetMs(id, Number(time)) | 0;
+});
+TIME_ZONE_METHODS.set('getRawOffset()I', (self) => {
+  if (typeof self.rawOffset === 'number') return self.rawOffset | 0;
+  return timeZoneRawOffset(self.id || 'UTC') | 0;
+});
+TIME_ZONE_METHODS.set('setRawOffset(I)V', (self, [offset]) => {
+  self.rawOffset = toInt(offset);
+});
+TIME_ZONE_METHODS.set('getOffset(IIIIII)I', (self, [era, year, month, day, dayOfWeek, milliseconds]) => {
+  void era;
+  void dayOfWeek;
+  const local = Date.UTC(toInt(year), toInt(month), toInt(day)) + toInt(milliseconds);
+  const id = self.id || 'UTC';
+  const first = timeZoneOffsetMs(id, local);
+  return timeZoneOffsetMs(id, local - first) | 0;
+});
+TIME_ZONE_METHODS.set('inDaylightTime(Ljava/util/Date;)Z', (self, [date]) => {
+  const id = self.id || 'UTC';
+  const value = Number(date?.$peer?.time ?? date?.time ?? 0);
+  return (timeZoneOffsetMs(id, value) !== timeZoneRawOffset(id) ? 1 : 0);
+});
+TIME_ZONE_METHODS.set('useDaylightTime()Z', (self) => (timeZoneObservesDaylight(self.id || 'UTC') ? 1 : 0));
+TIME_ZONE_METHODS.set('observesDaylightTime()Z', (self) => (timeZoneObservesDaylight(self.id || 'UTC') ? 1 : 0));
+TIME_ZONE_METHODS.set('getDSTSavings()I', (self) =>
+  (timeZoneObservesDaylight(self.id || 'UTC') ? 3600000 : 0));
+TIME_ZONE_METHODS.set('getDisplayName(ZILjava/util/Locale;)Ljava/lang/String;', (self, [daylight, style]) => {
+  const id = self.id || 'UTC';
+  const wantsLong = toInt(style) === 1;
+  try {
+    const format = new Intl.DateTimeFormat('en-US', {
+      timeZone: id,
+      timeZoneName: wantsLong ? 'long' : 'short',
+    });
+    const part = format.formatToParts(new Date()).find((item) => item.type === 'timeZoneName');
+    void daylight;
+    if (part?.value) return part.value;
+  } catch (_error) {
+    // 非 IANA 时区（如 GMT+8）直接回退到 ID。
+  }
+  return id;
+});
+TIME_ZONE_METHODS.set('toZoneId()Ljava/time/ZoneId;', (self, _args, vm) => makeZoneId(vm, self.id || 'UTC'));
+TIME_ZONE_METHODS.set('hasSameRules(Ljava/util/TimeZone;)Z', (self, [other]) => {
+  if (!other) return 0;
+  const offsetOf = (zone) => (typeof zone?.rawOffset === 'number' ? zone.rawOffset : timeZoneRawOffset(zone?.id || 'UTC'));
+  const sameOffset = offsetOf(self) === offsetOf(other);
+  const sameDst = timeZoneObservesDaylight(self.id || 'UTC') === timeZoneObservesDaylight(other.id || 'UTC');
+  return sameOffset && sameDst ? 1 : 0;
+});
+
+TIME_ZONE_STATIC.set('getDefault()Ljava/util/TimeZone;', (_self, _args, vm) => {
+  if (!vm.__defaultTimeZone) {
+    let id = 'UTC';
+    try {
+      id = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (_error) {
+      id = 'UTC';
+    }
+    vm.__defaultTimeZone = TIME_ZONE_STATIC.get('getTimeZone(Ljava/lang/String;)Ljava/util/TimeZone;')(null, [id], vm);
+  }
+  return vm.__defaultTimeZone;
+});
+TIME_ZONE_STATIC.set('setDefault(Ljava/util/TimeZone;)V', (_self, [zone], vm) => {
+  vm.__defaultTimeZone = zone ?? null;
+});
+TIME_ZONE_STATIC.set('getTimeZone(Ljava/lang/String;)Ljava/util/TimeZone;', (_self, [id], vm) => {
+  const name = jsString(id) || 'UTC';
+  const zone = vm.instantiate('Ljava/util/TimeZone;', []);
+  const peer = vm.registry.getPeer(zone, 'Ljava/util/TimeZone;') || zone.$peer;
+  if (peer) {
+    peer.id = name;
+    peer.rawOffset = timeZoneRawOffset(name);
+  }
+  return zone;
+});
+TIME_ZONE_STATIC.set('getTimeZone(Ljava/time/ZoneId;)Ljava/util/TimeZone;', (_self, [zoneId], vm) => {
+  const id = zoneId?.$peer?.id ?? zoneId?.id ?? jsString(zoneId) ?? 'UTC';
+  return TIME_ZONE_STATIC.get('getTimeZone(Ljava/lang/String;)Ljava/util/TimeZone;')(null, [id], vm);
+});
+TIME_ZONE_STATIC.set('getAvailableIDs()[Ljava/lang/String;', (_self, _args, vm) => {
+  let ids = ['UTC'];
+  try {
+    if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+      ids = ['UTC', ...Intl.supportedValuesOf('timeZone')];
+    }
+  } catch (_error) {
+    ids = ['UTC'];
+  }
+  const array = vm.newArray('[Ljava/lang/String;', ids.length);
+  ids.forEach((value, index) => {
+    array.$data[index] = value;
+  });
+  return array;
+});
+TIME_ZONE_STATIC.set('getAvailableIDs(I)[Ljava/lang/String;', (_self, [offset], vm) => {
+  const target = toInt(offset);
+  const all = TIME_ZONE_STATIC.get('getAvailableIDs()[Ljava/lang/String;')(null, [], vm);
+  const ids = all.$data.filter((id) => timeZoneRawOffset(id) === target);
+  const array = vm.newArray('[Ljava/lang/String;', ids.length);
+  ids.forEach((value, index) => {
+    array.$data[index] = value;
+  });
+  return array;
+});
+
+function makeZoneId(vm, id) {
+  const zone = vm.allocateRawObject('Ljava/time/ZoneId;');
+  zone.$peer = { id: String(id || 'UTC') };
+  return zone;
+}
+
+JAVA_CORE_CLASSES['Ljava/time/ZoneId;'] = nativeDef('Ljava/time/ZoneId;', {
+  super: 'Ljava/lang/Object;',
+  methods: {
+    'getId()Ljava/lang/String;': (self) => self.id || 'UTC',
+    'toString()Ljava/lang/String;': (self) => self.id || 'UTC',
+    'equals(Ljava/lang/Object;)Z': (self, [other]) => (self.id || 'UTC') === (other?.$peer?.id ?? other?.id) ? 1 : 0,
+    'hashCode()I': (self) => hashCode(self.id || 'UTC'),
+    'normalized()Ljava/time/ZoneId;': (self) => self.$object ?? self,
+    'getDisplayName(Ljava/time/format/TextStyle;Ljava/util/Locale;)Ljava/lang/String;': (self) => self.id || 'UTC',
+  },
+  staticMethods: {
+    'systemDefault()Ljava/time/ZoneId;': (_self, _args, vm) => {
+      let id = 'UTC';
+      try {
+        id = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch (_error) {
+        id = 'UTC';
+      }
+      return makeZoneId(vm, id);
+    },
+    'of(Ljava/lang/String;)Ljava/time/ZoneId;': (_self, [id], vm) => makeZoneId(vm, jsString(id)),
+    'getAvailableZoneIds()Ljava/util/Set;': (_self, _args, vm) => {
+      let ids = ['UTC'];
+      try {
+        if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+          ids = ['UTC', ...Intl.supportedValuesOf('timeZone')];
+        }
+      } catch (_error) {
+        ids = ['UTC'];
+      }
+      return makeSet(vm, ids);
+    },
+  },
+});
+
+const PACKAGE_METHODS = JAVA_CORE_CLASSES['Ljava/lang/Package;'].methods;
+const PACKAGE_STATIC = JAVA_CORE_CLASSES['Ljava/lang/Package;'].staticMethods;
+
+function packageMeta(self) {
+  if (!self.$peer) self.$peer = {};
+  return self.$peer;
+}
+
+PACKAGE_METHODS.set('getName()Ljava/lang/String;', (self) => self.$name ?? self.name ?? self.$peer?.name ?? '');
+PACKAGE_METHODS.set('getSpecificationTitle()Ljava/lang/String;', (self) => packageMeta(self).specificationTitle ?? null);
+PACKAGE_METHODS.set('getSpecificationVersion()Ljava/lang/String;', (self) => packageMeta(self).specificationVersion ?? null);
+PACKAGE_METHODS.set('getSpecificationVendor()Ljava/lang/String;', (self) => packageMeta(self).specificationVendor ?? null);
+PACKAGE_METHODS.set('getImplementationTitle()Ljava/lang/String;', (self) => packageMeta(self).implementationTitle ?? null);
+PACKAGE_METHODS.set('getImplementationVersion()Ljava/lang/String;', (self) => packageMeta(self).implementationVersion ?? null);
+PACKAGE_METHODS.set('getImplementationVendor()Ljava/lang/String;', (self) => packageMeta(self).implementationVendor ?? null);
+PACKAGE_METHODS.set('isSealed()Z', (self) => (packageMeta(self).sealed ? 1 : 0));
+PACKAGE_METHODS.set('isSealed(Ljava/net/URL;)Z', (self) => (packageMeta(self).sealed ? 1 : 0));
+PACKAGE_METHODS.set('isCompatibleWith(Ljava/lang/String;)Z', (self, [version]) => {
+  const spec = packageMeta(self).specificationVersion;
+  if (!spec) return 0;
+  const parse = (text) => String(text ?? '').split('.').map((part) => parseInt(part, 10) || 0);
+  const required = parse(version);
+  const actual = parse(spec);
+  const length = Math.max(required.length, actual.length);
+  for (let i = 0; i < length; i++) {
+    const left = required[i] ?? 0;
+    const right = actual[i] ?? 0;
+    if (left < right) return 1;
+    if (left > right) return 0;
+  }
+  return 1;
+});
+for (const [name, type] of [
+  ['getAnnotation', 'Ljava/lang/annotation/Annotation;'],
+  ['getDeclaredAnnotation', 'Ljava/lang/annotation/Annotation;'],
+]) {
+  PACKAGE_METHODS.set(`${name}(Ljava/lang/Class;)${type}`, () => null);
+}
+for (const [name, type] of [
+  ['getAnnotationsByType', '[Ljava/lang/annotation/Annotation;'],
+  ['getAnnotations', '[Ljava/lang/annotation/Annotation;'],
+  ['getDeclaredAnnotationsByType', '[Ljava/lang/annotation/Annotation;'],
+  ['getDeclaredAnnotations', '[Ljava/lang/annotation/Annotation;'],
+]) {
+  PACKAGE_METHODS.set(`${name}(Ljava/lang/Class;)${type}`, (_self, _args, vm) => vm.newArray(type, 0));
+  PACKAGE_METHODS.set(`${name}()${type}`, (_self, _args, vm) => vm.newArray(type, 0));
+}
+PACKAGE_METHODS.set('isAnnotationPresent(Ljava/lang/Class;)Z', () => 0);
+
+PACKAGE_STATIC.set('getPackage(Ljava/lang/String;)Ljava/lang/Package;', (_self, [name], vm) => {
+  const key = jsString(name) || '';
+  if (!vm.__packages) vm.__packages = new Map();
+  if (vm.__packages.has(key)) return vm.__packages.get(key);
+  const pkg = vm.allocateRawObject('Ljava/lang/Package;');
+  pkg.$name = key;
+  pkg.$peer = { name: key, specificationTitle: null, implementationTitle: null, sealed: false };
+  vm.__packages.set(key, pkg);
+  return pkg;
+});
+PACKAGE_STATIC.set('getPackages()[Ljava/lang/Package;', (_self, _args, vm) => {
+  const packages = [...(vm.__packages?.values() ?? [])];
+  const array = vm.newArray('[Ljava/lang/Package;', packages.length);
+  packages.forEach((pkg, index) => {
+    array.$data[index] = pkg;
+  });
+  return array;
+});
+
+JAVA_CORE_CLASSES['Ljava/util/Properties;'] = nativeDef('Ljava/util/Properties;', {
+  super: 'Ljava/lang/Object;',
+  interfaces: ['Ljava/util/Map;'],
+  ctor: peerClass(function () {
+    this.map = new Map();
+    this.defaults = null;
+  }, { map: new Map(), defaults: null }),
+  methods: {
+    '<init>()V': (self) => {
+      self.map = new Map();
+    },
+    '<init>(Ljava/util/Properties;)V': (self, [defaults]) => {
+      self.map = new Map();
+      self.defaults = defaults ?? null;
+    },
+    'setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;': (self, [key, value]) => {
+      const name = jsString(key);
+      const previous = self.map.get(name) ?? null;
+      self.map.set(name, jsString(value));
+      return previous;
+    },
+    'getProperty(Ljava/lang/String;)Ljava/lang/String;': (self, [key], vm) => {
+      const name = jsString(key);
+      if (self.map.has(name)) return self.map.get(name);
+      if (self.defaults) {
+        const inherited = vm.invokeByName('getProperty', '(Ljava/lang/String;)Ljava/lang/String;', self.defaults, [key]);
+        if (inherited !== null && inherited !== undefined) return inherited;
+      }
+      return null;
+    },
+    'getProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;': (self, [key, fallback], vm) => {
+      const name = jsString(key);
+      if (self.map.has(name)) return self.map.get(name);
+      if (self.defaults) {
+        const inherited = vm.invokeByName('getProperty', '(Ljava/lang/String;)Ljava/lang/String;', self.defaults, [key]);
+        if (inherited !== null && inherited !== undefined) return inherited;
+      }
+      return fallback ?? null;
+    },
+    'get(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => self.map.get(jsString(key)) ?? null,
+    'put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;': (self, [key, value]) => {
+      const name = jsString(key);
+      const previous = self.map.get(name) ?? null;
+      self.map.set(name, value);
+      return previous;
+    },
+    'remove(Ljava/lang/Object;)Ljava/lang/Object;': (self, [key]) => {
+      const name = jsString(key);
+      const previous = self.map.get(name) ?? null;
+      self.map.delete(name);
+      return previous;
+    },
+    'containsKey(Ljava/lang/Object;)Z': (self, [key]) => (self.map.has(jsString(key)) ? 1 : 0),
+    'contains(Ljava/lang/Object;)Z': (self, [value]) => ([...self.map.values()].some((item) => valuesEqual(item, value, undefined)) ? 1 : 0),
+    'size()I': (self) => self.map.size,
+    'isEmpty()Z': (self) => (self.map.size === 0 ? 1 : 0),
+    'clear()V': (self) => {
+      self.map.clear();
+    },
+    'keySet()Ljava/util/Set;': (self, _args, vm) => makeSet(vm, [...self.map.keys()]),
+    'stringPropertyNames()Ljava/util/Set;': (self, _args, vm) => makeSet(vm, [...self.map.keys()]),
+    'entrySet()Ljava/util/Set;': (self, _args, vm) => {
+      const entries = [...self.map.entries()].map(([key, value]) => {
+        const entry = vm.allocateRawObject('Ljava/util/Map$Entry;');
+        entry.$peer = { key, value, map: self.map };
+        return entry;
+      });
+      return makeSet(vm, entries);
+    },
+    'propertyNames()Ljava/util/Enumeration;': (self, _args, vm) => makeEnumeration(vm, [...self.map.keys()]),
+    'toString()Ljava/lang/String;': (self) => {
+      const pairs = [...self.map.entries()].map(([key, value]) => `${key}=${jsString(value)}`);
+      return `{${pairs.join(', ')}}`;
+    },
+    'load(Ljava/io/InputStream;)V': (self, [stream]) => {
+      const bytes = stream?.$peer?.data ?? stream?.data ?? stream?.$data ?? null;
+      if (!bytes) return;
+      const text = utf8Decode(bytes);
+      for (const line of text.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) continue;
+        const index = trimmed.search(/[=:]/);
+        if (index < 0) self.map.set(trimmed, '');
+        else self.map.set(trimmed.slice(0, index).trim(), trimmed.slice(index + 1).trim());
+      }
+    },
+    'store(Ljava/io/OutputStream;Ljava/lang/String;)V': (self, [stream, comment], vm) => {
+      let text = comment === null || comment === undefined ? '' : `#${jsString(comment)}\n`;
+      for (const [key, value] of self.map) text += `${key}=${jsString(value)}\n`;
+      const bytes = utf8Encode(text);
+      const peer = stream?.$peer ?? stream;
+      if (peer && 'data' in peer) peer.data = bytes;
+      else if (peer && typeof peer.write === 'function') peer.write(bytes);
+      else if (stream?.$object) vm.invokeByName('write', '([B)V', stream, [vm.newArray('[B', bytes.length, [...bytes])]);
+    },
+  },
+});
+
+const SYSTEM_STATIC = JAVA_CORE_CLASSES['Ljava/lang/System;'].staticMethods;
+
+function systemPropertyDefaults() {
+  return {
+    'java.version': '17',
+    'java.vendor': 'apk.js',
+    'java.vm.name': 'apk.js VM',
+    'os.name': 'Linux',
+    'os.arch': 'aarch64',
+    'os.version': '5.15',
+    'file.separator': '/',
+    'path.separator': ':',
+    'line.separator': '\n',
+    'user.dir': '/',
+    'user.home': '/',
+    'user.name': 'android',
+    'java.io.tmpdir': '/tmp',
+    'http.agent': 'apk.js',
+  };
+}
+
+function systemProperties(vm) {
+  if (!vm.__systemProperties) {
+    vm.__systemProperties = new Map(Object.entries(systemPropertyDefaults()));
+  }
+  return vm.__systemProperties;
+}
+
+function systemEnvironmentMap() {
+  const map = new Map();
+  if (typeof navigator !== 'undefined') {
+    if (navigator.language) map.set('LANG', String(navigator.language));
+    if (navigator.userAgent) map.set('USER_AGENT', String(navigator.userAgent));
+    try {
+      map.set('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    } catch (_error) {
+      map.set('TZ', 'UTC');
+    }
+  }
+  return map;
+}
+
+SYSTEM_STATIC.set('setIn(Ljava/io/InputStream;)V', (_self, [stream], vm) => {
+  vm.__systemIn = stream ?? null;
+  const definition = vm.registry.resolve('Ljava/lang/System;');
+  definition?.staticValues?.set('in:Ljava/io/InputStream;', stream ?? null);
+});
+SYSTEM_STATIC.set('setOut(Ljava/io/PrintStream;)V', (_self, [stream], vm) => {
+  vm.__systemOut = stream ?? null;
+  const definition = vm.registry.resolve('Ljava/lang/System;');
+  definition?.staticValues?.set('out:Ljava/io/PrintStream;', stream ?? null);
+});
+SYSTEM_STATIC.set('setErr(Ljava/io/PrintStream;)V', (_self, [stream], vm) => {
+  vm.__systemErr = stream ?? null;
+  const definition = vm.registry.resolve('Ljava/lang/System;');
+  definition?.staticValues?.set('err:Ljava/io/PrintStream;', stream ?? null);
+});
+SYSTEM_STATIC.set('console()Ljava/io/Console;', () => null);
+SYSTEM_STATIC.set('inheritedChannel()Ljava/nio/channels/Channel;', () => null);
+SYSTEM_STATIC.set('setSecurityManager(Ljava/lang/SecurityManager;)V', (_self, [manager], vm) => {
+  vm.__securityManager = manager ?? null;
+});
+SYSTEM_STATIC.set('getSecurityManager()Ljava/lang/SecurityManager;', (_self, _args, vm) => vm.__securityManager ?? null);
+SYSTEM_STATIC.set('getProperties()Ljava/util/Properties;', (_self, _args, vm) => {
+  const properties = vm.allocateRawObject('Ljava/util/Properties;');
+  properties.$peer = { map: new Map(systemProperties(vm)), defaults: null };
+  return properties;
+});
+SYSTEM_STATIC.set('setProperties(Ljava/util/Properties;)V', (_self, [properties], vm) => {
+  const source = properties?.$peer?.map ?? properties?.map;
+  const target = systemProperties(vm);
+  if (source) {
+    target.clear();
+    for (const [key, value] of source) target.set(String(key), value);
+  }
+});
+SYSTEM_STATIC.set('getProperty(Ljava/lang/String;)Ljava/lang/String;', (_self, [key], vm) => {
+  const name = jsString(key);
+  const value = systemProperties(vm).get(name);
+  return value === undefined ? null : String(value);
+});
+SYSTEM_STATIC.set('getProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;', (_self, [key, fallback], vm) => {
+  const name = jsString(key);
+  const value = systemProperties(vm).get(name);
+  return value === undefined ? (fallback ?? null) : String(value);
+});
+SYSTEM_STATIC.set('setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;', (_self, [key, value], vm) => {
+  const name = jsString(key);
+  const properties = systemProperties(vm);
+  const previous = properties.has(name) ? properties.get(name) : null;
+  properties.set(name, jsString(value));
+  return previous;
+});
+SYSTEM_STATIC.set('clearProperty(Ljava/lang/String;)Ljava/lang/String;', (_self, [key], vm) => {
+  const name = jsString(key);
+  const properties = systemProperties(vm);
+  const previous = properties.has(name) ? properties.get(name) : null;
+  properties.delete(name);
+  return previous;
+});
+SYSTEM_STATIC.set('getenv(Ljava/lang/String;)Ljava/lang/String;', (_self, [key], vm) => {
+  if (!vm.__environ) vm.__environ = systemEnvironmentMap();
+  const name = jsString(key);
+  const value = vm.__environ.get(name);
+  return value === undefined ? null : String(value);
+});
+SYSTEM_STATIC.set('getenv()Ljava/util/Map;', (_self, _args, vm) => {
+  if (!vm.__environ) vm.__environ = systemEnvironmentMap();
+  const map = makeMap(vm);
+  for (const [key, value] of vm.__environ) map.$peer.map.set(key, value);
+  return map;
+});
+SYSTEM_STATIC.set('runFinalization()V', () => undefined);
+SYSTEM_STATIC.set('runFinalizersOnExit(Z)V', (_self, [enabled], vm) => {
+  vm.__runFinalizersOnExit = !!enabled;
+});
+SYSTEM_STATIC.set('load(Ljava/lang/String;)V', (_self, [path], vm) => {
+  vm.throwException('Ljava/lang/UnsatisfiedLinkError;', `dlopen failed: library "${jsString(path)}" not found`);
+});
+SYSTEM_STATIC.set('loadLibrary(Ljava/lang/String;)V', (_self, [name], vm) => {
+  vm.throwException('Ljava/lang/UnsatisfiedLinkError;', `dlopen failed: library "${systemLibraryName(jsString(name))}" not found`);
+});
+SYSTEM_STATIC.set('mapLibraryName(Ljava/lang/String;)Ljava/lang/String;', (_self, [name]) =>
+  systemLibraryName(jsString(name)));
+
+function systemLibraryName(name) {
+  const base = String(name ?? '');
+  if (!base) return base;
+  if (/\.so(\.\d+)*$/.test(base)) return base;
+  return `lib${base}.so`;
+}
+
+JAVA_CORE_CLASSES['Ljava/lang/System;'].staticFields.set('in:Ljava/io/InputStream;', { $descriptor: 'Ljava/io/InputStream;' });
+
+/* ===== java.net.URI 真实解析/规范化/解析相对地址 ===== */
+
+function percentDecode(text) {
+  if (text === null || text === undefined) return text;
+  return String(text).replace(/(?:%[0-9A-Fa-f]{2})+/g, (sequence) => {
+    try {
+      return decodeURIComponent(sequence);
+    } catch (_error) {
+      return sequence;
+    }
+  });
+}
+
+function splitUriQuery(text) {
+  const index = text.indexOf('?');
+  if (index < 0) return { path: text, query: null };
+  return { path: text.slice(0, index), query: text.slice(index + 1) };
+}
+
+function parseUriParts(value) {
+  const raw = String(value ?? '');
+  const parts = {
+    raw,
+    scheme: null,
+    ssp: null,
+    authority: null,
+    userInfo: null,
+    host: null,
+    port: -1,
+    path: '',
+    query: null,
+    fragment: null,
+    opaque: false,
+  };
+  let rest = raw;
+  const hash = rest.indexOf('#');
+  if (hash >= 0) {
+    parts.fragment = rest.slice(hash + 1);
+    rest = rest.slice(0, hash);
+  }
+  const schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(rest);
+  if (schemeMatch) {
+    parts.scheme = schemeMatch[1];
+    rest = rest.slice(schemeMatch[0].length);
+  }
+  if (parts.scheme && !rest.startsWith('//')) {
+    parts.opaque = !rest.startsWith('/');
+    if (parts.opaque) {
+      parts.ssp = rest;
+      parts.path = '';
+      return parts;
+    }
+  }
+  if (rest.startsWith('//')) {
+    const end = rest.indexOf('/', 2);
+    const authority = end < 0 ? rest.slice(2) : rest.slice(2, end);
+    const tail = end < 0 ? '' : rest.slice(end);
+    parts.authority = authority;
+    const at = authority.lastIndexOf('@');
+    parts.userInfo = at >= 0 ? authority.slice(0, at) : null;
+    const hostPort = at >= 0 ? authority.slice(at + 1) : authority;
+    if (hostPort.startsWith('[')) {
+      const close = hostPort.indexOf(']');
+      parts.host = close >= 0 ? hostPort.slice(0, close + 1) : hostPort;
+      const after = close >= 0 ? hostPort.slice(close + 1) : '';
+      if (after.startsWith(':') && /^\d+$/.test(after.slice(1))) parts.port = parseInt(after.slice(1), 10);
+    } else {
+      const colon = hostPort.lastIndexOf(':');
+      if (colon > 0 && /^\d*$/.test(hostPort.slice(colon + 1))) {
+        parts.host = hostPort.slice(0, colon);
+        if (hostPort.slice(colon + 1)) parts.port = parseInt(hostPort.slice(colon + 1), 10);
+      } else {
+        parts.host = hostPort;
+      }
+    }
+    const split = splitUriQuery(tail);
+    parts.path = split.path;
+    parts.query = split.query;
+    parts.ssp = `${authority}${tail}`;
+    return parts;
+  }
+  const split = splitUriQuery(rest);
+  parts.path = split.path;
+  parts.query = split.query;
+  parts.ssp = rest;
+  return parts;
+}
+
+function uriPartsOf(value) {
+  const self = value?.$peer ?? value;
+  if (!self.$uriParts) self.$uriParts = parseUriParts(self.text ?? '');
+  return self.$uriParts;
+}
+
+function normalizeUriPath(path) {
+  if (!path) return path;
+  const absolute = path.startsWith('/');
+  const trailing = path.endsWith('/');
+  const segments = [];
+  for (const segment of path.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length && segments[segments.length - 1] !== '..') segments.pop();
+      else if (!absolute) segments.push('..');
+      continue;
+    }
+    segments.push(segment);
+  }
+  let result = `${absolute ? '/' : ''}${segments.join('/')}`;
+  if (trailing && result && !result.endsWith('/')) result += '/';
+  if (absolute && !result) result = '/';
+  return result;
+}
+
+function uriTextFromParts(parts) {
+  let text = parts.scheme ? `${parts.scheme}:` : '';
+  if (parts.opaque) return `${text}${parts.ssp ?? ''}${parts.fragment === null ? '' : `#${parts.fragment}`}`;
+  if (parts.authority !== null && parts.authority !== undefined) text += `//${parts.authority}`;
+  text += parts.path ?? '';
+  if (parts.query !== null && parts.query !== undefined) text += `?${parts.query}`;
+  if (parts.fragment !== null && parts.fragment !== undefined) text += `#${parts.fragment}`;
+  return text;
+}
+
+function makeUri(vm, text) {
+  const object = vm.allocateRawObject('Ljava/net/URI;');
+  object.$peer = { vm, text: String(text ?? ''), $object: object };
+  return object;
+}
+
+function mergeUriPaths(basePath, relativePath) {
+  if (!basePath) return relativePath;
+  const index = basePath.lastIndexOf('/');
+  return `${index < 0 ? '' : basePath.slice(0, index + 1)}${relativePath}`;
+}
+
+function resolveUriParts(base, reference) {
+  const target = {
+    scheme: base.scheme,
+    authority: base.authority,
+    userInfo: base.userInfo,
+    host: base.host,
+    port: base.port,
+    path: '',
+    query: null,
+    fragment: reference.fragment,
+    opaque: false,
+    ssp: null,
+  };
+  if (reference.scheme) {
+    target.scheme = reference.scheme;
+    target.authority = reference.authority;
+    target.path = normalizeUriPath(reference.path);
+    target.query = reference.query;
+  } else if (reference.authority !== null) {
+    target.authority = reference.authority;
+    target.path = normalizeUriPath(reference.path);
+    target.query = reference.query;
+  } else if (!reference.path) {
+    target.path = base.path;
+    target.query = reference.query === null ? base.query : reference.query;
+  } else if (reference.path.startsWith('/')) {
+    target.path = normalizeUriPath(reference.path);
+    target.query = reference.query;
+  } else {
+    target.path = normalizeUriPath(mergeUriPaths(base.path, reference.path));
+    target.query = reference.query;
+  }
+  return target;
+}
+
+function relativizeUriParts(base, target) {
+  if (base.scheme !== target.scheme || base.authority !== target.authority) return null;
+  if (target.opaque || base.opaque) return null;
+  const baseSegments = base.path.split('/');
+  baseSegments.pop();
+  const targetSegments = target.path.split('/');
+  while (baseSegments.length && targetSegments.length && baseSegments[0] === targetSegments[0]) {
+    baseSegments.shift();
+    targetSegments.shift();
+  }
+  const segments = [...baseSegments.map(() => '..'), ...targetSegments];
+  return {
+    scheme: null,
+    authority: null,
+    userInfo: null,
+    host: null,
+    port: -1,
+    path: segments.join('/'),
+    query: target.query,
+    fragment: target.fragment,
+    opaque: false,
+    ssp: null,
+  };
+}
+
+const URI_METHODS = JAVA_CORE_CLASSES['Ljava/net/URI;'].methods;
+const URI_STATIC = JAVA_CORE_CLASSES['Ljava/net/URI;'].staticMethods;
+
+URI_METHODS.set('<init>(Ljava/lang/String;)V', (self, [text]) => {
+  self.text = jsString(text);
+  self.$uriParts = null;
+});
+URI_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V',
+  (self, [scheme, userInfo, host, port, path, query, fragment]) => {
+    const authority = host === null || host === undefined
+      ? null
+      : `${userInfo === null || userInfo === undefined ? '' : `${jsString(userInfo)}@`}${jsString(host)}${toInt(port) >= 0 ? `:${toInt(port)}` : ''}`;
+    self.text = uriTextFromParts({
+      scheme: scheme === null || scheme === undefined ? null : jsString(scheme),
+      authority,
+      path: path === null || path === undefined ? '' : jsString(path),
+      query: query === null || query === undefined ? null : jsString(query),
+      fragment: fragment === null || fragment === undefined ? null : jsString(fragment),
+      opaque: false,
+      ssp: null,
+    });
+    self.$uriParts = null;
+  });
+URI_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V',
+  (self, [scheme, authority, path, query, fragment]) => {
+    self.text = uriTextFromParts({
+      scheme: scheme === null || scheme === undefined ? null : jsString(scheme),
+      authority: authority === null || authority === undefined ? null : jsString(authority),
+      path: path === null || path === undefined ? '' : jsString(path),
+      query: query === null || query === undefined ? null : jsString(query),
+      fragment: fragment === null || fragment === undefined ? null : jsString(fragment),
+      opaque: false,
+      ssp: null,
+    });
+    self.$uriParts = null;
+  });
+URI_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V',
+  (self, [scheme, host, path, fragment]) => {
+    self.text = uriTextFromParts({
+      scheme: scheme === null || scheme === undefined ? null : jsString(scheme),
+      authority: host === null || host === undefined ? null : jsString(host),
+      path: path === null || path === undefined ? '' : jsString(path),
+      query: null,
+      fragment: fragment === null || fragment === undefined ? null : jsString(fragment),
+      opaque: false,
+      ssp: null,
+    });
+    self.$uriParts = null;
+  });
+URI_METHODS.set('<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V', (self, [scheme, ssp, fragment]) => {
+  const name = scheme === null || scheme === undefined ? null : jsString(scheme);
+  const body = ssp === null || ssp === undefined ? '' : jsString(ssp);
+  self.text = `${name === null ? '' : `${name}:`}${body}${fragment === null || fragment === undefined ? '' : `#${jsString(fragment)}`}`;
+  self.$uriParts = null;
+});
+URI_METHODS.set('getScheme()Ljava/lang/String;', (self) => uriPartsOf(self).scheme);
+URI_METHODS.set('getHost()Ljava/lang/String;', (self) => uriPartsOf(self).host);
+URI_METHODS.set('getPort()I', (self) => uriPartsOf(self).port);
+URI_METHODS.set('getPath()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).path));
+URI_METHODS.set('getRawPath()Ljava/lang/String;', (self) => uriPartsOf(self).path);
+URI_METHODS.set('getQuery()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).query));
+URI_METHODS.set('getRawQuery()Ljava/lang/String;', (self) => uriPartsOf(self).query);
+URI_METHODS.set('getFragment()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).fragment));
+URI_METHODS.set('getRawFragment()Ljava/lang/String;', (self) => uriPartsOf(self).fragment);
+URI_METHODS.set('getAuthority()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).authority));
+URI_METHODS.set('getRawAuthority()Ljava/lang/String;', (self) => uriPartsOf(self).authority);
+URI_METHODS.set('getUserInfo()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).userInfo));
+URI_METHODS.set('getRawUserInfo()Ljava/lang/String;', (self) => uriPartsOf(self).userInfo);
+URI_METHODS.set('getSchemeSpecificPart()Ljava/lang/String;', (self) => percentDecode(uriPartsOf(self).ssp));
+URI_METHODS.set('getRawSchemeSpecificPart()Ljava/lang/String;', (self) => uriPartsOf(self).ssp);
+URI_METHODS.set('isAbsolute()Z', (self) => (uriPartsOf(self).scheme ? 1 : 0));
+URI_METHODS.set('isOpaque()Z', (self) => (uriPartsOf(self).opaque ? 1 : 0));
+URI_METHODS.set('parseServerAuthority()Ljava/net/URI;', (self, _args, vm) => {
+  const parts = uriPartsOf(self);
+  if (parts.authority !== null && !parts.host) {
+    vm.throwException('Ljava/net/URISyntaxException;', `Illegal character in authority: ${self.text}`);
+  }
+  return self.$object ?? self;
+});
+URI_METHODS.set('normalize()Ljava/net/URI;', (self, _args, vm) => {
+  const parts = uriPartsOf(self);
+  if (parts.opaque) {
+    return makeUri(vm, `${String(parts.scheme).toLowerCase()}:${parts.ssp ?? ''}`);
+  }
+  const normalized = {
+    scheme: parts.scheme === null ? null : String(parts.scheme).toLowerCase(),
+    authority: parts.authority === null ? null : String(parts.authority).toLowerCase(),
+    path: normalizeUriPath(parts.path),
+    query: parts.query,
+    fragment: parts.fragment,
+    opaque: false,
+    ssp: null,
+  };
+  return makeUri(vm, uriTextFromParts(normalized));
+});
+URI_METHODS.set('resolve(Ljava/net/URI;)Ljava/net/URI;', (self, [reference], vm) => {
+  const target = resolveUriParts(uriPartsOf(self), uriPartsOf(reference));
+  return makeUri(vm, uriTextFromParts(target));
+});
+URI_METHODS.set('resolve(Ljava/lang/String;)Ljava/net/URI;', (self, [reference], vm) =>
+  URI_METHODS.get('resolve(Ljava/net/URI;)Ljava/net/URI;')(self, [makeUri(vm, jsString(reference))], vm));
+URI_METHODS.set('relativize(Ljava/net/URI;)Ljava/net/URI;', (self, [other], vm) => {
+  const relative = relativizeUriParts(uriPartsOf(self), uriPartsOf(other));
+  if (!relative) return other;
+  return makeUri(vm, uriTextFromParts(relative));
+});
+URI_METHODS.set('compareTo(Ljava/net/URI;)I', (self, [other]) => {
+  const left = uriPartsOf(self);
+  const right = uriPartsOf(other);
+  const compare = (a, b) => {
+    if (a === b) return 0;
+    if (a === null || a === undefined) return -1;
+    if (b === null || b === undefined) return 1;
+    return a < b ? -1 : (a > b ? 1 : 0);
+  };
+  const order = compare(left.scheme, right.scheme)
+    || compare(left.authority, right.authority)
+    || compare(left.path, right.path)
+    || compare(left.query, right.query)
+    || compare(left.fragment, right.fragment);
+  return order | 0;
+});
+URI_STATIC.set('create(Ljava/lang/String;)Ljava/net/URI;', (_self, [text], vm) =>
+  makeUri(vm, jsString(text)));
+
+JAVA_CORE_CLASSES['Ljava/net/URI;'].ctor = class URIPeer {
+  constructor(vm, receiver) {
+    this.vm = vm;
+    this.$object = receiver;
+    this.text = '';
+    this.$uriParts = null;
+  }
+};
+
+/* ===== Properties 读写/XML/列举的真实实现 ===== */
+
+function applyPropertiesText(self, text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) continue;
+    const index = trimmed.search(/[=:]/);
+    if (index < 0) self.map.set(trimmed, '');
+    else self.map.set(trimmed.slice(0, index).trim(), trimmed.slice(index + 1).trim());
+  }
+}
+
+function propertiesAsText(self, comment) {
+  let text = comment === null || comment === undefined ? '' : `#${jsString(comment)}\n`;
+  for (const [key, value] of self.map) text += `${key}=${jsString(value)}\n`;
+  return text;
+}
+
+function propertyStreamBytes(stream) {
+  const peer = stream?.$peer ?? stream;
+  const raw = peer?.data instanceof Uint8Array ? peer.data
+    : peer?.bytes instanceof Uint8Array ? peer.bytes : null;
+  return raw;
+}
+
+function writePropertyBytes(stream, bytes, vm) {
+  const peer = stream?.$peer ?? stream;
+  if (peer && Array.isArray(peer.chunks)) peer.chunks.push(bytes);
+  else if (peer && 'data' in peer) peer.data = bytes;
+  else if (peer && typeof peer.write === 'function') peer.write(bytes);
+  else if (stream) vm.invokeByName('write', '([B)V', stream, [vm.newArray('[B', bytes.length, [...bytes])]);
+}
+
+function writePropertyTextToWriter(writer, text, vm) {
+  const peer = writer?.$peer ?? writer;
+  if (peer && typeof peer.buffer === 'string') peer.buffer += text;
+  else if (peer && typeof peer.write === 'function') peer.write(text);
+  else if (writer) vm.invokeByName('write', '(Ljava/lang/String;)V', writer, [text]);
+}
+
+const PROPERTIES_METHODS = JAVA_CORE_CLASSES['Ljava/util/Properties;'].methods;
+PROPERTIES_METHODS.set('load(Ljava/io/Reader;)V', (self, [reader], vm) => {
+  let text = '';
+  const chars = vm.newArray('[C', 4096, 0);
+  for (;;) {
+    const count = Number(vm.invokeByName('read', '([C)I', reader, [chars]));
+    if (!(count > 0)) break;
+    for (let i = 0; i < count; i++) text += String.fromCharCode(chars.$data[i] | 0);
+  }
+  applyPropertiesText(self, text);
+});
+PROPERTIES_METHODS.set('save(Ljava/io/OutputStream;Ljava/lang/String;)V', (self, [stream, comment], vm) => {
+  writePropertyBytes(stream, utf8Encode(propertiesAsText(self, comment)), vm);
+});
+PROPERTIES_METHODS.set('store(Ljava/io/Writer;Ljava/lang/String;)V', (self, [writer, comment], vm) => {
+  writePropertyTextToWriter(writer, propertiesAsText(self, comment), vm);
+});
+PROPERTIES_METHODS.set('loadFromXML(Ljava/io/InputStream;)V', (self, [stream]) => {
+  const bytes = propertyStreamBytes(stream);
+  if (!bytes) return;
+  const text = utf8Decode(bytes);
+  const unescapeXml = (value) => value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+  const pattern = /<entry\s+key="([^"]*)"[^>]*>([\s\S]*?)<\/entry>/g;
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    self.map.set(unescapeXml(match[1]), unescapeXml(match[2]));
+  }
+});
+PROPERTIES_METHODS.set('storeToXML(Ljava/io/OutputStream;Ljava/lang/String;)V', (self, [stream, comment], vm) => {
+  PROPERTIES_METHODS.get('storeToXML(Ljava/io/OutputStream;Ljava/lang/String;Ljava/lang/String;)V')(self, [stream, comment, null], vm);
+});
+PROPERTIES_METHODS.set('storeToXML(Ljava/io/OutputStream;Ljava/lang/String;Ljava/lang/String;)V', (self, [stream, comment, encoding], vm) => {
+  const escapeXml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const charset = encoding === null || encoding === undefined ? 'UTF-8' : jsString(encoding);
+  let text = '<?xml version="1.0" encoding="' + charset + '"?>\n<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">\n<properties>\n';
+  if (comment !== null && comment !== undefined) text += `<comment>${escapeXml(jsString(comment))}</comment>\n`;
+  for (const [key, value] of self.map) text += `<entry key="${escapeXml(key)}">${escapeXml(jsString(value))}</entry>\n`;
+  text += '</properties>\n';
+  writePropertyBytes(stream, utf8Encode(text), vm);
+});
+for (const signature of ['list(Ljava/io/PrintStream;)V', 'list(Ljava/io/PrintWriter;)V']) {
+  PROPERTIES_METHODS.set(signature, (self, [target], vm) => {
+    const peer = target?.$peer ?? target;
+    const lines = [...self.map.entries()].map(([key, value]) => `${key}=${jsString(value)}`);
+    if (peer && typeof peer.buffer === 'string') {
+      for (const line of lines) peer.buffer += `${line}\n`;
+      return;
+    }
+    for (const line of lines) vm.invokeByName('println', '(Ljava/lang/String;)V', target, [line]);
+  });
+}
