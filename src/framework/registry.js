@@ -22245,7 +22245,12 @@ function resolveThemeColorForKey(vm, key) {
   const store = themeStore(vm);
   if (Object.prototype.hasOwnProperty.call(store, key)) {
     const value = store[key];
-    if (typeof value === 'number') return value >>> 0;
+    if (typeof value === 'number') {
+      // 主题值可能仍是引用（如 colorControlNormal = ?android:attr/textColorTertiary），
+      // 必须继续解到颜色整数，否则调用方会把 attr id 当颜色用（通常渲染成透明）。
+      const resolvedAttr = resolveThemeColorNumber(vm, value, new Set([key]));
+      if (resolvedAttr !== undefined) return resolvedAttr;
+    }
     if (value && typeof value === 'object' && typeof value.reference === 'number') {
       const resolved = vm.resources?.resolve?.(value.reference >>> 0);
       if (typeof resolved === 'number') return resolved >>> 0;
@@ -22263,6 +22268,42 @@ function resolveThemeColorForKey(vm, key) {
   if (TEXT_COLOR_KEYS.has(key)) {
     const fallback = store.textColorPrimary ?? 0xff000000;
     if (typeof fallback === 'number') return fallback >>> 0;
+  }
+  return undefined;
+}
+
+/**
+ * 把主题里的颜色值逐级解引用到颜色整数。链式引用很常见：
+ * `colorControlNormal -> ?android:attr/textColorTertiary (0x01010038)
+ *  -> @color/abc_secondary_text_material_light`。
+ * 只解一级会把 attr id 原样返回，调用方据此绘制就得到透明/错色。
+ */
+function resolveThemeColorNumber(vm, value, seen = new Set()) {
+  if (typeof value !== 'number') return undefined;
+  const id = value >>> 0;
+  const table = vm.resources?.table || null;
+  const entry = table?.getEntry?.(id);
+  const systemAttr = id >= 0x01010000 && id < 0x02000000;
+  const key = entry?.typeName === 'attr'
+    ? entry.key
+    : (!entry && systemAttr ? FRAMEWORK_ATTR_KEYS.get(id) || null : null);
+  if (!key || seen.has(key)) return key ? undefined : id;
+  seen.add(key);
+  const store = themeStore(vm);
+  if (Object.prototype.hasOwnProperty.call(store, key)) {
+    const next = resolveThemeColorNumber(vm, store[key], seen);
+    if (next !== undefined) return next;
+  }
+  const refId = store.$attrReferences?.[key];
+  if (typeof refId === 'number') {
+    const list = vm.resources?.getColorStateList?.(refId >>> 0);
+    if (list && typeof list.color === 'number') return list.color >>> 0;
+    const resolvedColor = vm.resources?.resolveColorValue?.(refId >>> 0);
+    if (typeof resolvedColor === 'number') return resolvedColor >>> 0;
+  }
+  if (TEXT_COLOR_KEYS.has(key)) {
+    const fallback = resolveThemeColorNumber(vm, store.textColorPrimary, seen);
+    return fallback === undefined ? 0xff000000 : fallback;
   }
   return undefined;
 }
@@ -22517,7 +22558,10 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
         const entry = vm.resources?.table?.getEntry?.(numeric);
         if (entry?.typeName === 'attr') {
           const themed = vm.themeAttributes?.[entry.key];
-          if (typeof themed === 'number') return themed >>> 0;
+          if (typeof themed === 'number') {
+            const resolvedThemed = resolveThemeColorNumber(vm, themed, new Set([entry.key]));
+            if (resolvedThemed !== undefined) return resolvedThemed >>> 0;
+          }
           const refId = vm.themeAttributes?.$attrReferences?.[entry.key];
           if (typeof refId === 'number') {
             const resolvedRef = vm.resources?.resolve?.(refId >>> 0);
@@ -22528,6 +22572,11 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
         // 系统资源（0x01xxxxxx）不在 APK 的 arsc 里，getEntry 查不到，
         // 但 resources.resolve 有内置映射（如 android:color/transparent）。
         if (!entry) {
+          // 系统 attr 引用（如 ?android:attr/textColorTertiary）要先按主题链解到颜色。
+          if ((numeric >>> 24) === 0x01 && FRAMEWORK_ATTR_KEYS.has(numeric)) {
+            const themedAttr = resolveThemeColorNumber(vm, numeric);
+            if (themedAttr !== undefined) return themedAttr >>> 0;
+          }
           const resolvedUnknown = vm.resources?.resolve?.(numeric);
           if (typeof resolvedUnknown === 'number') return resolvedUnknown >>> 0;
           if (typeof resolvedUnknown === 'string' && resolvedUnknown.startsWith('#')) {
