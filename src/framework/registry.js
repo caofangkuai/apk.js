@@ -2183,6 +2183,46 @@ function calendarSetDate(vm, calendar, year, month, day) {
   state.day = day | 0;
 }
 
+const USER_PER_USER_RANGE = 100000;
+const USER_FIRST_APPLICATION_UID = 10000;
+const USER_LAST_APPLICATION_UID = 19999;
+const USER_FIRST_ISOLATED_UID = 90000;
+const USER_LAST_ISOLATED_UID = 99999;
+const USER_FIRST_SHARED_APPLICATION_GID = 50000;
+const USER_CACHE_APP_UID = 20000;
+const USER_SHARED_USER_GID = 9997;
+
+function userHandleUserIdOf(uid) {
+  return Math.trunc((Number(uid) | 0) / USER_PER_USER_RANGE);
+}
+
+function userHandleAppIdOf(uid) {
+  return (Number(uid) | 0) % USER_PER_USER_RANGE;
+}
+
+function userHandleUidOf(userId, appId) {
+  return (userId | 0) * USER_PER_USER_RANGE + ((appId | 0) % USER_PER_USER_RANGE);
+}
+
+/** AOSP UserHandle.formatUid：普通 uid 直接输出，应用/隔离 uid 输出 u0a123 / u0i5。 */
+function userHandleFormatUidOf(uid) {
+  const value = Number(uid) | 0;
+  if (value < USER_FIRST_APPLICATION_UID && value >= 0) return String(value);
+  const userId = userHandleUserIdOf(value);
+  const appId = userHandleAppIdOf(value);
+  if (appId >= USER_FIRST_ISOLATED_UID && appId <= USER_LAST_ISOLATED_UID) {
+    return `u${userId}i${appId - USER_FIRST_ISOLATED_UID}`;
+  }
+  if (appId >= USER_FIRST_APPLICATION_UID) return `u${userId}a${appId - USER_FIRST_APPLICATION_UID}`;
+  return `u${userId}s${appId}`;
+}
+
+function userHandleObjectOf(vm, id) {
+  const object = vm.allocateRawObject('Landroid/os/UserHandle;');
+  object.$peer = { vm, id: id | 0 };
+  return object;
+}
+
 function viewPeerConstructor(descriptor, superDescriptor = null) {
   const ViewClass = NATIVE_VIEW_CLASSES[descriptor]
     || (superDescriptor ? NATIVE_VIEW_CLASSES[superDescriptor] : null)
@@ -16901,24 +16941,131 @@ function vmShowChild(self, index) {
       },
       methods: {
         '<init>(I)V': (self, [id]) => { self.id = id | 0; },
+        '<init>(Landroid/os/Parcel;)V': (self, [parcel]) => {
+          const peer = parcel?.$peer ?? parcel;
+          self.id = toInt(peer?.userId ?? 0);
+        },
         'getIdentifier()I': (self) => self.id | 0,
         'hashCode()I': (self) => self.id | 0,
-        'equals(Ljava/lang/Object;)Z': (self, [other]) => (other?.id | 0) === (self.id | 0),
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          const otherId = toInt(other?.$peer?.id ?? other?.id ?? 0);
+          return otherId === (self.id | 0) ? 1 : 0;
+        },
         'toString()Ljava/lang/String;': (self) => `UserHandle{${self.id | 0}}`,
         'describeContents()I': () => 0,
+        'isOwner()Z': (self) => ((self.id | 0) === 0 ? 1 : 0),
+        'isSystem()Z': (self) => ((self.id | 0) === 1000 ? 1 : 0),
+        'getUid(I)I': (self, [appId]) => userHandleUidOf(self.id | 0, toInt(appId)),
+        'writeToParcel(Landroid/os/Parcel;I)V': (self, [parcel]) => {
+          const peer = parcel?.$peer ?? parcel;
+          if (!peer) return;
+          peer.userId = self.id | 0;
+          if (Array.isArray(peer.written)) peer.written.push({ kind: 'UserHandle', id: self.id | 0 });
+        },
       },
       staticMethods: {
         'myUserId()I': () => 0,
-        'getUserHandleForUid(I)Landroid/os/UserHandle;': (_self, _args, vm) => {
-          const handle = vm.allocateRawObject('Landroid/os/UserHandle;');
-          handle.$peer = { vm, id: 0 };
-          return handle;
+        'getUserHandleForUid(I)Landroid/os/UserHandle;': (_self, [uid], vm) => userHandleObjectOf(vm, userHandleUserIdOf(uid)),
+        'of(I)Landroid/os/UserHandle;': (_self, [id], vm) => userHandleObjectOf(vm, id),
+        'isSameUser(II)Z': (_self, [uid1, uid2]) => (userHandleUserIdOf(uid1) === userHandleUserIdOf(uid2) ? 1 : 0),
+        'isSameApp(II)Z': (_self, [uid1, uid2]) => (
+          userHandleUserIdOf(uid1) === userHandleUserIdOf(uid2)
+            && userHandleAppIdOf(uid1) === userHandleAppIdOf(uid2) ? 1 : 0
+        ),
+        'isIsolated(I)Z': (_self, [uid]) => {
+          const appId = userHandleAppIdOf(uid);
+          return (Number(uid) > 0 && appId >= USER_FIRST_ISOLATED_UID && appId <= USER_LAST_ISOLATED_UID) ? 1 : 0;
+        },
+        'isApp(I)Z': (_self, [uid]) => {
+          const appId = userHandleAppIdOf(uid);
+          return (Number(uid) > 0 && appId >= USER_FIRST_APPLICATION_UID && appId <= USER_LAST_APPLICATION_UID) ? 1 : 0;
+        },
+        'isCore(I)Z': (_self, [uid]) => (Number(uid) >= 0 && userHandleAppIdOf(uid) < USER_FIRST_APPLICATION_UID ? 1 : 0),
+        'isSharedAppGid(I)Z': (_self, [gid]) => {
+          const appId = userHandleAppIdOf(gid);
+          return (appId >= USER_FIRST_SHARED_APPLICATION_GID && appId < USER_FIRST_SHARED_APPLICATION_GID + USER_PER_USER_RANGE / 2) ? 1 : 0;
+        },
+        'getUserId(I)I': (_self, [uid]) => userHandleUserIdOf(uid),
+        'getCallingUserId()I': () => 0,
+        'getCallingAppId()I': () => USER_FIRST_APPLICATION_UID,
+        'fromUserHandles(Ljava/util/List;)[I': (_self, [handles], vm) => {
+          const items = handles?.$peer?.items ?? handles?.items ?? [];
+          const array = vm.newArray('[I', items.length, 0);
+          for (let index = 0; index < items.length; index++) {
+            array.$data[index] = toInt(items[index]?.$peer?.id ?? items[index]?.id ?? 0);
+          }
+          return array;
+        },
+        'toUserHandles([I)Ljava/util/List;': (_self, [uids], vm) => {
+          const data = uids?.$data ?? [];
+          const list = vm.allocateRawObject('Ljava/util/ArrayList;');
+          list.$peer = { items: Array.from(data, (uid) => userHandleObjectOf(vm, toInt(uid))) };
+          return list;
+        },
+        'getUid(II)I': (_self, [userId, appId]) => userHandleUidOf(toInt(userId), toInt(appId)),
+        'getAppId(I)I': (_self, [uid]) => userHandleAppIdOf(uid),
+        'getUserGid(I)I': (_self, [userId]) => userHandleUidOf(toInt(userId), USER_SHARED_USER_GID),
+        'getSharedAppGid(I)I': (_self, [uid]) => {
+          const appId = userHandleAppIdOf(uid);
+          if (appId < USER_FIRST_APPLICATION_UID || appId > USER_LAST_APPLICATION_UID) return -1;
+          return userHandleUidOf(userHandleUserIdOf(uid), appId + USER_FIRST_SHARED_APPLICATION_GID - USER_FIRST_APPLICATION_UID);
+        },
+        'getSharedAppGid(II)I': (_self, [userId, appId]) => {
+          const id = toInt(appId);
+          if (id < USER_FIRST_APPLICATION_UID || id > USER_LAST_APPLICATION_UID) return -1;
+          return userHandleUidOf(toInt(userId), id + USER_FIRST_SHARED_APPLICATION_GID - USER_FIRST_APPLICATION_UID);
+        },
+        'getAppIdFromSharedAppGid(I)I': (_self, [gid]) => {
+          const appId = userHandleAppIdOf(gid) - USER_FIRST_SHARED_APPLICATION_GID + USER_FIRST_APPLICATION_UID;
+          return (appId >= USER_FIRST_APPLICATION_UID && appId <= USER_LAST_APPLICATION_UID) ? appId : -1;
+        },
+        'getCacheAppGid(I)I': (_self, [uid]) => {
+          const appId = userHandleAppIdOf(uid);
+          if (appId < USER_FIRST_APPLICATION_UID || appId > USER_LAST_APPLICATION_UID) return -1;
+          return userHandleUidOf(userHandleUserIdOf(uid), appId + USER_CACHE_APP_UID - USER_FIRST_APPLICATION_UID);
+        },
+        'getCacheAppGid(II)I': (_self, [userId, appId]) => {
+          const id = toInt(appId);
+          if (id < USER_FIRST_APPLICATION_UID || id > USER_LAST_APPLICATION_UID) return -1;
+          return userHandleUidOf(toInt(userId), id + USER_CACHE_APP_UID - USER_FIRST_APPLICATION_UID);
+        },
+        'formatUid(Ljava/lang/StringBuilder;I)V': (_self, [builder, uid]) => {
+          const peer = builder?.$peer ?? builder;
+          if (Array.isArray(peer?.parts)) peer.parts.push(userHandleFormatUidOf(uid));
+        },
+        'formatUid(I)Ljava/lang/String;': (_self, [uid]) => userHandleFormatUidOf(uid),
+        'formatUid(Ljava/io/PrintWriter;I)V': (_self, [writer, uid], vm) => {
+          try {
+            vm.invokeByName('print', '(Ljava/lang/String;)V', writer, [userHandleFormatUidOf(uid)]);
+          } catch (_error) {
+            void _error;
+          }
+        },
+        'parseUserArg(Ljava/lang/String;)I': (_self, [text]) => {
+          const value = String(jsString(text) ?? '').trim();
+          if (value === 'all') return -1;
+          if (value === 'current' || value === 'cur') return -2;
+          const parsed = Number.parseInt(value, 10);
+          return Number.isFinite(parsed) ? parsed | 0 : -10000;
+        },
+        'writeToParcel(Landroid/os/UserHandle;Landroid/os/Parcel;)V': (_self, [handle, parcel]) => {
+          const id = toInt(handle?.$peer?.id ?? handle?.id ?? 0);
+          const peer = parcel?.$peer ?? parcel;
+          if (!peer) return;
+          peer.userId = id;
+          if (Array.isArray(peer.written)) peer.written.push({ kind: 'UserHandle', id });
+        },
+        'readFromParcel(Landroid/os/Parcel;)Landroid/os/UserHandle;': (_self, [parcel], vm) => {
+          const peer = parcel?.$peer ?? parcel;
+          return userHandleObjectOf(vm, toInt(peer?.userId ?? 0));
         },
       },
       staticFields: new Map([
         ['USER_OWNER:Landroid/os/UserHandle;', 0],
         ['USER_CURRENT:Landroid/os/UserHandle;', 0],
         ['USER_ALL:Landroid/os/UserHandle;', -1],
+        ['USER_CURRENT_OR_SELF:Landroid/os/UserHandle;', -3],
+        ['USER_NULL:Landroid/os/UserHandle;', -10000],
       ]),
     }),
     nativeDef('Landroid/os/UserManager;', {

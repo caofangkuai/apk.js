@@ -9857,6 +9857,37 @@ CLASS_METHODS.set('getDeclaredAnnotations()[Ljava/lang/annotation/Annotation;', 
 // ---- android.app.ActivityManager 补全 ----
 const ACT_METHODS = JAVA_CORE_CLASSES['Landroid/app/ActivityManager;'].methods;
 const ACT_STATIC = JAVA_CORE_CLASSES['Landroid/app/ActivityManager;'].staticMethods;
+// ---- android.os.Debug.MemoryInfo：按设备内存折算的分项统计 ----
+const MEMORY_INFO_FIELDS = [
+  'dalvikPss', 'dalvikPrivateDirty', 'dalvikSharedDirty', 'dalvikPrivateClean', 'dalvikSharedClean',
+  'nativePss', 'nativePrivateDirty', 'nativeSharedDirty', 'nativePrivateClean', 'nativeSharedClean',
+  'otherPss', 'otherPrivateDirty', 'otherSharedDirty', 'otherPrivateClean', 'otherSharedClean',
+  'codePss', 'stackPss', 'graphicsPss', 'systemPss', 'privateOtherPss',
+  'totalPss', 'totalRss', 'totalPrivateDirty', 'totalSharedDirty', 'totalPrivateClean', 'totalSharedClean',
+  'totalSwappablePss', 'totalSwappedOut', 'totalSwappedOutPss',
+];
+
+/** MemoryInfo 的 summary.* 键值（与 AOSP Debug.getMemoryStat 的名称一致）。 */
+function memoryInfoStatEntries(self) {
+  const value = (key) => toInt(self[key] ?? 0);
+  return [
+    ['summary.java-heap', value('dalvikPss')],
+    ['summary.native-heap', value('nativePss')],
+    ['summary.code', value('codePss')],
+    ['summary.stack', value('stackPss')],
+    ['summary.graphics', value('graphicsPss')],
+    ['summary.private-other', value('privateOtherPss')],
+    ['summary.system', value('systemPss')],
+    ['summary.total-pss', value('totalPss')],
+    ['summary.total-swap', value('totalSwappedOut')],
+  ];
+}
+
+/** 按 AOSP 语义把 RSS 估算为 PSS 加上共享页的额外占用。 */
+function memoryInfoRssOf(self, key) {
+  return Math.round(toInt(self[key] ?? 0) * 1.2);
+}
+
 JAVA_CORE_CLASSES['Landroid/os/Debug$MemoryInfo;'] = nativeDef('Landroid/os/Debug$MemoryInfo;', {
   super: 'Ljava/lang/Object;',
   ctor: peerClass(function (vm) {
@@ -9866,14 +9897,27 @@ JAVA_CORE_CLASSES['Landroid/os/Debug$MemoryInfo;'] = nativeDef('Landroid/os/Debu
     this.dalvikPss = Math.round(totalKb * 0.08);
     this.nativePss = Math.round(totalKb * 0.04);
     this.otherPss = Math.round(totalKb * 0.02);
-    this.totalPss = this.dalvikPss + this.nativePss + this.otherPss;
+    this.codePss = Math.round(totalKb * 0.03);
+    this.stackPss = Math.round(totalKb * 0.005);
+    this.graphicsPss = Math.round(totalKb * 0.02);
+    this.systemPss = Math.round(totalKb * 0.02);
+    this.privateOtherPss = this.otherPss;
+    this.totalPss = this.dalvikPss + this.nativePss + this.otherPss + this.codePss
+      + this.stackPss + this.graphicsPss + this.systemPss;
     this.dalvikPrivateDirty = Math.round(this.dalvikPss * 0.7);
     this.dalvikSharedDirty = this.dalvikPss - this.dalvikPrivateDirty;
     this.nativePrivateDirty = Math.round(this.nativePss * 0.6);
     this.nativeSharedDirty = this.nativePss - this.nativePrivateDirty;
     this.totalPrivateDirty = this.dalvikPrivateDirty + this.nativePrivateDirty;
     this.totalSharedDirty = this.totalPss - this.totalPrivateDirty;
+    this.totalPrivateClean = Math.round(this.totalPrivateDirty * 0.2);
+    this.totalSharedClean = Math.round(this.totalSharedDirty * 0.2);
+    this.totalRss = Math.round(this.totalPss * 1.2);
+    this.totalSwappablePss = 0;
+    this.totalSwappedOut = 0;
+    this.totalSwappedOutPss = 0;
     this.otherLabels = new Map();
+    this.otherStats = new Map();
   }, { dalvikPss: 0, nativePss: 0, otherPss: 0, totalPss: 0 }),
   methods: {
     'getTotalPss()I': (self) => toInt(self.totalPss),
@@ -9901,16 +9945,73 @@ JAVA_CORE_CLASSES['Landroid/os/Debug$MemoryInfo;'] = nativeDef('Landroid/os/Debu
     },
     'getMemoryStat(Ljava/util/Map;)Z': (self, [map], vm) => {
       if (!map) return false;
-      const entries = [
-        ['summary.java-heap', self.dalvikPss],
-        ['summary.native-heap', self.nativePss],
-        ['summary.total-pss', self.totalPss],
-        ['summary.total-swap', self.totalSwappedOutPss ?? 0],
-      ];
       const storage = mapPeer(map);
       if (!storage) return false;
-      for (const [key, value] of entries) storage.set(key, String(toInt(value)));
+      for (const [key, value] of memoryInfoStatEntries(self)) storage.set(key, String(toInt(value)));
       return true;
+    },
+    'set(Landroid/os/Debug$MemoryInfo;)V': (self, [other]) => {
+      const source = other?.$peer ?? other;
+      if (!source) return;
+      for (const key of MEMORY_INFO_FIELDS) self[key] = toInt(source[key] ?? 0);
+      if (source.otherLabels instanceof Map) self.otherLabels = new Map(source.otherLabels);
+      if (source.otherStats instanceof Map) self.otherStats = new Map(source.otherStats);
+    },
+    'getTotalRss()I': (self) => toInt(self.totalRss ?? Math.round(toInt(self.totalPss) * 1.2)),
+    'getTotalSwappedOut()I': (self) => toInt(self.totalSwappedOut ?? 0),
+    'getOtherSwappablePss(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.swappablePss ?? 0),
+    'getOtherRss(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.rss ?? memoryInfoRssOf(self, 'otherPss')),
+    'getOtherPrivateClean(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.privateClean ?? 0),
+    'getOtherPrivate(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.privateDirty ?? 0),
+    'getOtherSharedClean(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.sharedClean ?? 0),
+    'getOtherSwappedOut(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.swappedOut ?? 0),
+    'getOtherSwappedOutPss(I)I': (self, [type]) => toInt(self.otherStats?.get(toInt(type))?.swappedOutPss ?? 0),
+    'getMemoryStat(Ljava/lang/String;)Ljava/lang/String;': (self, [name]) => {
+      const key = jsString(name);
+      const entry = memoryInfoStatEntries(self).find(([entryKey]) => entryKey === key);
+      return entry ? String(entry[1]) : null;
+    },
+    'getMemoryStats()Ljava/util/Map;': (self, _args, vm) => {
+      const map = makeMap(vm);
+      const storage = mapPeer(map);
+      if (storage) {
+        for (const [key, value] of memoryInfoStatEntries(self)) storage.set(key, String(value));
+      }
+      return map;
+    },
+    'getSummaryJavaHeap()I': (self) => toInt(self.dalvikPss),
+    'getSummaryNativeHeap()I': (self) => toInt(self.nativePss),
+    'getSummaryCode()I': (self) => toInt(self.codePss),
+    'getSummaryStack()I': (self) => toInt(self.stackPss),
+    'getSummaryGraphics()I': (self) => toInt(self.graphicsPss),
+    'getSummaryPrivateOther()I': (self) => toInt(self.privateOtherPss ?? self.otherPss),
+    'getSummarySystem()I': (self) => toInt(self.systemPss),
+    'getSummaryJavaHeapRss()I': (self) => memoryInfoRssOf(self, 'dalvikPss'),
+    'getSummaryNativeHeapRss()I': (self) => memoryInfoRssOf(self, 'nativePss'),
+    'getSummaryCodeRss()I': (self) => memoryInfoRssOf(self, 'codePss'),
+    'getSummaryStackRss()I': (self) => memoryInfoRssOf(self, 'stackPss'),
+    'getSummaryGraphicsRss()I': (self) => memoryInfoRssOf(self, 'graphicsPss'),
+    'getSummaryUnknownRss()I': (self) => {
+      const known = ['dalvikPss', 'nativePss', 'codePss', 'stackPss', 'graphicsPss'].reduce((sum, key) => sum + memoryInfoRssOf(self, key), 0);
+      return Math.max(0, toInt(self.totalRss ?? 0) - known);
+    },
+    'getSummaryTotalPss()I': (self) => toInt(self.totalPss),
+    'getSummaryTotalSwap()I': (self) => toInt(self.totalSwappedOut ?? 0),
+    'getSummaryTotalSwapPss()I': (self) => toInt(self.totalSwappedOutPss ?? 0),
+    'hasSwappedOutPss()Z': (self) => (toInt(self.totalSwappedOutPss ?? 0) > 0 ? 1 : 0),
+    'describeContents()I': () => 0,
+    'writeToParcel(Landroid/os/Parcel;I)V': (self, [parcel]) => {
+      const peer = parcel?.$peer ?? parcel;
+      if (!peer) return;
+      const stats = {};
+      for (const key of MEMORY_INFO_FIELDS) stats[key] = toInt(self[key] ?? 0);
+      peer.memoryInfo = stats;
+      if (Array.isArray(peer.written)) peer.written.push({ kind: 'Debug$MemoryInfo', stats });
+    },
+    'readFromParcel(Landroid/os/Parcel;)V': (self, [parcel]) => {
+      const stats = (parcel?.$peer ?? parcel)?.memoryInfo;
+      if (!stats) return;
+      for (const key of MEMORY_INFO_FIELDS) self[key] = toInt(stats[key] ?? 0);
     },
   },
 });
