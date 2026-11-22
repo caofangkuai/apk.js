@@ -2038,6 +2038,151 @@ class PopupWindowPeer {
   }
 }
 
+const DATE_PICKER_MODE_SPINNER = 1;
+const DATE_PICKER_MODE_CALENDAR = 2;
+const DATE_DEFAULT_MIN = -2208988800000; // 1900-01-01T00:00:00Z
+const DATE_DEFAULT_MAX = 4102444799000;  // 2099-12-31T23:59:59Z
+
+/** DatePicker 的初始模式（MODE_SPINNER / MODE_CALENDAR）。 */
+function datePickerModeOf(self) {
+  return (Number(self.mode) | 0) === DATE_PICKER_MODE_CALENDAR ? DATE_PICKER_MODE_CALENDAR : DATE_PICKER_MODE_SPINNER;
+}
+
+/** 取 DatePicker 当前日期（视图为准，未在视图上同步时退回 peer 字段）。 */
+function datePickerYearOf(self) { return (self.view?.year ?? self.year ?? 1970) | 0; }
+function datePickerMonthOf(self) { return (self.view?.month ?? self.month ?? 0) | 0; }
+function datePickerDayOf(self) { return (self.view?.day ?? self.day ?? 1) | 0; }
+
+function datePickerMillisOf(self) {
+  return Date.UTC(datePickerYearOf(self), datePickerMonthOf(self), datePickerDayOf(self));
+}
+
+function datePickerMinOf(self) {
+  return self.minDate === undefined ? DATE_DEFAULT_MIN : Number(self.minDate);
+}
+
+function datePickerMaxOf(self) {
+  return self.maxDate === undefined ? DATE_DEFAULT_MAX : Number(self.maxDate);
+}
+
+/** 把毫秒时间截断到 DatePicker 的 [min,max] 区间，返回年月日。 */
+function datePickerClampMillis(self, millis) {
+  const value = Number(millis);
+  const base = Number.isFinite(value) ? value : datePickerMillisOf(self);
+  return Math.max(datePickerMinOf(self), Math.min(datePickerMaxOf(self), base));
+}
+
+/** 设置 DatePicker 日期：夹取到合法范围、同步 CalendarView 与文本，必要时回调监听器。 */
+function datePickerApplyDate(self, year, month, day, vm, notify) {
+  const y = year | 0;
+  const m = Math.max(0, Math.min(11, month | 0));
+  const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const d = Math.max(1, Math.min(lastDay, day | 0));
+  const millis = datePickerClampMillis(self, Date.UTC(y, m, d));
+  const date = new Date(millis);
+  self.year = date.getUTCFullYear();
+  self.month = date.getUTCMonth();
+  self.day = date.getUTCDate();
+  self.view?.setDate?.(self.year, self.month, self.day);
+  datePickerSyncCalendar(self, vm);
+  if (notify) datePickerNotifyChanged(self, vm);
+}
+
+function datePickerNotifyChanged(self, vm) {
+  if (!self.dateListener || !vm) return;
+  try {
+    vm.invokeInterface(self.dateListener, 'onDateChanged', '(Landroid/widget/DatePicker;III)V', [self.object ?? self, datePickerYearOf(self), datePickerMonthOf(self), datePickerDayOf(self)]);
+  } catch (_error) {
+    void _error;
+  }
+}
+
+/** 校验状态（min <= max）变化时通知 ValidationCallback。 */
+function datePickerRefreshValidation(self, vm) {
+  const valid = datePickerMinOf(self) <= datePickerMaxOf(self);
+  if (self.validationValid === undefined) {
+    self.validationValid = valid;
+    return;
+  }
+  if (self.validationValid === valid) return;
+  self.validationValid = valid;
+  if (!self.validationCallback || !vm) return;
+  try {
+    vm.invokeInterface(self.validationCallback, 'onValidationChanged', '(Z)V', [valid]);
+  } catch (_error) {
+    void _error;
+  }
+}
+
+function calendarFirstDayOfWeekOf(value) {
+  const day = Number(value) | 0;
+  return day >= 1 && day <= 7 ? day : 1; // 默认 Calendar.SUNDAY
+}
+
+/** java.util.Calendar 首日（1..7）转成 JS Date.getDay() 的 0..6（0=周日）。 */
+function calendarFirstDayIndexOf(value) {
+  return (calendarFirstDayOfWeekOf(value) - 1) % 7;
+}
+
+/** 懒创建 DatePicker 内部的 CalendarView 对象，并同步日期/范围/首日。 */
+function datePickerCalendarViewOf(self, vm) {
+  if (self.calendarViewObject) return self.calendarViewObject;
+  if (!vm) return null;
+  const context = self.view?.context ?? vm.contextObject ?? null;
+  let object = null;
+  try {
+    object = vm.instantiate('Landroid/widget/CalendarView;', [context]);
+  } catch (_error) {
+    void _error;
+  }
+  if (!object) return null;
+  if (!object.$peer) {
+    try {
+      vm.registry.getPeer(object, 'Landroid/widget/CalendarView;');
+    } catch (_error) {
+      void _error;
+    }
+  }
+  self.calendarViewObject = object;
+  datePickerSyncCalendar(self, vm);
+  return object;
+}
+
+/** 把 DatePicker 的日期/范围/首日同步到内部 CalendarView。 */
+function datePickerSyncCalendar(self, vm) {
+  const object = self.calendarViewObject;
+  if (!object) return;
+  const state = object.$peer ?? object;
+  state.date = datePickerMillisOf(self);
+  state.minDate = datePickerMinOf(self);
+  state.maxDate = datePickerMaxOf(self);
+  state.firstDayOfWeek = calendarFirstDayOfWeekOf(self.firstDayOfWeek);
+  if (state.view) {
+    state.view.firstDayOfWeek = calendarFirstDayIndexOf(state.firstDayOfWeek);
+    state.view.minDate = state.minDate;
+    state.view.maxDate = state.maxDate;
+    state.view.setDate?.(state.date);
+    state.view.invalidate?.();
+  }
+  void vm;
+}
+
+/** 把解析出的年月日写入 android.icu.util.Calendar（优先走其真实 set 方法）。 */
+function calendarSetDate(vm, calendar, year, month, day) {
+  if (!calendar) return;
+  if (vm) {
+    try {
+      vm.invokeByName('set', '(III)V', calendar, [year | 0, month | 0, day | 0]);
+    } catch (_error) {
+      void _error;
+    }
+  }
+  const state = calendar.$peer ?? calendar;
+  state.year = year | 0;
+  state.month = month | 0;
+  state.day = day | 0;
+}
+
 function viewPeerConstructor(descriptor, superDescriptor = null) {
   const ViewClass = NATIVE_VIEW_CLASSES[descriptor]
     || (superDescriptor ? NATIVE_VIEW_CLASSES[superDescriptor] : null)
@@ -10675,9 +10820,12 @@ function vmShowChild(self, index) {
         'setOnDateChangeListener(Landroid/widget/CalendarView$OnDateChangeListener;)V': (self, [listener]) => { self.dateChangeListener = listener; },
         'setDate(J)V': (self, [millis]) => { self.date = Number(millis) || 0; self.view?.setDate?.(self.date); },
         'setDate(JZZ)V': (self, [millis]) => { self.date = Number(millis) || 0; self.view?.setDate?.(self.date); },
-        'getDate()J': (self) => BigInt(self.view?.date || self.date || 0),
-        'setFirstDayOfWeek(I)V': (self, [day]) => { self.firstDayOfWeek = day | 0; },
-        'getFirstDayOfWeek()I': (self) => self.firstDayOfWeek | 0,
+        'getDate()J': (self) => BigInt(self.view?.date ?? self.date ?? 0),
+        'setFirstDayOfWeek(I)V': (self, [day]) => {
+          self.firstDayOfWeek = calendarFirstDayOfWeekOf(day);
+          if (self.view) { self.view.firstDayOfWeek = calendarFirstDayIndexOf(self.firstDayOfWeek); self.view.invalidate?.(); }
+        },
+        'getFirstDayOfWeek()I': (self) => calendarFirstDayOfWeekOf(self.firstDayOfWeek),
         'setShownWeekCount(I)V': (self, [count]) => { self.shownWeekCount = count | 0; },
         'getShownWeekCount()I': (self) => self.shownWeekCount | 0,
         'setSelectedWeekBackgroundColor(I)V': (self, [color]) => { self.selectedWeekBackgroundColor = color | 0; },
@@ -10697,12 +10845,76 @@ function vmShowChild(self, index) {
         'getWeekDayTextAppearance()I': (self) => self.weekDayTextAppearance | 0,
         'setDateTextAppearance(I)V': (self, [resId]) => { self.dateTextAppearance = resId | 0; },
         'getDateTextAppearance()I': (self) => self.dateTextAppearance | 0,
-        'getMinDate()J': (self) => BigInt(self.minDate ?? 0),
-        'setMinDate(J)V': (self, [millis]) => { self.minDate = Number(millis) || 0; self.view?.setMinDate?.(self.minDate); },
-        'getMaxDate()J': (self) => BigInt(self.maxDate ?? 4102444800000),
-        'setMaxDate(J)V': (self, [millis]) => { self.maxDate = Number(millis) || 0; self.view?.setMaxDate?.(self.maxDate); },
+        'getMinDate()J': (self) => BigInt(self.minDate === undefined ? DATE_DEFAULT_MIN : Number(self.minDate)),
+        'setMinDate(J)V': (self, [millis]) => {
+          const next = Number(millis);
+          if (!Number.isFinite(next)) return;
+          self.minDate = next;
+          const current = Number(self.view?.date ?? self.date ?? 0);
+          const clamped = Math.max(next, Math.min(self.maxDate === undefined ? DATE_DEFAULT_MAX : Number(self.maxDate), current));
+          if (clamped !== current) { self.date = clamped; self.view?.setDate?.(clamped); }
+          if (self.view) { self.view.minDate = next; self.view.invalidate?.(); }
+        },
+        'getMaxDate()J': (self) => BigInt(self.maxDate === undefined ? DATE_DEFAULT_MAX : Number(self.maxDate)),
+        'setMaxDate(J)V': (self, [millis]) => {
+          const next = Number(millis);
+          if (!Number.isFinite(next)) return;
+          self.maxDate = next;
+          const current = Number(self.view?.date ?? self.date ?? 0);
+          const clamped = Math.max(self.minDate === undefined ? DATE_DEFAULT_MIN : Number(self.minDate), Math.min(next, current));
+          if (clamped !== current) { self.date = clamped; self.view?.setDate?.(clamped); }
+          if (self.view) { self.view.maxDate = next; self.view.invalidate?.(); }
+        },
         'setShowWeekNumber(Z)V': (self, [show]) => { self.showWeekNumber = !!show; },
         'getShowWeekNumber()Z': (self) => !!self.showWeekNumber,
+        'getBoundsForDate(JLandroid/graphics/Rect;)Z': (self, [millis, rect]) => {
+          const date = new Date(Number(millis) || 0);
+          if (Number.isNaN(date.getTime())) return 0;
+          const shown = new Date(Number(self.view?.date ?? self.date ?? 0));
+          if (date.getUTCFullYear() !== shown.getUTCFullYear() || date.getUTCMonth() !== shown.getUTCMonth()) return 0;
+          const firstDay = calendarFirstDayIndexOf(self.firstDayOfWeek);
+          const first = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+          const start = (first.getUTCDay() - firstDay + 7) % 7;
+          const index = start + date.getUTCDate() - 1;
+          const row = Math.floor(index / 7);
+          if (row > 5) return 0;
+          const col = index % 7;
+          const width = Number(self.view?.getWidth?.() ?? self.view?.width ?? 0) || 0;
+          const height = Number(self.view?.getHeight?.() ?? self.view?.height ?? 0) || 0;
+          const cellWidth = width / 7;
+          const cellHeight = Math.max(0, height - 32) / 6;
+          setRectField(rect, 'left', Math.round(col * cellWidth));
+          setRectField(rect, 'top', Math.round(32 + row * cellHeight));
+          setRectField(rect, 'right', Math.round((col + 1) * cellWidth));
+          setRectField(rect, 'bottom', Math.round(32 + (row + 1) * cellHeight));
+          return 1;
+        },
+      },
+      staticMethods: {
+        'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z': (_self, [text, calendar], vm) => {
+          if (!calendar) return 0;
+          const value = String(text ?? '').trim();
+          let year = 0;
+          let month = 0;
+          let day = 0;
+          let match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(value);
+          if (match) {
+            year = Number(match[1]);
+            month = Number(match[2]);
+            day = Number(match[3]);
+          } else {
+            match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+            if (!match) return 0;
+            month = Number(match[1]);
+            day = Number(match[2]);
+            year = Number(match[3]);
+          }
+          if (month < 1 || month > 12 || day < 1 || day > 31) return 0;
+          const parsed = new Date(Date.UTC(year, month - 1, day));
+          if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return 0;
+          calendarSetDate(vm, calendar, year, month - 1, day);
+          return 1;
+        },
       },
     })
   );
@@ -10715,13 +10927,73 @@ function vmShowChild(self, index) {
         '<init>(Landroid/content/Context;)V': () => undefined,
         '<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V': () => undefined,
         '<init>(Landroid/content/Context;Landroid/util/AttributeSet;I)V': () => undefined,
+        'getMode()I': (self) => datePickerModeOf(self),
+        'init(IIILandroid/widget/DatePicker$OnDateChangedListener;)V': (self, [year, month, day, listener], vm) => {
+          self.dateListener = listener ?? null;
+          datePickerApplyDate(self, year | 0, month | 0, day | 0, vm, true);
+          datePickerRefreshValidation(self, vm);
+        },
         'setOnDateChangedListener(Landroid/widget/DatePicker$OnDateChangedListener;)V': (self, [listener]) => { self.dateListener = listener; },
-        'updateDate(III)V': (self, [year, month, day]) => { self.year = year | 0; self.month = month | 0; self.day = day | 0; self.view?.setDate?.(self.year, self.month, self.day); },
-        'getYear()I': (self) => (self.view?.year ?? self.year) | 0,
-        'getMonth()I': (self) => (self.view?.month ?? self.month) | 0,
-        'getDayOfMonth()I': (self) => (self.view?.day ?? self.day) | 0,
+        'updateDate(III)V': (self, [year, month, day], vm) => {
+          if (self.view?.enabled === false) return;
+          const before = datePickerMillisOf(self);
+          datePickerApplyDate(self, year | 0, month | 0, day | 0, vm, false);
+          datePickerRefreshValidation(self, vm);
+          if (datePickerMillisOf(self) !== before) datePickerNotifyChanged(self, vm);
+        },
+        'getYear()I': (self) => datePickerYearOf(self),
+        'getMonth()I': (self) => datePickerMonthOf(self),
+        'getDayOfMonth()I': (self) => datePickerDayOf(self),
+        'getMinDate()J': (self) => BigInt(datePickerMinOf(self)),
+        'setMinDate(J)V': (self, [millis], vm) => {
+          const next = Number(millis);
+          if (!Number.isFinite(next)) return;
+          self.minDate = next;
+          const before = datePickerMillisOf(self);
+          datePickerApplyDate(self, datePickerYearOf(self), datePickerMonthOf(self), datePickerDayOf(self), vm, false);
+          datePickerRefreshValidation(self, vm);
+          if (datePickerMillisOf(self) !== before) datePickerNotifyChanged(self, vm);
+        },
+        'getMaxDate()J': (self) => BigInt(datePickerMaxOf(self)),
+        'setMaxDate(J)V': (self, [millis], vm) => {
+          const next = Number(millis);
+          if (!Number.isFinite(next)) return;
+          self.maxDate = next;
+          const before = datePickerMillisOf(self);
+          datePickerApplyDate(self, datePickerYearOf(self), datePickerMonthOf(self), datePickerDayOf(self), vm, false);
+          datePickerRefreshValidation(self, vm);
+          if (datePickerMillisOf(self) !== before) datePickerNotifyChanged(self, vm);
+        },
+        'setValidationCallback(Landroid/widget/DatePicker$ValidationCallback;)V': (self, [callback]) => {
+          self.validationCallback = callback ?? null;
+        },
+        'setFirstDayOfWeek(I)V': (self, [day], vm) => {
+          self.firstDayOfWeek = calendarFirstDayOfWeekOf(day);
+          datePickerSyncCalendar(self, vm);
+        },
+        'getFirstDayOfWeek()I': (self) => calendarFirstDayOfWeekOf(self.firstDayOfWeek),
+        'getCalendarViewShown()Z': (self) => {
+          if (self.calendarViewShown === undefined) return datePickerModeOf(self) === DATE_PICKER_MODE_CALENDAR ? 1 : 0;
+          return self.calendarViewShown ? 1 : 0;
+        },
+        'getCalendarView()Landroid/widget/CalendarView;': (self, _args, vm) => datePickerCalendarViewOf(self, vm),
+        'setCalendarViewShown(Z)V': (self, [shown], vm) => {
+          self.calendarViewShown = !!shown;
+          const object = shown ? datePickerCalendarViewOf(self, vm) : self.calendarViewObject;
+          const state = object?.$peer ?? object;
+          state?.view?.setVisibility?.(shown ? VISIBILITY.VISIBLE : VISIBILITY.GONE);
+        },
+        'getSpinnersShown()Z': (self) => (self.spinnersShown === undefined ? 1 : (self.spinnersShown ? 1 : 0)),
+        'setSpinnersShown(Z)V': (self, [shown]) => {
+          self.spinnersShown = !!shown;
+          self.view?.invalidate?.();
+        },
         'setEnabled(Z)V': (self, [value]) => { if (self.view) self.view.enabled = !!value; },
       },
+      staticFields: new Map([
+        ['MODE_SPINNER:I', DATE_PICKER_MODE_SPINNER],
+        ['MODE_CALENDAR:I', DATE_PICKER_MODE_CALENDAR],
+      ]),
     })
   );
 

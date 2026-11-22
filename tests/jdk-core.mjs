@@ -560,4 +560,121 @@ assert.equal(call(pluginList, 'getList()Ljava/util/List;').$peer.items.length, 1
 call(pluginList, 'clear()V');
 assert.equal(call(pluginList, 'getList()Ljava/util/List;').$peer.items.length, 0);
 
+/* 23. GLSurfaceView / DatePicker / CalendarView：EGL 生命周期、日期范围、网格与解析 */
+const glView = vm.allocateRawObject('Landroid/opengl/GLSurfaceView;');
+call(glView, '<init>(Landroid/content/Context;)V', [null]);
+assert.equal(glView.$peer.renderer, null);
+const glCalls = [];
+const glRenderer = {
+  onSurfaceCreated: () => glCalls.push('created'),
+  onSurfaceChanged: (_gl, width, height) => glCalls.push(`changed:${width}x${height}`),
+  onDrawFrame: () => glCalls.push('draw'),
+};
+call(glView, 'setRenderer(Landroid/opengl/GLSurfaceView$Renderer;)V', [glRenderer]);
+assert.deepEqual(glCalls.slice(0, 2), ['created', 'changed:0x0']);
+call(glView, 'setRenderMode(I)V', [1]);
+assert.equal(Number(call(glView, 'getRenderMode()I')), 1);
+call(glView, 'setDebugFlags(I)V', [3]);
+assert.equal(Number(call(glView, 'getDebugFlags()I')), 3);
+call(glView, 'requestRender()V');
+assert.equal(glCalls[glCalls.length - 1], 'draw');
+call(glView, 'setEGLConfigChooser(IIIIII)V', [8, 8, 8, 8, 16, 0]);
+assert.equal(glView.$peer.eglConfigChooser.depth, 16);
+const glWrapperOutput = vm.allocateRawObject('Ljavax/microedition/khronos/opengles/GL;');
+call(glView, 'setGLWrapper(Landroid/opengl/GLSurfaceView$GLWrapper;)V', [{ wrap: () => glWrapperOutput }]);
+assert.equal(glView.$peer.glWrapper.wrapped, glWrapperOutput);
+const glHolder = vm.allocateRawObject('Landroid/view/SurfaceHolder;');
+const createdContext = vm.allocateRawObject('Ljavax/microedition/khronos/egl/EGLContext;');
+const createdSurface = vm.allocateRawObject('Ljavax/microedition/khronos/egl/EGLSurface;');
+call(glView, 'setEGLContextFactory(Landroid/opengl/GLSurfaceView$EGLContextFactory;)V', [{ createContext: () => createdContext }]);
+call(glView, 'setEGLWindowSurfaceFactory(Landroid/opengl/GLSurfaceView$EGLWindowSurfaceFactory;)V', [{ createWindowSurface: () => createdSurface }]);
+call(glView, 'surfaceCreated(Landroid/view/SurfaceHolder;)V', [glHolder]);
+assert.equal(glView.$peer.eglContext, createdContext);
+assert.equal(glView.$peer.eglSurface, createdSurface);
+assert.equal(glView.$peer.eglSurfaceCreated, true);
+call(glView, 'surfaceChanged(Landroid/view/SurfaceHolder;III)V', [glHolder, 1, 320, 240]);
+assert.equal(glView.$peer.surfaceWidth, 320);
+assert.equal(glView.$peer.surfaceHeight, 240);
+assert.ok(glCalls.includes('changed:320x240'));
+let glRedrawn = false;
+call(glView, 'surfaceRedrawNeededAsync(Landroid/view/SurfaceHolder;Ljava/lang/Runnable;)V', [glHolder, { run: () => { glRedrawn = true; } }]);
+assert.equal(glRedrawn, true);
+call(glView, 'setPreserveEGLContextOnPause(Z)V', [true]);
+assert.equal(Number(call(glView, 'getPreserveEGLContextOnPause()Z')), 1);
+call(glView, 'surfaceDestroyed(Landroid/view/SurfaceHolder;)V', [glHolder]);
+assert.equal(glView.$peer.eglSurfaceCreated, false);
+call(glView, 'finalize()V');
+assert.equal(glView.$peer.finalized, true);
+
+const picker = vm.allocateRawObject('Landroid/widget/DatePicker;');
+call(picker, '<init>(Landroid/content/Context;)V', [null]);
+assert.equal(Number(call(picker, 'getMode()I')), 1);
+const pickerEvents = [];
+const pickerListener = { onDateChanged: (_picker, year, month, day) => pickerEvents.push([year, month, day]) };
+call(picker, 'init(IIILandroid/widget/DatePicker$OnDateChangedListener;)V', [2024, 1, 29, pickerListener]);
+assert.deepEqual(pickerEvents, [[2024, 1, 29]]);
+assert.equal(Number(call(picker, 'getYear()I')), 2024);
+assert.equal(Number(call(picker, 'getMonth()I')), 1);
+assert.equal(Number(call(picker, 'getDayOfMonth()I')), 29);
+assert.equal(call(picker, 'getMinDate()J'), BigInt(-2208988800000));
+assert.equal(call(picker, 'getMaxDate()J'), BigInt(4102444799000));
+call(picker, 'updateDate(III)V', [2023, 0, 1]);
+assert.deepEqual(pickerEvents[pickerEvents.length - 1], [2023, 0, 1]);
+call(picker, 'setMinDate(J)V', [BigInt(Date.UTC(2024, 0, 1))]);
+assert.equal(Number(call(picker, 'getYear()I')), 2024);
+assert.equal(Number(call(picker, 'getMonth()I')), 0);
+assert.equal(Number(call(picker, 'getDayOfMonth()I')), 1);
+const pickerValidations = [];
+call(picker, 'setValidationCallback(Landroid/widget/DatePicker$ValidationCallback;)V', [{ onValidationChanged: (valid) => pickerValidations.push(valid) }]);
+call(picker, 'setMaxDate(J)V', [BigInt(Date.UTC(2023, 11, 31))]);
+assert.deepEqual(pickerValidations, [false]);
+call(picker, 'setMaxDate(J)V', [BigInt(Date.UTC(2025, 11, 31))]);
+assert.deepEqual(pickerValidations, [false, true]);
+assert.equal(Number(call(picker, 'getCalendarViewShown()Z')), 0);
+const pickerCalendar = call(picker, 'getCalendarView()Landroid/widget/CalendarView;');
+assert.equal(pickerCalendar.$peer.view.constructor.name, 'CalendarView');
+assert.equal(pickerCalendar.$peer.date, Date.UTC(2024, 0, 1));
+call(picker, 'setCalendarViewShown(Z)V', [true]);
+assert.equal(Number(call(picker, 'getCalendarViewShown()Z')), 1);
+assert.equal(pickerCalendar.$peer.view.visibility, 0);
+call(picker, 'setFirstDayOfWeek(I)V', [2]);
+assert.equal(Number(call(picker, 'getFirstDayOfWeek()I')), 2);
+assert.equal(pickerCalendar.$peer.view.firstDayOfWeek, 1);
+assert.equal(Number(call(picker, 'getSpinnersShown()Z')), 1);
+call(picker, 'setSpinnersShown(Z)V', [false]);
+assert.equal(Number(call(picker, 'getSpinnersShown()Z')), 0);
+
+const calendarView = vm.allocateRawObject('Landroid/widget/CalendarView;');
+call(calendarView, '<init>(Landroid/content/Context;)V', [null]);
+call(calendarView, 'setDate(J)V', [BigInt(Date.UTC(2024, 1, 15))]);
+assert.equal(call(calendarView, 'getDate()J'), BigInt(Date.UTC(2024, 1, 15)));
+assert.equal(Number(calendarView.$peer.view.firstDayOfWeek), 0);
+assert.equal(Number(call(calendarView, 'getFirstDayOfWeek()I')), 1);
+call(calendarView, 'setFirstDayOfWeek(I)V', [2]);
+assert.equal(Number(call(calendarView, 'getFirstDayOfWeek()I')), 2);
+assert.equal(calendarView.$peer.view.firstDayOfWeek, 1);
+assert.equal(call(calendarView, 'getMinDate()J'), BigInt(-2208988800000));
+call(calendarView, 'setMinDate(J)V', [BigInt(Date.UTC(2024, 0, 1))]);
+assert.equal(call(calendarView, 'getMinDate()J'), BigInt(Date.UTC(2024, 0, 1)));
+call(calendarView, 'setMaxDate(J)V', [BigInt(Date.UTC(2024, 11, 31))]);
+assert.equal(call(calendarView, 'getMaxDate()J'), BigInt(Date.UTC(2024, 11, 31)));
+calendarView.$peer.view.left = 0;
+calendarView.$peer.view.top = 0;
+calendarView.$peer.view.right = 700;
+calendarView.$peer.view.bottom = 620;
+const boundsRect = { $fields: new Map() };
+assert.equal(Number(call(calendarView, 'getBoundsForDate(JLandroid/graphics/Rect;)Z', [BigInt(Date.UTC(2024, 1, 15)), boundsRect])), 1);
+assert.deepEqual(
+  ['left', 'top', 'right', 'bottom'].map((name) => boundsRect.$fields.get('Landroid/graphics/Rect;->' + name + ':I')),
+  [300, 228, 400, 326]
+);
+assert.equal(Number(call(calendarView, 'getBoundsForDate(JLandroid/graphics/Rect;)Z', [BigInt(Date.UTC(2024, 2, 1)), boundsRect])), 0);
+const icuCalendar = vm.allocateRawObject('Landroid/icu/util/Calendar;');
+assert.equal(Number(stat('Landroid/widget/CalendarView;', 'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z', ['2024-02-15', icuCalendar])), 1);
+assert.deepEqual([icuCalendar.year, icuCalendar.month, icuCalendar.day], [2024, 1, 15]);
+assert.equal(Number(stat('Landroid/widget/CalendarView;', 'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z', ['02/15/2024', icuCalendar])), 1);
+assert.equal(Number(stat('Landroid/widget/CalendarView;', 'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z', ['2024-13-01', icuCalendar])), 0);
+assert.equal(Number(stat('Landroid/widget/CalendarView;', 'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z', ['02/30/2024', icuCalendar])), 0);
+assert.equal(Number(stat('Landroid/widget/CalendarView;', 'parseDate(Ljava/lang/String;Landroid/icu/util/Calendar;)Z', ['not-a-date', icuCalendar])), 0);
+
 console.log('jdk-core OK');

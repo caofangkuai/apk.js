@@ -718,12 +718,51 @@ const GLSurfaceViewPeer = class {
     this.renderer = null;
     this.clientVersion = 1;
     this.renderMode = 0;
+    this.debugFlags = 0;
+    this.eglContextFactory = null;
+    this.eglWindowSurfaceFactory = null;
+    this.eglConfigChooser = null;
+    this.glWrapper = null;
+    this.preserveEGLContextOnPause = false;
+    this.paused = false;
     this.$view = new View(vm.contextObject ?? null);
     this.$view.$descriptor = 'Landroid/opengl/GLSurfaceView;';
     this.$view.$javaObject = object;
     object.$view = this.$view;
   }
 };
+
+/** 取 GLSurfaceView 当前可用的 GL 实例（EGL 上下文或新建的 GL10 桩）。 */
+function glSurfaceGl(self) {
+  const vm = self.vm;
+  const context = self.glWrapper?.wrapped ?? null;
+  if (context) return context;
+  if (vm?._eglContext?.gl) return vm._eglContext.gl;
+  const created = eglContextObject(vm);
+  return created?.$peer?.gl ?? created;
+}
+
+/** 通知渲染器绘制一帧（对应 GLSurfaceView 的 GLThread 绘制循环）。 */
+function glSurfaceDrawFrame(self) {
+  const vm = self.vm;
+  if (!self.renderer || !vm) return;
+  try {
+    vm.invokeInterface(self.renderer, 'onDrawFrame', '(Ljavax/microedition/khronos/opengles/GL10;)V', [glSurfaceGl(self)]);
+  } catch (_error) {
+    void _error;
+  }
+}
+
+/** 通知渲染器 Surface 尺寸变化。 */
+function glSurfaceChanged(self, width, height) {
+  const vm = self.vm;
+  if (!self.renderer || !vm) return;
+  try {
+    vm.invokeInterface(self.renderer, 'onSurfaceChanged', '(Ljavax/microedition/khronos/opengles/GL10;II)V', [glSurfaceGl(self), width | 0, height | 0]);
+  } catch (_error) {
+    void _error;
+  }
+}
 
 const GLSurfaceView = nativeDef('Landroid/opengl/GLSurfaceView;', {
   super: 'Landroid/view/View;',
@@ -743,41 +782,17 @@ const GLSurfaceView = nativeDef('Landroid/opengl/GLSurfaceView;', {
       const vm = self.vm;
       if (!renderer || !vm) return;
       try {
-        const gl = eglContextObject(vm).$peer?.gl ?? vm.allocateRawObject('Ljavax/microedition/khronos/opengles/GL10;');
         const config = eglConfigObject(vm, 0);
-        vm.invoke(
-          { classDesc: 'Landroid/opengl/GLSurfaceView$Renderer;', name: 'onSurfaceCreated', proto: { descriptor: '(Ljavax/microedition/khronos/opengles/GL10;Ljavax/microedition/khronos/egl/EGLConfig;)V', parameters: ['Ljavax/microedition/khronos/opengles/GL10;', 'Ljavax/microedition/khronos/egl/EGLConfig;'], returnType: 'V' } },
-          renderer,
-          [gl, config],
-          'interface',
-        );
+        vm.invokeInterface(renderer, 'onSurfaceCreated', '(Ljavax/microedition/khronos/opengles/GL10;Ljavax/microedition/khronos/egl/EGLConfig;)V', [glSurfaceGl(self), config]);
         const [width, height] = [self.$view?.getWidth?.() || 0, self.$view?.getHeight?.() || 0];
-        vm.invoke(
-          { classDesc: 'Landroid/opengl/GLSurfaceView$Renderer;', name: 'onSurfaceChanged', proto: { descriptor: '(Ljavax/microedition/khronos/opengles/GL10;II)V', parameters: ['Ljavax/microedition/khronos/opengles/GL10;', 'I', 'I'], returnType: 'V' } },
-          renderer,
-          [gl, width, height],
-          'interface',
-        );
+        glSurfaceChanged(self, width, height);
       } catch (_error) {
         void _error;
       }
     },
     'setRenderMode(I)V': (self, [mode]) => { self.renderMode = toInt(mode); },
-    'requestRender()V': (self) => {
-      const vm = self.vm;
-      if (!self.renderer || !vm) return;
-      try {
-        const gl = vm._eglContext?.gl ?? eglContextObject(vm).gl;
-        vm.invoke(
-          { classDesc: 'Landroid/opengl/GLSurfaceView$Renderer;', name: 'onDrawFrame', proto: { descriptor: '(Ljavax/microedition/khronos/opengles/GL10;)V', parameters: ['Ljavax/microedition/khronos/opengles/GL10;'], returnType: 'V' } },
-          self.renderer,
-          [gl],
-          'interface',
-        );
-      } catch (_error) {
-        void _error;
-      }
-    },
+    'getRenderMode()I': (self) => self.renderMode | 0,
+    'requestRender()V': (self) => { glSurfaceDrawFrame(self); },
     'queueEvent(Ljava/lang/Runnable;)V': (self, [runnable], vm) => {
       try {
         vm.invokeInterface(runnable, 'run', '()V', []);
@@ -785,13 +800,113 @@ const GLSurfaceView = nativeDef('Landroid/opengl/GLSurfaceView;', {
         void _error;
       }
     },
-    'onPause()V': () => undefined,
-    'onResume()V': () => undefined,
-    'setEGLConfigChooser(IIIIII)V': () => undefined,
-    'setEGLConfigChooser(Z)V': () => undefined,
-    'setDebugFlags(I)V': () => undefined,
-    'getPreserveEGLContextOnPause()Z': () => 0,
-    'setPreserveEGLContextOnPause(Z)V': () => undefined,
+    'onPause()V': (self) => {
+      self.paused = true;
+      if (!self.preserveEGLContextOnPause) {
+        self.eglSurface = null;
+        self.eglContext = null;
+      }
+    },
+    'onResume()V': (self) => {
+      self.paused = false;
+      if (self.eglSurfaceCreated) glSurfaceDrawFrame(self);
+    },
+    'setEGLConfigChooser(IIIIII)V': (self, [red, green, blue, alpha, depth, stencil]) => {
+      self.eglConfigChooser = { red, green, blue, alpha, depth, stencil };
+    },
+    'setEGLConfigChooser(Z)V': (self, [needDepth]) => {
+      self.eglConfigChooser = { needDepth: !!needDepth };
+    },
+    'setEGLConfigChooser(Landroid/opengl/GLSurfaceView$EGLConfigChooser;)V': (self, [chooser]) => {
+      self.eglConfigChooser = chooser ?? null;
+    },
+    'setDebugFlags(I)V': (self, [flags]) => { self.debugFlags = flags | 0; },
+    'getDebugFlags()I': (self) => self.debugFlags | 0,
+    'setGLWrapper(Landroid/opengl/GLSurfaceView$GLWrapper;)V': (self, [wrapper], vm) => {
+      self.glWrapper = { wrapper, wrapped: null };
+      if (!wrapper || !vm) return;
+      try {
+        const wrapped = vm.invokeInterface(wrapper, 'wrap', '(Ljavax/microedition/khronos/opengles/GL;)Ljavax/microedition/khronos/opengles/GL;', [glSurfaceGl(self)]);
+        self.glWrapper = { wrapper, wrapped: wrapped ?? null };
+      } catch (_error) {
+        void _error;
+      }
+    },
+    'setEGLContextFactory(Landroid/opengl/GLSurfaceView$EGLContextFactory;)V': (self, [factory]) => {
+      self.eglContextFactory = factory ?? null;
+    },
+    'setEGLWindowSurfaceFactory(Landroid/opengl/GLSurfaceView$EGLWindowSurfaceFactory;)V': (self, [factory]) => {
+      self.eglWindowSurfaceFactory = factory ?? null;
+    },
+    'getPreserveEGLContextOnPause()Z': (self) => (self.preserveEGLContextOnPause ? 1 : 0),
+    'setPreserveEGLContextOnPause(Z)V': (self, [preserve]) => { self.preserveEGLContextOnPause = !!preserve; },
+    'surfaceCreated(Landroid/view/SurfaceHolder;)V': (self, [holder]) => {
+      self.surfaceHolder = holder ?? null;
+      self.eglSurfaceCreated = true;
+      self.eglContext = null;
+      self.eglSurface = null;
+      const vm = self.vm;
+      if (!vm) return;
+      const config = eglConfigObject(vm, 0);
+      if (self.eglContextFactory) {
+        try {
+          self.eglContext = vm.invokeInterface(self.eglContextFactory, 'createContext', '(Ljavax/microedition/khronos/egl/EGL10;Ljavax/microedition/khronos/egl/EGLDisplay;Ljavax/microedition/khronos/egl/EGLConfig;)Ljavax/microedition/khronos/egl/EGLContext;',
+            [vm._egl10 ?? null, vm._eglDisplay ?? null, config]) ?? null;
+        } catch (_error) {
+          void _error;
+        }
+      }
+      if (self.eglWindowSurfaceFactory) {
+        try {
+          self.eglSurface = vm.invokeInterface(self.eglWindowSurfaceFactory, 'createWindowSurface', '(Ljavax/microedition/khronos/egl/EGL10;Ljavax/microedition/khronos/egl/EGLDisplay;Ljavax/microedition/khronos/egl/EGLConfig;Ljava/lang/Object;)Ljavax/microedition/khronos/egl/EGLSurface;',
+            [vm._egl10 ?? null, vm._eglDisplay ?? null, config, holder ?? null]) ?? null;
+        } catch (_error) {
+          void _error;
+        }
+      }
+      if (self.renderer) {
+        try {
+          vm.invokeInterface(self.renderer, 'onSurfaceCreated', '(Ljavax/microedition/khronos/opengles/GL10;Ljavax/microedition/khronos/egl/EGLConfig;)V', [glSurfaceGl(self), config]);
+        } catch (_error) {
+          void _error;
+        }
+      }
+      const width = Number(self.$view?.getWidth?.() ?? self.surfaceWidth ?? 0);
+      const height = Number(self.$view?.getHeight?.() ?? self.surfaceHeight ?? 0);
+      glSurfaceChanged(self, width, height);
+      glSurfaceDrawFrame(self);
+    },
+    'surfaceDestroyed(Landroid/view/SurfaceHolder;)V': (self) => {
+      self.surfaceHolder = null;
+      self.eglSurfaceCreated = false;
+      self.eglSurface = null;
+      self.eglContext = null;
+    },
+    'surfaceChanged(Landroid/view/SurfaceHolder;III)V': (self, [_holder, _format, width, height]) => {
+      self.surfaceWidth = width | 0;
+      self.surfaceHeight = height | 0;
+      glSurfaceChanged(self, width | 0, height | 0);
+      glSurfaceDrawFrame(self);
+    },
+    'surfaceRedrawNeeded(Landroid/view/SurfaceHolder;)V': (self) => {
+      glSurfaceDrawFrame(self);
+    },
+    'surfaceRedrawNeededAsync(Landroid/view/SurfaceHolder;Ljava/lang/Runnable;)V': (self, [_holder, runnable], vm) => {
+      glSurfaceDrawFrame(self);
+      if (!runnable) return;
+      try {
+        vm.invokeInterface(runnable, 'run', '()V', []);
+      } catch (_error) {
+        void _error;
+      }
+    },
+    'finalize()V': (self) => {
+      self.renderer = null;
+      self.eglSurfaceCreated = false;
+      self.eglSurface = null;
+      self.eglContext = null;
+      self.finalized = true;
+    },
   },
 });
 
