@@ -3,8 +3,8 @@
 > 本文件由 `npm run docs:coverage` 生成，请勿手工修改。
 
 - 源文件：20
-- 注册的 native 类：465
-- 方法/构造函数键（静态统计）：9790
+- 注册的 native 类：472
+- 方法/构造函数键（静态统计）：9876
 
 ## Native 类清单
 
@@ -160,6 +160,8 @@
 | `Landroid/os/VibrationEffect;` | registry.js |
 | `Landroid/os/Vibrator;` | registry.js |
 | `Landroid/preference/PreferenceManager;` | java-core.js |
+| `Landroid/print/PageRange;` | registry.js |
+| `Landroid/print/PrintDocumentAdapter;` | registry.js |
 | `Landroid/provider/MediaStore;` | registry.js |
 | `Landroid/system/Os;` | registry.js |
 | `Landroid/system/StructUtsname;` | registry.js |
@@ -232,12 +234,17 @@
 | `Landroid/webkit/JsResult;` | webkit.js |
 | `Landroid/webkit/MimeTypeMap;` | webkit.js |
 | `Landroid/webkit/PermissionRequest;` | webkit.js |
+| `Landroid/webkit/Plugin;` | webkit.js |
+| `Landroid/webkit/PluginList;` | webkit.js |
 | `Landroid/webkit/SslErrorHandler;` | webkit.js |
 | `Landroid/webkit/URLUtil;` | webkit.js |
 | `Landroid/webkit/WebBackForwardList;` | webkit.js |
 | `Landroid/webkit/WebChromeClient;` | registry.js |
 | `Landroid/webkit/WebChromeClient$FileChooserParams;` | webkit.js |
 | `Landroid/webkit/WebHistoryItem;` | webkit.js |
+| `Landroid/webkit/WebMessage;` | webkit.js |
+| `Landroid/webkit/WebMessagePort;` | webkit.js |
+| `Landroid/webkit/WebMessagePort$WebMessageCallback;` | webkit.js |
 | `Landroid/webkit/WebResourceError;` | webkit.js |
 | `Landroid/webkit/WebResourceRequest;` | webkit.js |
 | `Landroid/webkit/WebSettings;` | registry.js |

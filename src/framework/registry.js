@@ -55,7 +55,7 @@ import {
 } from './widgets.js';
 import { DecorView, SurfaceScreen, Window, createCanvasAdapter } from './window.js';
 import { DRAWABLE_CLASSES, OUTLINE_CLASSES, SHADER_CLASSES, drawableObject } from './drawables.js';
-import { WEBKIT_CLASSES, uriObject } from './webkit.js';
+import { WEBKIT_CLASSES, uriObject, createWebMessagePortPair } from './webkit.js';
 import { OPENGL_CLASSES } from './opengl.js';
 import { handleBrowserIntent, uriVirtualPath, triggerBrowserDownload } from './browser-io.js';
 
@@ -2062,6 +2062,55 @@ function viewPeerConstructor(descriptor, superDescriptor = null) {
       this.view = object.$view;
     }
   };
+}
+
+/** 应用 WebView 构造参数（宿主视图 + 私有浏览 + JS 接口表）。 */
+function applyWebViewInit(self, options = {}) {
+  const view = self.view;
+  self.defStyleAttr = toInt(options.defStyleAttr);
+  self.defStyleRes = toInt(options.defStyleRes);
+  self.privateBrowsing = !!options.privateBrowsing;
+  if (!view) return;
+  view.privateBrowsing = self.privateBrowsing;
+  view.defStyleAttr = self.defStyleAttr;
+  if (options.context) view.javaContext = options.context;
+  if (options.attrs) view.attributes = options.attrs?.$peer ?? options.attrs;
+  const source = options.javascriptInterfaces?.$peer?.map ?? options.javascriptInterfaces?.map ?? null;
+  if (source instanceof Map) view.javascriptInterfaces = new Map(source);
+}
+
+/** 把 WebView 的历史记录包装成 WebBackForwardList 对象。 */
+function makeWebBackForwardList(vm, view) {
+  const object = vm.allocateRawObject('Landroid/webkit/WebBackForwardList;');
+  const history = view?.history || [];
+  const items = history.map((entry) => {
+    const item = vm.allocateRawObject('Landroid/webkit/WebHistoryItem;');
+    item.$peer = {
+      $url: entry.url ?? '',
+      $title: entry.title ?? '',
+      $time: entry.time ?? 0,
+    };
+    return item;
+  });
+  object.$peer = { $items: items, $index: view?.historyIndex ?? (items.length ? items.length - 1 : -1) };
+  return object;
+}
+
+/** 深度优先遍历宿主视图树（debugDump / findHierarchyView 共用）。 */
+function walkViewHierarchy(view, depth, visit) {
+  if (!view) return;
+  visit(view, depth);
+  for (const child of view.children || []) walkViewHierarchy(child, depth + 1, visit);
+  if (view.child) walkViewHierarchy(view.child, depth + 1, visit);
+}
+
+/** 取视图的 Java 类名，便于和 findHierarchyView 的入参比较。 */
+function viewDescriptorName(view) {
+  const descriptor = view?.$descriptor;
+  if (descriptor && descriptor.startsWith('L') && descriptor.endsWith(';')) {
+    return descriptor.slice(1, -1).replace(/\//g, '.');
+  }
+  return view?.constructor?.name ?? 'View';
 }
 
 function adoptLayoutParams(vm, self, params) {
@@ -7960,6 +8009,18 @@ export function buildFrameworkDefinitions(vm) {
       super: 'Landroid/view/View;',
       ctor: viewPeerConstructor('Landroid/webkit/WebView;'),
       methods: {
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;IZ)V':
+          (self, [context, attrs, defStyleAttr, privateBrowsing]) => {
+            applyWebViewInit(self, { context, attrs, defStyleAttr, privateBrowsing });
+          },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;ILjava/util/Map;Z)V':
+          (self, [context, attrs, defStyleAttr, javascriptInterfaces, privateBrowsing]) => {
+            applyWebViewInit(self, { context, attrs, defStyleAttr, javascriptInterfaces, privateBrowsing });
+          },
+        '<init>(Landroid/content/Context;Landroid/util/AttributeSet;IILjava/util/Map;Z)V':
+          (self, [context, attrs, defStyleAttr, defStyleRes, javascriptInterfaces, privateBrowsing]) => {
+            applyWebViewInit(self, { context, attrs, defStyleAttr, defStyleRes, javascriptInterfaces, privateBrowsing });
+          },
         'loadUrl(Ljava/lang/String;)V': (self, [url]) => self.view?.loadUrl?.(jsString(url)),
         'loadData(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V': (self, [data, mime, enc]) =>
           self.view?.loadData?.(jsString(data), jsString(mime), jsString(enc)),
@@ -8002,37 +8063,543 @@ export function buildFrameworkDefinitions(vm) {
             }
           }
         },
-        'destroy()V': (self) => { self.destroyed = true; },
+        'destroy()V': (self) => {
+          self.destroyed = true;
+          self.loading = false;
+          if (self.view) self.view.paused = true;
+        },
         'stopLoading()V': (self) => { self.loading = false; },
-        'goBack()V': () => undefined,
-        'goForward()V': () => undefined,
-        'goBackOrForward(I)V': () => undefined,
-        'canGoBack()Z': (self) => !!self.canGoBackState,
-        'canGoForward()Z': (self) => !!self.canGoForwardState,
-        'canGoBackOrForward(I)Z': (self, [steps]) => Math.abs(steps | 0) <= 1,
+        'goBack()V': (self) => { self.view?.goBack?.(); },
+        'goForward()V': (self) => { self.view?.goForward?.(); },
+        'goBackOrForward(I)V': (self, [steps]) => { self.view?.goBackOrForward?.(steps | 0); },
+        'canGoBack()Z': (self) => (self.view ? !!self.view.canGoBack?.() : !!self.canGoBackState),
+        'canGoForward()Z': (self) => (self.view ? !!self.view.canGoForward?.() : !!self.canGoForwardState),
+        'canGoBackOrForward(I)Z': (self, [steps]) => (self.view ? !!self.view.canGoBackOrForward?.(steps | 0) : Math.abs(steps | 0) <= 1),
         'clearFormData()V': () => undefined,
         'clearSslPreferences()V': () => undefined,
-        'saveState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;': () => null,
+        'clearHistory()V': (self) => { self.view?.clearHistory?.(); },
+        'saveState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;': (self, [bundle], vm) => {
+          const view = self.view;
+          if (!view) return null;
+          const snapshot = view.snapshotState?.() ?? null;
+          const peer = bundle?.$peer ?? bundle;
+          if (peer?.map) {
+            peer.map.set('webview.state', snapshot);
+            peer.map.set('webview.state.url', snapshot?.url ?? '');
+          }
+          return makeWebBackForwardList(vm, view);
+        },
+        'restoreState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;': (self, [bundle], vm) => {
+          const view = self.view;
+          if (!view) return null;
+          const peer = bundle?.$peer ?? bundle;
+          const snapshot = peer?.map?.get?.('webview.state') ?? null;
+          if (!snapshot) return null;
+          view.restoreSnapshot?.(snapshot);
+          return makeWebBackForwardList(vm, view);
+        },
+        'copyBackForwardList()Landroid/webkit/WebBackForwardList;': (self, _args, vm) => makeWebBackForwardList(vm, self.view),
         'saveWebArchive(Ljava/lang/String;)V': () => undefined,
         'saveWebArchive(Ljava/lang/String;ZLandroid/webkit/ValueCallback;)V': () => undefined,
-        'restoreState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;': () => null,
-        'zoomBy(F)V': () => undefined,
-        'zoomIn()Z': () => true,
-        'zoomOut()Z': () => true,
+        'zoomBy(F)V': (self, [factor]) => {
+          const view = self.view;
+          if (!view) return;
+          const current = Number(view.zoomScale ?? 1) || 1;
+          view.zoomScale = Math.min(5, Math.max(0.25, current * (Number(factor) || 1)));
+          view.invalidate?.();
+        },
+        'zoomIn()Z': (self) => {
+          const view = self.view;
+          if (!view) return false;
+          view.zoomScale = Math.min(5, (Number(view.zoomScale) || 1) * 1.25);
+          view.invalidate?.();
+          return true;
+        },
+        'zoomOut()Z': (self) => {
+          const view = self.view;
+          if (!view) return false;
+          view.zoomScale = Math.max(0.25, (Number(view.zoomScale) || 1) / 1.25);
+          view.invalidate?.();
+          return true;
+        },
+        'invokeZoomPicker()V': (self) => {
+          const view = self.view;
+          if (!view) return;
+          view.zoomControlsVisible = true;
+          view.zoomPickerShownAt = Date.now();
+          view.invalidate?.();
+        },
+        'getZoomControls()Landroid/view/View;': (self, _args, vm) => {
+          if (!self.zoomControlsObject) {
+            const controls = new View(vm.contextObject || null);
+            controls.$descriptor = 'Landroid/view/View;';
+            controls.webView = self.view;
+            const object = viewObject(vm, controls);
+            self.zoomControlsObject = object;
+          }
+          self.zoomControlsObject.$view.visibility = self.view?.zoomControlsVisible === false ? 8 : 0;
+          return self.zoomControlsObject;
+        },
+        'isPaused()Z': (self) => !!self.view?.paused,
+        'getContentWidth()I': (self) => Math.max(
+          0,
+          Number(self.view?.contentWidth ?? 0),
+          Number(self.view?.width ?? 0),
+          Number(self.view?.measuredWidth ?? 0)
+        ),
+        'getVisibleTitleHeight()I': (self) => {
+          const view = self.view;
+          if (!view) return 0;
+          const height = Number(view.visibleTitleHeight ?? 0);
+          const viewHeight = Number(view.height ?? 0);
+          return Math.max(0, Math.min(height, viewHeight));
+        },
+        'getTouchIconUrl()Ljava/lang/String;': (self) => self.view?.touchIconUrl || self.touchIconUrl || null,
+        'savePassword(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V': (_self, [host, username, password], vm) => {
+          const store = (vm.$savedPasswords ||= new Map());
+          const key = jsString(host);
+          const user = jsString(username);
+          const secret = jsString(password);
+          if (!key) return;
+          if (!user && !secret) store.delete(key);
+          else store.set(key, { username: user, password: secret });
+        },
+        'setHttpAuthUsernamePassword(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V': (_self, [host, realm, username, password], vm) => {
+          const store = (vm.$httpAuthCredentials ||= new Map());
+          const key = `${jsString(host)}\u0000${jsString(realm)}`;
+          const user = jsString(username);
+          const secret = jsString(password);
+          if (!user && !secret) store.delete(key);
+          else store.set(key, { username: user, password: secret });
+        },
+        'getHttpAuthUsernamePassword(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;': (_self, [host, realm], vm) => {
+          const store = vm.$httpAuthCredentials;
+          const entry = store?.get?.(`${jsString(host)}\u0000${jsString(realm)}`) ?? null;
+          if (!entry) return null;
+          return vm.newArray('[Ljava/lang/String;', 2, [entry.username, entry.password]);
+        },
+        'savePicture(Landroid/os/Bundle;Ljava/io/File;)Z': (self, [bundle]) => {
+          const view = self.view;
+          if (!view) return false;
+          const snapshot = view.snapshotState?.() ?? null;
+          const peer = bundle?.$peer ?? bundle;
+          if (peer?.map) peer.map.set('webview.picture', snapshot);
+          return true;
+        },
+        'restorePicture(Landroid/os/Bundle;Ljava/io/File;)Z': (self, [bundle]) => {
+          const view = self.view;
+          if (!view) return false;
+          const peer = bundle?.$peer ?? bundle;
+          const snapshot = peer?.map?.get?.('webview.picture') ?? null;
+          if (!snapshot) return false;
+          view.restoreSnapshot?.(snapshot);
+          return true;
+        },
+        'createPrintDocumentAdapter()Landroid/print/PrintDocumentAdapter;': (self, _args, vm) => {
+          const adapter = vm.allocateRawObject('Landroid/print/PrintDocumentAdapter;');
+          adapter.$peer = { view: self.view, webView: self.object ?? null, pageCount: 1, finished: false };
+          return adapter;
+        },
+        'createWebMessageChannel()[Landroid/webkit/WebMessagePort;': (self, _args, vm) => {
+          const ports = createWebMessagePortPair(vm);
+          const view = self.view;
+          if (view) (view.webMessagePorts ||= []).push(...ports);
+          return vm.newArray('[Landroid/webkit/WebMessagePort;', ports.length, ports);
+        },
+        'postWebMessage(Landroid/webkit/WebMessage;Landroid/net/Uri;)V': (self, [message, targetOrigin], vm) => {
+          const view = self.view;
+          if (!message) return;
+          if (view) {
+            (view.webMessages ||= []).push({
+              message,
+              targetOrigin: targetOrigin?.$peer?.$value ?? '',
+              time: Date.now(),
+            });
+          }
+          const port = (view?.webMessagePorts || []).find((entry) => !entry.$peer?.closed && entry.$peer?.callback);
+          if (!port) return;
+          try {
+            vm.invokeByName(
+              'onMessage',
+              '(Landroid/webkit/WebMessagePort;Landroid/webkit/WebMessage;)V',
+              port.$peer.callback,
+              [port, message]
+            );
+          } catch (_error) {
+            void _error;
+          }
+        },
+        'showFindDialog(Ljava/lang/String;Z)Z': (self, [text]) => {
+          const view = self.view;
+          if (!view) return false;
+          const query = jsString(text) || '';
+          const haystack = `${view.html || ''}\n${view.url || ''}`.toLowerCase();
+          const needle = query.toLowerCase();
+          let count = 0;
+          if (needle) {
+            let index = haystack.indexOf(needle);
+            while (index >= 0) {
+              count += 1;
+              index = haystack.indexOf(needle, index + needle.length);
+            }
+          }
+          view.lastFindQuery = query;
+          view.findMatches = count;
+          const listener = self.findListener;
+          if (listener) {
+            try {
+              self.vm.invokeByName('onFindResultReceived', '(IIZ)V', listener, [0, count, true]);
+            } catch (_error) {
+              void _error;
+            }
+          }
+          return true;
+        },
+        'emulateShiftHeld()V': (self) => {
+          const view = self.view;
+          if (!view) return;
+          view.shiftHeld = true;
+          view.invalidate?.();
+        },
+        'onChildViewAdded(Landroid/view/View;Landroid/view/View;)V': (self, [_parent, child]) => {
+          if (self.view) self.view.fullscreenChild = child?.$view ?? child ?? null;
+        },
+        'onChildViewRemoved(Landroid/view/View;Landroid/view/View;)V': (self, [_parent, child]) => {
+          const view = self.view;
+          if (!view) return;
+          const removed = child?.$view ?? child ?? null;
+          if (!removed || view.fullscreenChild === removed) view.fullscreenChild = null;
+        },
+        'onGlobalFocusChanged(Landroid/view/View;Landroid/view/View;)V': (self, [_oldFocus, newFocus]) => {
+          if (self.view) self.view.globalFocus = newFocus?.$view ?? newFocus ?? null;
+        },
+        'debugDump()V': (self) => {
+          const view = self.view;
+          if (!view) return;
+          const lines = [];
+          walkViewHierarchy(view, 0, (node, depth) => {
+            lines.push(`${'  '.repeat(depth)}${viewDescriptorName(node)} ${node.id ?? ''} ${node.left ?? 0},${node.top ?? 0}`);
+          });
+          view.debugDump = lines.join('\n');
+        },
+        'dumpViewHierarchyWithProperties(Ljava/io/BufferedWriter;I)V': (self, [writer, level], vm) => {
+          const view = self.view;
+          if (!view) return;
+          walkViewHierarchy(view, level | 0, (node, depth) => {
+            const line = `${'  '.repeat(depth)}${viewDescriptorName(node)} {${node.left ?? 0},${node.top ?? 0} - ${node.right ?? 0},${node.bottom ?? 0}}`;
+            try {
+              vm.invokeByName('write', '(Ljava/lang/String;)V', writer, [line]);
+            } catch (_error) {
+              void _error;
+            }
+          });
+        },
+        'findHierarchyView(Ljava/lang/String;I)Landroid/view/View;': (self, [className, id], vm) => {
+          const name = jsString(className) || '';
+          const targetId = id | 0;
+          let found = null;
+          walkViewHierarchy(self.view, 0, (node) => {
+            if (found) return;
+            const descriptor = viewDescriptorName(node);
+            const shortName = descriptor.slice(descriptor.lastIndexOf('.') + 1);
+            const nameMatches = !name || descriptor === name || shortName === name;
+            const idMatches = !targetId || Number(node.id) === targetId;
+            if (nameMatches && idMatches) found = node;
+          });
+          return found ? viewObject(vm, found) : null;
+        },
+        'getWebViewProvider()Landroid/webkit/WebViewProvider;': (self, _args, vm) => {
+          if (!self.providerObject) {
+            const object = vm.allocateRawObject('Landroid/webkit/WebViewProvider;');
+            object.$peer = {
+              webView: self.object ?? null,
+              view: self.view ?? null,
+              settings: self.view?.settings ?? {},
+            };
+            self.providerObject = object;
+          }
+          return self.providerObject;
+        },
+        'onDetachedFromWindowInternal()V': (self) => {
+          const view = self.view;
+          if (!view) return;
+          view.detached = true;
+          view.paused = true;
+          view.findMatches = 0;
+        },
+        'onMovedToDisplay(ILandroid/content/res/Configuration;)V': (self, [displayId, configuration]) => {
+          const view = self.view;
+          if (!view) return;
+          view.displayId = displayId | 0;
+          view.displayConfiguration = configuration ?? null;
+          view.invalidate?.();
+        },
+        'shouldDelayChildPressedState()Z': () => false,
+        'performAccessibilityActionInternal(ILandroid/os/Bundle;)Z': (self, [action]) => {
+          const view = self.view;
+          if (!view) return false;
+          const value = action >>> 0;
+          if (value === 0x10) {
+            view.performClick?.();
+            return true;
+          }
+          if (value === 0x04000000 || value === 0x08000000) {
+            view.accessibilityFocused = value === 0x04000000;
+            return true;
+          }
+          if (value === 0x1000 || value === 0x2000) {
+            const step = Math.max(1, Math.floor((view.height || 0) * 0.8));
+            view.scrollBy?.(0, value === 0x1000 ? -step : step);
+            return true;
+          }
+          return false;
+        },
+        'onDrawVerticalScrollBar(Landroid/graphics/Canvas;Landroid/graphics/drawable/Drawable;IIII)V':
+          (self, [canvas, _drawable, left, top, right, bottom]) => {
+            self.view?.drawVerticalScrollBar?.(canvas, left | 0, top | 0, right | 0, bottom | 0);
+          },
+        'setFrame(IIII)Z': (self, [left, top, right, bottom]) => {
+          const view = self.view;
+          if (!view) return false;
+          const next = [left | 0, top | 0, right | 0, bottom | 0];
+          const changed = view.left !== next[0] || view.top !== next[1] || view.right !== next[2] || view.bottom !== next[3];
+          if (changed) view.layout?.(...next);
+          return changed;
+        },
+        'requestChildRectangleOnScreen(Landroid/view/View;Landroid/graphics/Rect;Z)Z': (self, [child, rect, immediate]) => {
+          const view = self.view;
+          if (!view) return false;
+          const childView = child?.$view ?? child ?? null;
+          const rectState = rect?.$peer ?? rect ?? {};
+          const offsetX = Number(childView?.left ?? 0) - Number(view.scrollX ?? 0);
+          const offsetY = Number(childView?.top ?? 0) - Number(view.scrollY ?? 0);
+          const left = offsetX + Number(rectState.left ?? 0);
+          const top = offsetY + Number(rectState.top ?? 0);
+          const right = offsetX + Number(rectState.right ?? 0);
+          const bottom = offsetY + Number(rectState.bottom ?? 0);
+          let scrollX = Number(view.scrollX ?? 0);
+          let scrollY = Number(view.scrollY ?? 0);
+          if (left < 0) scrollX += left;
+          else if (right > (view.width || 0)) scrollX += right - (view.width || 0);
+          if (top < 0) scrollY += top;
+          else if (bottom > (view.height || 0)) scrollY += bottom - (view.height || 0);
+          if (scrollX === Number(view.scrollX ?? 0) && scrollY === Number(view.scrollY ?? 0)) return false;
+          view.scrollTo?.(scrollX, scrollY);
+          view.invalidate?.();
+          void immediate;
+          return true;
+        },
+        'encodeProperties(Landroid/view/ViewHierarchyEncoder;)V': (self, [encoder], vm) => {
+          const url = self.view?.getUrl?.() ?? '';
+          const title = self.view?.getTitle?.() ?? '';
+          try {
+            vm.invokeByName('addProperty', '(Ljava/lang/String;Ljava/lang/String;)V', encoder, ['url', url]);
+            vm.invokeByName('addProperty', '(Ljava/lang/String;Ljava/lang/String;)V', encoder, ['title', title]);
+          } catch (_error) {
+            const peer = encoder?.$peer ?? encoder;
+            if (peer && typeof peer === 'object') {
+              peer.properties = { ...(peer.properties || {}), url, title };
+            }
+          }
+        },
         'setFindListener(Landroid/webkit/WebView$FindListener;)V': (self, [listener]) => { self.findListener = listener ?? null; },
-        'findAllAsync(Ljava/lang/String;)V': () => undefined,
-        'findNext(Z)V': () => undefined,
-        'clearMatches()V': () => undefined,
-        'getFavicon()Landroid/graphics/Bitmap;': () => null,
-        'getOriginalUrl()Ljava/lang/String;': (self) => self.view?.getUrl?.() ?? '',
+        'findAllAsync(Ljava/lang/String;)V': (self, [text]) => {
+          const view = self.view;
+          if (!view) return;
+          const query = (jsString(text) || '').toLowerCase();
+          const haystack = `${view.html || ''}\n${view.url || ''}`.toLowerCase();
+          let count = 0;
+          let index = query ? haystack.indexOf(query) : -1;
+          while (index >= 0) {
+            count += 1;
+            index = haystack.indexOf(query, index + query.length);
+          }
+          view.lastFindQuery = jsString(text) || '';
+          view.findMatches = count;
+          const listener = self.findListener;
+          if (listener) {
+            try {
+              self.vm?.invokeByName?.('onFindResultReceived', '(IIZ)V', listener, [0, count, true]);
+            } catch (_error) {
+              void _error;
+            }
+          }
+        },
+        'findNext(Z)V': (self) => {
+          const view = self.view;
+          if (!view || !view.findMatches) return;
+          view.findIndex = ((Number(view.findIndex) || 0) + 1) % view.findMatches;
+        },
+        'clearMatches()V': (self) => {
+          const view = self.view;
+          if (!view) return;
+          view.findMatches = 0;
+          view.findIndex = 0;
+          view.lastFindQuery = '';
+        },
+        'getFavicon()Landroid/graphics/Bitmap;': (self) => self.view?.favicon ?? null,
+        'getOriginalUrl()Ljava/lang/String;': (self) => {
+          const view = self.view;
+          const history = view?.history || [];
+          return history[0]?.url ?? view?.getUrl?.() ?? '';
+        },
         'postUrl(Ljava/lang/String;[B)V': (self, [url]) => self.view?.loadUrl?.(jsString(url)),
         'setPictureListener(Landroid/webkit/WebView$PictureListener;)V': (self, [listener]) => { self.pictureListener = listener ?? null; },
         'getContentHeight()I': (self) => Number(self.view?.height) | 0,
-        'pageUp(Z)Z': () => false,
-        'pageDown(Z)Z': () => false,
+        'pageUp(Z)Z': (self) => {
+          const view = self.view;
+          if (!view) return false;
+          const step = Math.max(1, Math.floor((view.height || 0) * 0.8));
+          view.scrollBy?.(0, -step);
+          return true;
+        },
+        'pageDown(Z)Z': (self) => {
+          const view = self.view;
+          if (!view) return false;
+          const step = Math.max(1, Math.floor((view.height || 0) * 0.8));
+          view.scrollBy?.(0, step);
+          return true;
+        },
       },
       staticMethods: {
         'setWebContentsDebuggingEnabled(Z)V': () => undefined,
+        'enablePlatformNotifications()V': (_self, _args, vm) => { vm.$platformNotifications = true; },
+        'disablePlatformNotifications()V': (_self, _args, vm) => { vm.$platformNotifications = false; },
+        'freeMemoryForTests()V': (_self, _args, vm) => {
+          vm.$webStorage = null;
+          vm.$webMemoryFreedAt = Date.now();
+        },
+        'findAddress(Ljava/lang/String;)Ljava/lang/String;': (_self, [address]) => {
+          const text = jsString(address)?.trim() ?? '';
+          if (!text) return null;
+          let hash = 0;
+          for (let index = 0; index < text.length; index += 1) {
+            hash = ((hash * 31) + text.charCodeAt(index)) >>> 0;
+          }
+          const latitude = ((hash % 18000) / 100) - 90;
+          const longitude = (((hash >>> 7) % 36000) / 100) - 180;
+          return `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+        },
+        'getPluginList()Landroid/webkit/PluginList;': (_self, _args, vm) => {
+          if (!vm.$pluginList) {
+            const object = vm.allocateRawObject('Landroid/webkit/PluginList;');
+            object.$peer = { plugins: [] };
+            vm.$pluginList = object;
+          }
+          return vm.$pluginList;
+        },
+        'refreshPlugins(Z)V': (_self, [reload], vm) => {
+          vm.$pluginsRefreshed = true;
+          vm.$pluginsReload = !!reload;
+        },
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/print/PageRange;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>(II)V': (self, [start, end]) => {
+          self.start = start | 0;
+          self.end = end | 0;
+        },
+        'getStart()I': (self) => self.start | 0,
+        'getEnd()I': (self) => self.end | 0,
+        'contains(I)Z': (self, [page]) => {
+          const value = page | 0;
+          return value >= (self.start | 0) && value <= (self.end | 0);
+        },
+        'getSize()I': (self) => Math.max(0, (self.end | 0) - (self.start | 0) + 1),
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': (self, [parcel, flags]) => {
+          const peer = parcel?.$peer ?? parcel;
+          if (peer && typeof peer === 'object') {
+            (peer.written ||= []).push({ type: 'PageRange', start: self.start | 0, end: self.end | 0, flags: flags | 0 });
+          }
+        },
+        'hashCode()I': (self) => ((self.start | 0) * 31 + (self.end | 0)) | 0,
+        'equals(Ljava/lang/Object;)Z': (self, [other]) => {
+          const peer = other?.$peer ?? other ?? {};
+          return (self.start | 0) === (peer.start | 0) && (self.end | 0) === (peer.end | 0);
+        },
+        'toString()Ljava/lang/String;': (self) => `PageRange{${self.start | 0}-${self.end | 0}}`,
+      },
+    })
+  );
+
+  defs.push(
+    nativeDef('Landroid/print/PrintDocumentAdapter;', {
+      super: 'Ljava/lang/Object;',
+      methods: {
+        '<init>()V': (self) => {
+          self.view = null;
+          self.pageCount = 1;
+          self.finished = false;
+        },
+        'onStart()V': (self, _args, vm) => {
+          const callback = self.callback;
+          if (!callback) return;
+          try {
+            vm.invokeByName('onStart', '()V', callback, []);
+          } catch (_error) {
+            void _error;
+          }
+        },
+        'onLayout(Landroid/print/PrintAttributes;Landroid/print/PrintAttributes;Landroid/os/CancellationSignal;Landroid/print/PrintDocumentAdapter$LayoutResultCallback;Landroid/os/Bundle;)V':
+          (self, [_oldAttrs, newAttrs, cancellationSignal, callback], vm) => {
+            const view = self.view;
+            const contentHeight = Math.max(
+              1,
+              Number(view?.contentHeight ?? 0),
+              Number(view?.height ?? 0),
+              Number(view?.measuredHeight ?? 0)
+            );
+            const pageHeight = 1122;
+            const pageCount = Math.max(1, Math.ceil(contentHeight / pageHeight));
+            self.pageCount = pageCount;
+            self.attributes = newAttrs ?? null;
+            if (!callback) return;
+            try {
+              vm.invokeByName(
+                'onLayout',
+                '(ILandroid/print/PrintAttributes;Landroid/os/CancellationSignal;)V',
+                callback,
+                [pageCount, newAttrs ?? null, cancellationSignal ?? null]
+              );
+            } catch (_error) {
+              void _error;
+            }
+          },
+        'onWrite([Landroid/print/PageRange;Landroid/os/ParcelFileDescriptor;Landroid/os/CancellationSignal;Landroid/print/PrintDocumentAdapter$WriteResultCallback;)V':
+          (self, [pages, _destination, cancellationSignal, callback], vm) => {
+            const view = self.view;
+            const jobId = (vm.$printJobs = (vm.$printJobs || 0) + 1);
+            const path = `/print/job-${jobId}.json`;
+            const payload = {
+              url: view?.getUrl?.() ?? '',
+              title: view?.getTitle?.() ?? '',
+              html: view?.html ?? '',
+              pageCount: self.pageCount | 0,
+              generatedAt: Date.now(),
+            };
+            VIRTUAL_FS.write(path, new TextEncoder().encode(JSON.stringify(payload)));
+            self.lastJobPath = path;
+            self.lastPages = pages ?? null;
+            if (!callback) return;
+            try {
+              vm.invokeByName(
+                'onWriteFinished',
+                '([Landroid/print/PageRange;)V',
+                callback,
+                [pages ?? null]
+              );
+            } catch (_error) {
+              void _error;
+            }
+            void cancellationSignal;
+          },
+        'onFinish()V': (self) => { self.finished = true; },
       },
     })
   );

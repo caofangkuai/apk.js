@@ -727,6 +727,149 @@ const WEB_STORAGE_METHODS = {
   'setQuotaForOrigin(Ljava/lang/String;J)V': () => undefined,
 };
 
+const WEB_MESSAGE_METHODS = {
+  '<init>(Ljava/lang/String;)V': (self, [data]) => {
+    self.$data = jsString(data);
+    self.$ports = [];
+  },
+  '<init>(Ljava/lang/String;[Landroid/webkit/WebMessagePort;)V': (self, [data, ports]) => {
+    self.$data = jsString(data);
+    self.$ports = ports?.$data ? [...ports.$data] : [];
+  },
+  'getData()Ljava/lang/String;': (self) => self.$data ?? null,
+  'getPorts()[Landroid/webkit/WebMessagePort;': (self, _args, vm) => {
+    const ports = self.$ports || [];
+    return vm.newArray('[Landroid/webkit/WebMessagePort;', ports.length, [...ports]);
+  },
+};
+
+function webMessagePortPeer() {
+  return {
+    closed: false,
+    queue: [],
+    callback: null,
+    callbackHandler: null,
+    peer: null,
+    owner: null,
+  };
+}
+
+/** 创建一对互相连通的消息端口（createWebMessageChannel 的宿主实现）。 */
+export function createWebMessagePortPair(vm) {
+  const first = vm.allocateRawObject('Landroid/webkit/WebMessagePort;');
+  const second = vm.allocateRawObject('Landroid/webkit/WebMessagePort;');
+  first.$peer = { ...webMessagePortPeer(), owner: first };
+  second.$peer = { ...webMessagePortPeer(), owner: second };
+  first.$peer.peer = second.$peer;
+  second.$peer.peer = first.$peer;
+  return [first, second];
+}
+
+/** 把消息投递到端口，并在注册了回调时触发 onMessage。 */
+function deliverWebMessage(vm, portPeer, message) {
+  if (!portPeer || portPeer.closed) return;
+  portPeer.queue.push(message);
+  if (!portPeer.callback) return;
+  try {
+    vm.invokeByName(
+      'onMessage',
+      '(Landroid/webkit/WebMessagePort;Landroid/webkit/WebMessage;)V',
+      portPeer.callback,
+      [portPeer.owner, message]
+    );
+  } catch (_error) {
+    void _error;
+  }
+}
+
+const WEB_MESSAGE_PORT_METHODS = {
+  '<init>()V': (self) => {
+    self.closed = false;
+    self.queue = [];
+    self.callback = null;
+    self.callbackHandler = null;
+    self.peer = null;
+  },
+  'postMessage(Landroid/webkit/WebMessage;)V': (self, [message], vm) => {
+    if (self.closed || !message) return;
+    deliverWebMessage(vm, self.peer, message);
+  },
+  'close()V': (self) => {
+    self.closed = true;
+    if (self.peer) self.peer.closed = true;
+  },
+  'setWebMessageCallback(Landroid/webkit/WebMessagePort$WebMessageCallback;)V': (self, [callback]) => {
+    self.callback = callback ?? null;
+  },
+  'setWebMessageCallback(Landroid/webkit/WebMessagePort$WebMessageCallback;Landroid/os/Handler;)V': (self, [callback, handler]) => {
+    self.callback = callback ?? null;
+    self.callbackHandler = handler ?? null;
+  },
+};
+
+const WEB_MESSAGE_CALLBACK_METHODS = {
+  '<init>()V': () => undefined,
+  'onMessage(Landroid/webkit/WebMessagePort;Landroid/webkit/WebMessage;)V': () => undefined,
+};
+
+const PLUGIN_METHODS = {
+  '<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V': (self, [name, path, fileName, description]) => {
+    self.name = jsString(name) ?? '';
+    self.path = jsString(path) ?? '';
+    self.fileName = jsString(fileName) ?? '';
+    self.description = jsString(description) ?? '';
+  },
+  'getName()Ljava/lang/String;': (self) => self.name ?? '',
+  'getPath()Ljava/lang/String;': (self) => self.path ?? '',
+  'getFileName()Ljava/lang/String;': (self) => self.fileName ?? '',
+  'getDescription()Ljava/lang/String;': (self) => self.description ?? '',
+  'setName(Ljava/lang/String;)V': (self, [value]) => { self.name = jsString(value) ?? ''; },
+  'setPath(Ljava/lang/String;)V': (self, [value]) => { self.path = jsString(value) ?? ''; },
+  'setFileName(Ljava/lang/String;)V': (self, [value]) => { self.fileName = jsString(value) ?? ''; },
+  'setDescription(Ljava/lang/String;)V': (self, [value]) => { self.description = jsString(value) ?? ''; },
+  'setClickHandler(Landroid/webkit/Plugin$PreferencesClickHandler;)V': (self, [handler]) => {
+    self.clickHandler = handler ?? null;
+  },
+  'dispatchClickEvent(Landroid/content/Context;)V': (self, [context], vm) => {
+    self.clicked = true;
+    if (self.clickHandler) {
+      try {
+        vm.invokeByName('handleClickEvent', '(Landroid/webkit/Plugin;)V', self.clickHandler, [self.owner ?? self]);
+      } catch (_error) {
+        void _error;
+      }
+    }
+  },
+  'toString()Ljava/lang/String;': (self) => self.name ?? '',
+};
+
+const PLUGIN_LIST_METHODS = {
+  '<init>()V': (self) => { self.plugins = []; },
+  'getList()Ljava/util/List;': (self, _args, vm) => {
+    const object = vm.allocateRawObject('Ljava/util/ArrayList;');
+    object.$peer = { items: [...(self.plugins || [])] };
+    return object;
+  },
+  'addPlugin(Landroid/webkit/Plugin;)V': (self, [plugin]) => {
+    if (plugin) (self.plugins ||= []).push(plugin);
+  },
+  'removePlugin(Landroid/webkit/Plugin;)V': (self, [plugin]) => {
+    const plugins = (self.plugins ||= []);
+    const index = plugins.indexOf(plugin);
+    if (index >= 0) plugins.splice(index, 1);
+  },
+  'clear()V': (self) => { self.plugins = []; },
+  'pluginClicked(Landroid/content/Context;I)V': (self, [context, index], vm) => {
+    const plugin = (self.plugins || [])[index | 0];
+    if (!plugin) return;
+    try {
+      vm.invokeByName('dispatchClickEvent', '(Landroid/content/Context;)V', plugin, [context]);
+    } catch (_error) {
+      void _error;
+    }
+  },
+};
+
 export const WEBKIT_CLASSES = {
   'Landroid/net/Uri;': nativeDef(URI_DESCRIPTOR, {
     super: 'Ljava/lang/Object;',
@@ -787,6 +930,26 @@ export const WEBKIT_CLASSES = {
     staticMethods: {
       'getInstance()Landroid/webkit/CookieManager;': (_self, _args, vm) => cookieStore(vm),
     },
+  }),
+  'Landroid/webkit/WebMessage;': nativeDef('Landroid/webkit/WebMessage;', {
+    super: 'Ljava/lang/Object;',
+    methods: WEB_MESSAGE_METHODS,
+  }),
+  'Landroid/webkit/WebMessagePort;': nativeDef('Landroid/webkit/WebMessagePort;', {
+    super: 'Ljava/lang/Object;',
+    methods: WEB_MESSAGE_PORT_METHODS,
+  }),
+  'Landroid/webkit/WebMessagePort$WebMessageCallback;': nativeDef('Landroid/webkit/WebMessagePort$WebMessageCallback;', {
+    super: 'Ljava/lang/Object;',
+    methods: WEB_MESSAGE_CALLBACK_METHODS,
+  }),
+  'Landroid/webkit/Plugin;': nativeDef('Landroid/webkit/Plugin;', {
+    super: 'Ljava/lang/Object;',
+    methods: PLUGIN_METHODS,
+  }),
+  'Landroid/webkit/PluginList;': nativeDef('Landroid/webkit/PluginList;', {
+    super: 'Ljava/lang/Object;',
+    methods: PLUGIN_LIST_METHODS,
   }),
   'Landroid/webkit/WebStorage;': nativeDef('Landroid/webkit/WebStorage;', {
     super: 'Ljava/lang/Object;',

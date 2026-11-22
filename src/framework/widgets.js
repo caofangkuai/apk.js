@@ -1485,6 +1485,16 @@ export class WebView extends View {
     this.title = '';
     this.webViewClient = null;
     this.webChromeClient = null;
+    this.history = [];
+    this.historyIndex = -1;
+    this.paused = false;
+    this.contentWidth = 0;
+    this.touchIconUrl = '';
+    this.visibleTitleHeight = 0;
+    this.zoomControlsVisible = false;
+    this.fullscreenChild = null;
+    this.lastFindQuery = '';
+    this.findMatches = 0;
     this.settings = {
       javaScriptEnabled: false,
       domStorageEnabled: false,
@@ -1507,8 +1517,90 @@ export class WebView extends View {
     };
   }
 
+  recordHistory(url, title = '') {
+    const value = String(url ?? '');
+    if (!value) return;
+    const current = this.historyIndex >= 0 ? this.history[this.historyIndex] : null;
+    if (current && current.url === value) {
+      current.time = Date.now();
+      return;
+    }
+    if (this.historyIndex < this.history.length - 1) this.history.splice(this.historyIndex + 1);
+    this.history.push({ url: value, title: String(title || this.title || value), time: Date.now() });
+    if (this.history.length > 100) this.history.shift();
+    this.historyIndex = this.history.length - 1;
+  }
+
+  applyHistoryEntry() {
+    const entry = this.history[this.historyIndex];
+    if (!entry) return;
+    this.url = entry.url;
+    this.title = entry.title || this.title;
+    this.onPageStarted(entry.url);
+    this.invalidate();
+  }
+
+  canGoBack() {
+    return this.historyIndex > 0;
+  }
+
+  canGoForward() {
+    return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1;
+  }
+
+  canGoBackOrForward(steps) {
+    const target = this.historyIndex + (Number(steps) | 0);
+    return this.history.length > 0 && target >= 0 && target < this.history.length;
+  }
+
+  goBack() {
+    if (!this.canGoBack()) return false;
+    this.historyIndex -= 1;
+    this.applyHistoryEntry();
+    return true;
+  }
+
+  goForward() {
+    if (!this.canGoForward()) return false;
+    this.historyIndex += 1;
+    this.applyHistoryEntry();
+    return true;
+  }
+
+  goBackOrForward(steps) {
+    if (!this.canGoBackOrForward(steps)) return false;
+    this.historyIndex += Number(steps) | 0;
+    this.applyHistoryEntry();
+    return true;
+  }
+
+  clearHistory() {
+    const current = this.historyIndex >= 0 ? this.history[this.historyIndex] : null;
+    this.history = current ? [current] : [];
+    this.historyIndex = this.history.length ? 0 : -1;
+  }
+
+  snapshotState() {
+    return {
+      url: this.url,
+      title: this.title,
+      history: this.history.map((entry) => ({ ...entry })),
+      historyIndex: this.historyIndex,
+    };
+  }
+
+  restoreSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    this.history = Array.isArray(snapshot.history) ? snapshot.history.map((entry) => ({ ...entry })) : [];
+    this.historyIndex = Number.isInteger(snapshot.historyIndex) ? snapshot.historyIndex : this.history.length - 1;
+    this.url = String(snapshot.url ?? '');
+    this.title = String(snapshot.title ?? '');
+    return true;
+  }
+
   loadUrl(url) {
     this.url = String(url ?? '');
+    this.recordHistory(this.url);
     this.onPageStarted(this.url);
     this.invalidate();
     return this;
@@ -1516,6 +1608,7 @@ export class WebView extends View {
 
   loadData(data, mimeType, encoding) {
     this.html = String(data ?? '');
+    this.recordHistory('about:blank');
     this.onPageStarted('about:blank');
     this.invalidate();
     return this;
@@ -1524,9 +1617,19 @@ export class WebView extends View {
   loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl) {
     this.url = String(baseUrl ?? '');
     this.html = String(data ?? '');
+    this.recordHistory(historyUrl || this.url);
     this.onPageStarted(this.url);
     this.invalidate();
     return this;
+  }
+
+  drawVerticalScrollBar(canvas, left, top, right, bottom) {
+    const ctx = canvas?.context;
+    if (!ctx) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.fillRect(left, top, Math.max(2, right - left), Math.max(0, bottom - top));
+    ctx.restore();
   }
 
   reload() {
@@ -1551,6 +1654,7 @@ export class WebView extends View {
   onMeasure(widthSpec, heightSpec) {
     const width = resolveSize(320, widthSpec);
     const height = resolveSize(480, heightSpec);
+    this.contentWidth = width;
     this.setMeasuredDimension(width, height);
   }
 

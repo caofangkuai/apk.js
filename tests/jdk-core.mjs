@@ -474,4 +474,90 @@ const htmlClip = stat('Landroid/content/ClipData;', 'newHtmlText(Ljava/lang/Char
 assert.equal(call(call(htmlClip, 'getItemAt(I)Landroid/content/ClipData$Item;', [0]),
   'getHtmlText()Ljava/lang/String;'), '<i>x</i>');
 
+/* 22. WebView：历史栈、查找、HTTP 认证、打印适配器、消息通道与静态网络能力 */
+const webView = vm.allocateRawObject('Landroid/webkit/WebView;');
+const webSignature = 'Landroid/webkit/WebView;';
+call(webView, '<init>(Landroid/content/Context;Landroid/util/AttributeSet;IZ)V', [null, null, 0, true]);
+assert.equal(webView.$peer.privateBrowsing, true);
+const jsInterfaces = vm.allocateRawObject('Ljava/util/HashMap;');
+jsInterfaces.$peer = { map: new Map([['bridge', vm.allocateRawObject('Ljava/lang/Object;')]]) };
+call(vm.allocateRawObject(webSignature), '<init>(Landroid/content/Context;Landroid/util/AttributeSet;ILjava/util/Map;Z)V',
+  [null, null, 0, jsInterfaces, false]);
+assert.equal(webView.$peer.view.constructor.name, 'WebView');
+call(webView, 'loadUrl(Ljava/lang/String;)V', ['https://a.example/']);
+call(webView, 'loadUrl(Ljava/lang/String;)V', ['https://b.example/']);
+assert.equal(Number(call(webView, 'canGoBack()Z')), 1);
+assert.equal(Number(call(webView, 'canGoForward()Z')), 0);
+const backForward = call(webView, 'copyBackForwardList()Landroid/webkit/WebBackForwardList;');
+assert.equal(Number(call(backForward, 'getSize()I')), 2);
+assert.equal(call(backForward, 'getCurrentItem()Landroid/webkit/WebHistoryItem;').$peer.$url, 'https://b.example/');
+call(webView, 'goBack()V');
+assert.equal(call(webView, 'getUrl()Ljava/lang/String;'), 'https://a.example/');
+assert.equal(Number(call(webView, 'canGoForward()Z')), 1);
+call(webView, 'goForward()V');
+assert.equal(call(webView, 'getUrl()Ljava/lang/String;'), 'https://b.example/');
+const webBundle = vm.allocateRawObject('Landroid/os/Bundle;');
+webBundle.$peer = { map: new Map() };
+assert.equal(Number(call(call(webView, 'saveState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;', [webBundle]), 'getSize()I')), 2);
+const restoredView = vm.allocateRawObject(webSignature);
+const restoredList = call(restoredView, 'restoreState(Landroid/os/Bundle;)Landroid/webkit/WebBackForwardList;', [webBundle]);
+assert.equal(Number(call(restoredList, 'getSize()I')), 2);
+assert.equal(call(restoredView, 'getUrl()Ljava/lang/String;'), 'https://b.example/');
+
+call(webView, 'savePassword(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V', ['example.com', 'user', 'secret']);
+assert.equal(vm.$savedPasswords.get('example.com').password, 'secret');
+call(webView, 'setHttpAuthUsernamePassword(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V',
+  ['host.example', 'realm', 'authUser', 'authPass']);
+assert.deepEqual([...call(webView, 'getHttpAuthUsernamePassword(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;',
+  ['host.example', 'realm']).$data], ['authUser', 'authPass']);
+assert.equal(call(webView, 'getHttpAuthUsernamePassword(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;',
+  ['host.example', 'missing']), null);
+
+call(webView, 'loadData(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V', ['hello hello world', 'text/html', 'utf-8']);
+assert.equal(Number(call(webView, 'showFindDialog(Ljava/lang/String;Z)Z', ['hello', true])), 1);
+assert.equal(webView.$peer.view.findMatches, 2);
+const zoomControls = call(webView, 'getZoomControls()Landroid/view/View;');
+assert.equal(zoomControls.$view.$descriptor, 'Landroid/view/View;');
+assert.equal(Number(call(webView, 'shouldDelayChildPressedState()Z')), 0);
+assert.equal(Number(call(webView, 'isPaused()Z')), 0);
+assert.equal(Number(call(webView, 'getVisibleTitleHeight()I')), 0);
+
+const printAdapter = call(webView, 'createPrintDocumentAdapter()Landroid/print/PrintDocumentAdapter;');
+call(printAdapter, 'onLayout(Landroid/print/PrintAttributes;Landroid/print/PrintAttributes;Landroid/os/CancellationSignal;Landroid/print/PrintDocumentAdapter$LayoutResultCallback;Landroid/os/Bundle;)V',
+  [null, null, null, null, null]);
+assert.equal(printAdapter.$peer.pageCount, 1);
+const printPages = vm.newArray('[Landroid/print/PageRange;', 1, [vm.allocateRawObject('Landroid/print/PageRange;')]);
+call(printAdapter, 'onWrite([Landroid/print/PageRange;Landroid/os/ParcelFileDescriptor;Landroid/os/CancellationSignal;Landroid/print/PrintDocumentAdapter$WriteResultCallback;)V',
+  [printPages, null, null, null]);
+assert.match(printAdapter.$peer.lastJobPath, /^\/print\/job-\d+\.json$/);
+call(printAdapter, 'onFinish()V');
+assert.equal(printAdapter.$peer.finished, true);
+
+const webPorts = call(webView, 'createWebMessageChannel()[Landroid/webkit/WebMessagePort;');
+assert.equal(webPorts.$data.length, 2);
+const messageCallback = vm.allocateRawObject('Landroid/webkit/WebMessagePort$WebMessageCallback;');
+call(webPorts.$data[0], 'setWebMessageCallback(Landroid/webkit/WebMessagePort$WebMessageCallback;)V', [messageCallback]);
+const webMessage = vm.allocateRawObject('Landroid/webkit/WebMessage;');
+call(webMessage, '<init>(Ljava/lang/String;)V', ['ping']);
+call(webPorts.$data[1], 'postMessage(Landroid/webkit/WebMessage;)V', [webMessage]);
+assert.equal(webPorts.$data[0].$peer.queue.length, 1);
+assert.equal(call(webPorts.$data[0].$peer.queue[0], 'getData()Ljava/lang/String;'), 'ping');
+call(webView, 'postWebMessage(Landroid/webkit/WebMessage;Landroid/net/Uri;)V', [webMessage, null]);
+assert.equal(webView.$peer.view.webMessages.length, 1);
+
+assert.equal(stat(webSignature, 'findAddress(Ljava/lang/String;)Ljava/lang/String;', ['']), null);
+assert.match(stat(webSignature, 'findAddress(Ljava/lang/String;)Ljava/lang/String;', ['Shanghai']), /^-?\d+\.\d+,-?\d+\.\d+$/);
+stat(webSignature, 'enablePlatformNotifications()V', []);
+assert.equal(vm.$platformNotifications, true);
+stat(webSignature, 'disablePlatformNotifications()V', []);
+assert.equal(vm.$platformNotifications, false);
+const pluginList = stat(webSignature, 'getPluginList()Landroid/webkit/PluginList;', []);
+assert.equal(call(pluginList, 'getList()Ljava/util/List;').$peer.items.length, 0);
+const plugin = vm.allocateRawObject('Landroid/webkit/Plugin;');
+call(plugin, '<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V', ['Flash', '/p', 'f.so', 'desc']);
+call(pluginList, 'addPlugin(Landroid/webkit/Plugin;)V', [plugin]);
+assert.equal(call(pluginList, 'getList()Ljava/util/List;').$peer.items.length, 1);
+call(pluginList, 'clear()V');
+assert.equal(call(pluginList, 'getList()Ljava/util/List;').$peer.items.length, 0);
+
 console.log('jdk-core OK');
