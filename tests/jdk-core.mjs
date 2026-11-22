@@ -383,4 +383,95 @@ assert.equal(call(manager, 'findPreference(Ljava/lang/CharSequence;)Landroid/pre
 const screen = call(manager, 'createPreferenceScreen(Landroid/content/Context;)Landroid/preference/PreferenceScreen;', [null]);
 assert.ok(screen && screen.$peer && Array.isArray(screen.$peer.$items));
 
+/* 21. ClipData / ClipDescription / Item：构造器、mime 过滤、增删、URI 收集与包裹状态 */
+const init = (object, signature, args) => vm.invokeByName('<init>', signature, object, args);
+const clipMimes = vm.newArray('[Ljava/lang/String;', 2, ['text/plain', 'text/html']);
+const clipItem = vm.allocateRawObject('Landroid/content/ClipData$Item;');
+init(clipItem, '(Ljava/lang/CharSequence;Ljava/lang/String;)V', ['hello', '<b>hello</b>']);
+assert.equal(call(clipItem, 'coerceToHtmlText(Landroid/content/Context;)Ljava/lang/String;'), '<b>hello</b>');
+assert.equal(call(clipItem, 'coerceToText(Landroid/content/Context;)Ljava/lang/CharSequence;'), 'hello');
+const clip = vm.allocateRawObject('Landroid/content/ClipData;');
+init(clip, '(Ljava/lang/CharSequence;[Ljava/lang/String;Landroid/content/ClipData$Item;)V', ['label', clipMimes, clipItem]);
+assert.equal(Number(call(clip, 'getItemCount()I')), 1);
+const description = call(clip, 'getDescription()Landroid/content/ClipDescription;');
+assert.equal(Number(call(description, 'getMimeTypeCount()I')), 2);
+assert.equal(Number(call(description, 'hasMimeType(Ljava/lang/String;)Z', ['text/*'])), 1);
+assert.equal(Number(call(description, 'hasMimeType([Ljava/lang/String;)Z',
+  [vm.newArray('[Ljava/lang/String;', 1, ['image/png'])])), 0);
+assert.equal(Number(stat('Landroid/content/ClipDescription;', 'compareMimeTypes(Ljava/lang/String;Ljava/lang/String;)Z',
+  ['text/*', 'text/plain'])), 1);
+assert.equal(Number(stat('Landroid/content/ClipDescription;', 'compareMimeTypes(Ljava/lang/String;Ljava/lang/String;)Z',
+  ['image/*', 'text/plain'])), 0);
+const filteredMimes = call(description, 'filterMimeTypes(Ljava/lang/String;)[Ljava/lang/String;', ['image/*']);
+assert.deepEqual([...filteredMimes.$data], ['image/*']);
+assert.equal(Number(call(description, 'isStyledText()Z')), 1);
+call(description, 'setTimestamp(J)V', [777n]);
+assert.equal(call(description, 'getTimestamp()J'), 777n);
+const clipExtras = vm.allocateRawObject('Landroid/os/PersistableBundle;');
+clipExtras.$peer = {};
+call(description, 'setExtras(Landroid/os/PersistableBundle;)V', [clipExtras]);
+assert.equal(call(description, 'getExtras()Landroid/os/PersistableBundle;'), clipExtras);
+const descriptionCopy = vm.allocateRawObject('Landroid/content/ClipDescription;');
+init(descriptionCopy, '(Landroid/content/ClipDescription;)V', [description]);
+assert.equal(Number(call(descriptionCopy, 'getMimeTypeCount()I')), 2);
+assert.equal(call(descriptionCopy, 'getTimestamp()J'), 777n);
+assert.throws(() => {
+  const bad = vm.allocateRawObject('Landroid/content/ClipDescription;');
+  init(bad, '(Ljava/lang/CharSequence;[Ljava/lang/String;)V', ['bad', vm.newArray('[Ljava/lang/String;', 1, [null])]);
+  call(bad, 'validate()V');
+}, /MIME/);
+
+const itemUri = vm.allocateRawObject('Landroid/net/Uri;');
+itemUri.$peer = { $value: 'content://media/external/images/1' };
+const uriItem = vm.allocateRawObject('Landroid/content/ClipData$Item;');
+init(uriItem, '(Landroid/net/Uri;)V', [itemUri]);
+assert.equal(call(uriItem, 'getUri()Landroid/net/Uri;'), itemUri);
+const activityInfo = vm.allocateRawObject('Landroid/content/pm/ActivityInfo;');
+activityInfo.$peer = {};
+call(uriItem, 'setActivityInfo(Landroid/content/pm/ActivityInfo;)V', [activityInfo]);
+assert.equal(call(uriItem, 'getActivityInfo()Landroid/content/pm/ActivityInfo;'), activityInfo);
+
+call(clip, 'addItem(Landroid/content/ClipData$Item;)V', [uriItem]);
+assert.equal(Number(call(clip, 'getItemCount()I')), 2);
+call(clip, 'setItemAt(ILandroid/content/ClipData$Item;)V', [1, clipItem]);
+assert.equal(call(clip, 'getItemAt(I)Landroid/content/ClipData$Item;', [1]), clipItem);
+call(clip, 'setItemAt(ILandroid/content/ClipData$Item;)V', [1, uriItem]);
+const uriList = vm.allocateRawObject('Ljava/util/ArrayList;');
+uriList.$peer = { items: [] };
+call(clip, 'collectUris(Ljava/util/List;)V', [uriList]);
+assert.deepEqual(uriList.$peer.items.map((entry) => entry.$peer.$value), ['content://media/external/images/1']);
+
+const transfer = call(clip, 'copyForTransferWithActivityInfo()Landroid/content/ClipData;');
+assert.notEqual(transfer, clip);
+assert.equal(Number(call(transfer, 'getItemCount()I')), 2);
+assert.equal(Number(call(clip, 'willParcelWithActivityInfo()Z')), 0);
+call(clip, 'prepareToLeaveProcess(ZI)V', [true, 1]);
+assert.equal(clip.$leavingProcess, true);
+call(clip, 'prepareToEnterProcess(Landroid/content/AttributionSource;)V', [null]);
+assert.equal(clip.$leavingProcess, false);
+call(clip, 'fixUris(I)V', [2]);
+assert.equal(itemUri.$peer.$fixMode, 2);
+
+const clipText = vm.instantiate('Ljava/lang/StringBuilder;', []);
+call(clip, 'toShortString(Ljava/lang/StringBuilder;Z)V', [clipText, true]);
+assert.match(clipText.$peer.parts.join(''), /ClipData \{/);
+const clipParcel = vm.allocateRawObject('Landroid/os/Parcel;');
+clipParcel.$peer = {};
+call(clip, 'writeToParcel(Landroid/os/Parcel;I)V', [clipParcel, 0]);
+assert.equal(clipParcel.$peer.written[0].type, 'ClipData');
+assert.equal(clipParcel.$peer.written[0].items.length, 2);
+
+const listClip = vm.allocateRawObject('Landroid/content/ClipData;');
+const clipList = vm.allocateRawObject('Ljava/util/ArrayList;');
+clipList.$peer = { items: [clipItem] };
+init(listClip, '(Landroid/content/ClipDescription;Ljava/util/ArrayList;)V', [description, clipList]);
+assert.equal(Number(call(listClip, 'getItemCount()I')), 1);
+const clipCopy = vm.allocateRawObject('Landroid/content/ClipData;');
+init(clipCopy, '(Landroid/content/ClipData;)V', [clip]);
+assert.equal(Number(call(clipCopy, 'getItemCount()I')), 2);
+const htmlClip = stat('Landroid/content/ClipData;', 'newHtmlText(Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/String;)Landroid/content/ClipData;',
+  ['lbl', 'text', '<i>x</i>']);
+assert.equal(call(call(htmlClip, 'getItemAt(I)Landroid/content/ClipData$Item;', [0]),
+  'getHtmlText()Ljava/lang/String;'), '<i>x</i>');
+
 console.log('jdk-core OK');

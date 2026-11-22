@@ -1156,25 +1156,136 @@ function cloneIntent(vm, peer) {
   return object;
 }
 
+/** 把 Java String[] / JS 数组统一转成字符串数组；保留 null 项以便 validate 报错。 */
+function stringArrayValues(value) {
+  if (!value) return [];
+  const raw = Array.isArray(value.$data) ? value.$data : (Array.isArray(value) ? value : []);
+  return raw.map((entry) => (entry === null || entry === undefined ? null : jsString(entry)));
+}
+
+/** 构造一个 ClipData.Item：按文本 / Uri / Intent 分派到对应字段。 */
+function makeClipItem(vm, value) {
+  const item = vm.allocateRawObject('Landroid/content/ClipData$Item;');
+  const isUri = value && typeof value === 'object' && value.$peer && value.$peer.$value !== undefined;
+  const isIntent = value && typeof value === 'object' && value.$peer && value.$peer.action !== undefined;
+  item.$peer = {
+    $uri: isUri ? value : null,
+    $text: isUri || isIntent ? null : (value == null ? null : (jsString(value) ?? String(value))),
+    $htmlText: null,
+    $intent: isIntent ? value : null,
+    $activityInfo: null,
+    $textLinks: null,
+  };
+  return item;
+}
+
+/** 构造一个 ClipDescription 宿主对象（带 label 与 mime 列表）。 */
+function makeClipDescription(vm, label, mimeTypes) {
+  const object = vm.allocateRawObject('Landroid/content/ClipDescription;');
+  object.$peer = {
+    $label: jsString(label) ?? '',
+    $mimeTypes: [...(mimeTypes || ['*/*'])],
+    $timestamp: 0,
+    $extras: null,
+    $classificationStatus: 1,
+    $confidenceScores: new Map(),
+  };
+  return object;
+}
+
 /** 构造 ClipData：item 可以是 Uri 对象、文本或 Intent，描述里带 label 与 mime 列表。 */
 function makeClipData(vm, label, values, mimeTypes) {
   const object = vm.allocateRawObject('Landroid/content/ClipData;');
-  const items = (values || []).map((value) => {
-    const item = vm.allocateRawObject('Landroid/content/ClipData$Item;');
-    const isUri = value && typeof value === 'object' && value.$peer && value.$peer.$value !== undefined;
-    const isIntent = value && typeof value === 'object' && value.$peer && value.$peer.action !== undefined;
-    item.$peer = {
-      $uri: isUri ? value : null,
-      $text: isUri || isIntent ? null : (value == null ? null : (jsString(value) ?? String(value))),
-      $htmlText: null,
-      $intent: isIntent ? value : null,
-    };
-    return item;
-  });
-  const description = vm.allocateRawObject('Landroid/content/ClipDescription;');
-  description.$peer = { $label: jsString(label) ?? '', $mimeTypes: [...(mimeTypes || ['*/*'])] };
-  object.$peer = { $items: items, $description: description };
+  const items = (values || []).map((value) => makeClipItem(vm, value));
+  object.$peer = {
+    $items: items,
+    $description: makeClipDescription(vm, label, mimeTypes),
+    $activityInfo: null,
+  };
   return object;
+}
+
+/** 向 StringBuilder 追加文本（StringBuilder 的 peer 里是 parts 数组）。 */
+function appendClipText(vm, builder, text) {
+  if (!builder || text === null || text === undefined) return;
+  const peer = builder.$peer ?? builder;
+  if (peer && Array.isArray(peer.parts)) {
+    peer.parts.push(String(text));
+    return;
+  }
+  try {
+    vm.invokeByName('append', '(Ljava/lang/String;)Ljava/lang/StringBuilder;', builder, [String(text)]);
+  } catch (_error) {
+    void _error;
+  }
+}
+
+/** 拷贝 ClipData.Item 的字段（构造器 / copy 构造共用）。 */
+function copyClipItemFields(self, other) {
+  const src = other?.$peer ?? other ?? {};
+  self.$text = src.$text ?? null;
+  self.$htmlText = src.$htmlText ?? null;
+  self.$uri = src.$uri ?? null;
+  self.$intent = src.$intent ?? null;
+  self.$activityInfo = src.$activityInfo ?? null;
+  self.$textLinks = src.$textLinks ?? null;
+}
+
+/** 复制一个 ClipDescription（label / mime / 时间戳 / 分类结果全部保留）。 */
+function copyClipDescription(vm, source) {
+  const src = source?.$peer ?? source ?? {};
+  const object = vm.allocateRawObject('Landroid/content/ClipDescription;');
+  object.$peer = {
+    $label: src.$label ?? '',
+    $mimeTypes: [...(src.$mimeTypes || [])],
+    $timestamp: src.$timestamp ?? 0,
+    $extras: src.$extras ?? null,
+    $classificationStatus: src.$classificationStatus ?? 1,
+    $confidenceScores: new Map(src.$confidenceScores || []),
+  };
+  return object;
+}
+
+/** MIME 类型匹配：支持 * 通配（对应 ClipDescription.compareMimeTypes 的主/子类型比较）。 */
+function mimeTypeMatches(pattern, candidate) {
+  const left = String(pattern ?? '').toLowerCase();
+  const right = String(candidate ?? '').toLowerCase();
+  if (left === right) return true;
+  const leftParts = left.split('/');
+  const rightParts = right.split('/');
+  if (leftParts.length !== 2 || rightParts.length !== 2) return false;
+  if (leftParts[0] !== '*' && rightParts[0] !== '*' && leftParts[0] !== rightParts[0]) return false;
+  return leftParts[1] === '*' || rightParts[1] === '*' || leftParts[1] === rightParts[1];
+}
+
+/** 把纯文本转成可放进剪贴板的 HTML（转义标签、换行转 <br>）。 */
+function escapeHtmlText(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+/** 取 ClipData 的 item 数组（兼容宿主对象与原生 peer 两种形态）。 */
+function clipItemsOf(self) {
+  if (Array.isArray(self?.$items)) return self.$items;
+  return [];
+}
+
+/** 取 ClipData.Item 的状态（宿主对象与原生 peer 两种形态都支持）。 */
+function clipItemState(item) {
+  return item?.$peer ?? item ?? {};
+}
+
+/** 取 ClipDescription 的状态（宿主对象与原生 peer 两种形态都支持）。 */
+function clipDescriptionState(description) {
+  return description?.$peer ?? description ?? {};
+}
+
+/** 取 ClipDescription 的 mime 数组。 */
+function clipMimeTypesOf(self) {
+  return Array.isArray(self?.$mimeTypes) ? self.$mimeTypes : [];
 }
 
 /** 把振动节奏转交给浏览器 Vibration API；0 表示取消。 */
@@ -4835,18 +4946,85 @@ export function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/content/ClipData$Item;', {
       super: 'Ljava/lang/Object;',
       methods: {
+        '<init>(Landroid/content/ClipData$Item;)V': (self, [other]) => {
+          copyClipItemFields(self, other);
+        },
+        '<init>(Ljava/lang/CharSequence;)V': (self, [text]) => {
+          copyClipItemFields(self, null);
+          self.$text = text == null ? null : jsString(text);
+        },
+        '<init>(Ljava/lang/CharSequence;Ljava/lang/String;)V': (self, [text, html]) => {
+          copyClipItemFields(self, null);
+          self.$text = text == null ? null : jsString(text);
+          self.$htmlText = html == null ? null : jsString(html);
+        },
+        '<init>(Landroid/content/Intent;)V': (self, [intent]) => {
+          copyClipItemFields(self, null);
+          self.$intent = intent ?? null;
+        },
+        '<init>(Landroid/net/Uri;)V': (self, [uri]) => {
+          copyClipItemFields(self, null);
+          self.$uri = uri ?? null;
+        },
+        '<init>(Ljava/lang/CharSequence;Landroid/content/Intent;Landroid/net/Uri;)V': (self, [text, intent, uri]) => {
+          copyClipItemFields(self, null);
+          self.$text = text == null ? null : jsString(text);
+          self.$intent = intent ?? null;
+          self.$uri = uri ?? null;
+        },
+        '<init>(Ljava/lang/CharSequence;Ljava/lang/String;Landroid/content/Intent;Landroid/net/Uri;)V': (self, [text, html, intent, uri]) => {
+          copyClipItemFields(self, null);
+          self.$text = text == null ? null : jsString(text);
+          self.$htmlText = html == null ? null : jsString(html);
+          self.$intent = intent ?? null;
+          self.$uri = uri ?? null;
+        },
         'getUri()Landroid/net/Uri;': (self) => self.$uri ?? null,
         'getText()Ljava/lang/CharSequence;': (self) => self.$text ?? null,
         'getHtmlText()Ljava/lang/String;': (self) => self.$htmlText ?? null,
         'getIntent()Landroid/content/Intent;': (self) => self.$intent ?? null,
+        'getActivityInfo()Landroid/content/pm/ActivityInfo;': (self) => self.$activityInfo ?? null,
+        'setActivityInfo(Landroid/content/pm/ActivityInfo;)V': (self, [info]) => {
+          self.$activityInfo = info ?? null;
+        },
+        'getTextLinks()Landroid/view/textclassifier/TextLinks;': (self) => self.$textLinks ?? null,
+        'setTextLinks(Landroid/view/textclassifier/TextLinks;)V': (self, [links]) => {
+          self.$textLinks = links ?? null;
+        },
         'coerceToText(Landroid/content/Context;)Ljava/lang/CharSequence;': (self, _args, vm) => {
           if (self.$text != null) return self.$text;
-          if (self.$uri) {
-            const path = uriVirtualPath(self.$uri);
+          const uri = self.$uri ?? self.$intent?.$peer?.data ?? self.$intent?.data ?? null;
+          if (uri) {
+            const path = uriVirtualPath(uri);
             const bytes = path ? VIRTUAL_FS.read(path) : null;
             if (bytes) return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+            return uri.$peer?.$value ?? null;
           }
           return null;
+        },
+        'coerceToStyledText(Landroid/content/Context;)Ljava/lang/CharSequence;': (self) => {
+          if (self.$text != null) return self.$text;
+          if (self.$htmlText != null) return self.$htmlText;
+          return self.$uri?.$peer?.$value ?? null;
+        },
+        'coerceToHtmlText(Landroid/content/Context;)Ljava/lang/String;': (self) => {
+          if (self.$htmlText != null) return self.$htmlText;
+          if (self.$text != null) return escapeHtmlText(jsString(self.$text));
+          return self.$uri?.$peer?.$value ?? null;
+        },
+        'toShortString(Ljava/lang/StringBuilder;Z)V': (self, [builder], vm) => {
+          const parts = [];
+          if (self.$text != null) parts.push(`T:${jsString(self.$text)}`);
+          if (self.$htmlText != null) parts.push(`H:${self.$htmlText}`);
+          if (self.$intent) parts.push(`I:${self.$intent?.$peer?.action ?? ''}`);
+          if (self.$uri) parts.push(`U:${self.$uri?.$peer?.$value ?? ''}`);
+          appendClipText(vm, builder, `ClipData.Item { ${parts.join(' ')} }`);
+        },
+        'dumpDebug(Landroid/util/proto/ProtoOutputStream;J)V': (self, [proto, fieldId]) => {
+          const peer = proto?.$peer ?? proto;
+          if (peer && typeof peer === 'object') {
+            (peer.written ||= []).push({ fieldId: Number(fieldId ?? 0), text: String(self.$text ?? '') });
+          }
         },
         'toString()Ljava/lang/String;': (self) => String(self.$text ?? self.$uri?.$peer?.$value ?? ''),
       },
@@ -4857,12 +5035,104 @@ export function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/content/ClipDescription;', {
       super: 'Ljava/lang/Object;',
       methods: {
+        '<init>(Ljava/lang/CharSequence;[Ljava/lang/String;)V': (self, [label, mimes]) => {
+          self.$label = jsString(label) ?? '';
+          self.$mimeTypes = stringArrayValues(mimes);
+          self.$timestamp = 0;
+          self.$extras = null;
+          self.$classificationStatus = 1;
+          self.$confidenceScores = new Map();
+        },
+        '<init>(Landroid/content/ClipDescription;)V': (self, [other]) => {
+          const src = other?.$peer ?? other ?? {};
+          self.$label = src.$label ?? '';
+          self.$mimeTypes = [...(src.$mimeTypes || [])];
+          self.$timestamp = src.$timestamp ?? 0;
+          self.$extras = src.$extras ?? null;
+          self.$classificationStatus = src.$classificationStatus ?? 1;
+          self.$confidenceScores = new Map(src.$confidenceScores || []);
+        },
         'getLabel()Ljava/lang/CharSequence;': (self) => self.$label ?? null,
-        'getMimeTypeCount()I': (self) => (self.$mimeTypes || []).length,
-        'getMimeType(I)Ljava/lang/String;': (self, [index]) => self.$mimeTypes?.[index | 0] ?? null,
-        'hasMimeType(Ljava/lang/String;)Z': (self, [mime]) => (self.$mimeTypes || []).includes(jsString(mime)),
-        'compareTo(Landroid/content/ClipDescription;)I': (self, [other]) => String(self.$label ?? '').localeCompare(String(other?.$label ?? '')),
+        'getMimeTypeCount()I': (self) => clipMimeTypesOf(self).length,
+        'getMimeType(I)Ljava/lang/String;': (self, [index]) => clipMimeTypesOf(self)[index | 0] ?? null,
+        'hasMimeType(Ljava/lang/String;)Z': (self, [mime]) => {
+          const target = jsString(mime);
+          return clipMimeTypesOf(self).some((candidate) => mimeTypeMatches(candidate, target));
+        },
+        'hasMimeType([Ljava/lang/String;)Z': (self, [mimes]) => {
+          const wanted = stringArrayValues(mimes);
+          return wanted.some((target) => clipMimeTypesOf(self).some((candidate) => mimeTypeMatches(candidate, target)));
+        },
+        'filterMimeTypes(Ljava/lang/String;)[Ljava/lang/String;': (self, [mime], vm) => {
+          const target = jsString(mime);
+          const matched = clipMimeTypesOf(self).filter((candidate) => mimeTypeMatches(target, candidate));
+          if (!matched.includes(target)) matched.push(target);
+          return vm.newArray('[Ljava/lang/String;', matched.length, matched);
+        },
+        'setTimestamp(J)V': (self, [value]) => { self.$timestamp = Number(value) || 0; },
+        'getTimestamp()J': (self) => BigInt(self.$timestamp ?? 0),
+        'getExtras()Landroid/os/PersistableBundle;': (self) => self.$extras ?? null,
+        'setExtras(Landroid/os/PersistableBundle;)V': (self, [extras]) => { self.$extras = extras ?? null; },
+        'validate()V': (self, _args, vm) => {
+          if (clipMimeTypesOf(self).some((type) => type === null)) {
+            vm.throwException('Ljava/lang/IllegalArgumentException;', 'MIME type must not be null');
+          }
+        },
+        'isStyledText()Z': (self) => clipMimeTypesOf(self).some((type) => String(type).startsWith('text/')),
+        'setClassificationStatus(I)V': (self, [status]) => { self.$classificationStatus = status | 0; },
+        'getClassificationStatus()I': (self) => self.$classificationStatus | 0,
+        'getConfidenceScore(Ljava/lang/String;)F': (self, [entity]) => {
+          const scores = self.$confidenceScores;
+          return Number(scores?.get?.(jsString(entity)) ?? 0);
+        },
+        'setConfidenceScores(Ljava/util/Map;)V': (self, [scores]) => {
+          const source = scores?.$peer?.map ?? scores?.map ?? null;
+          self.$confidenceScores = source instanceof Map ? new Map(source) : new Map();
+        },
+        'toShortString(Ljava/lang/StringBuilder;Z)Z': (self, [builder], vm) => {
+          const types = clipMimeTypesOf(self);
+          appendClipText(vm, builder, String(self.$label ?? ''));
+          for (const type of types) appendClipText(vm, builder, ` ${type}`);
+          return types.length > 0;
+        },
+        'toShortStringTypesOnly(Ljava/lang/StringBuilder;)Z': (self, [builder], vm) => {
+          const types = clipMimeTypesOf(self);
+          types.forEach((type, index) => appendClipText(vm, builder, index === 0 ? String(type) : ` ${type}`));
+          return types.length > 0;
+        },
+        'dumpDebug(Landroid/util/proto/ProtoOutputStream;J)V': (self, [proto, fieldId]) => {
+          const peer = proto?.$peer ?? proto;
+          if (peer && typeof peer === 'object') {
+            (peer.written ||= []).push({ fieldId: Number(fieldId ?? 0), label: String(self.$label ?? '') });
+          }
+        },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': (self, [parcel, flags]) => {
+          const peer = parcel?.$peer ?? parcel;
+          if (peer && typeof peer === 'object') {
+            (peer.written ||= []).push({
+              type: 'ClipDescription',
+              flags: flags | 0,
+              label: String(self.$label ?? ''),
+              mimeTypes: [...clipMimeTypesOf(self)],
+            });
+          }
+        },
+        'compareTo(Landroid/content/ClipDescription;)I': (self, [other]) => {
+          const left = clipMimeTypesOf(self);
+          const right = clipMimeTypesOf(other?.$peer ?? other);
+          if (left.length !== right.length) return left.length - right.length;
+          for (let index = 0; index < left.length; index += 1) {
+            const order = String(left[index]).localeCompare(String(right[index]));
+            if (order !== 0) return order < 0 ? -1 : 1;
+          }
+          return 0;
+        },
         'toString()Ljava/lang/String;': (self) => String(self.$label ?? ''),
+      },
+      staticMethods: {
+        'compareMimeTypes(Ljava/lang/String;Ljava/lang/String;)Z': (_self, [first, second]) =>
+          mimeTypeMatches(jsString(first), jsString(second)),
       },
     })
   );
@@ -4871,10 +5141,147 @@ export function buildFrameworkDefinitions(vm) {
     nativeDef('Landroid/content/ClipData;', {
       super: 'Ljava/lang/Object;',
       methods: {
-        'getItemCount()I': (self) => (self.$items || []).length,
-        'getItemAt(I)Landroid/content/ClipData$Item;': (self, [index]) => (self.$items || [])[index | 0] ?? null,
+        '<init>(Ljava/lang/CharSequence;[Ljava/lang/String;Landroid/content/ClipData$Item;)V': (self, [label, mimes, item], vm) => {
+          self.$items = item ? [item] : [];
+          self.$description = copyClipDescription(vm, makeClipDescription(vm, label, stringArrayValues(mimes)));
+          self.$activityInfo = null;
+        },
+        '<init>(Landroid/content/ClipDescription;Landroid/content/ClipData$Item;)V': (self, [description, item], vm) => {
+          self.$items = item ? [item] : [];
+          self.$description = copyClipDescription(vm, description);
+          self.$activityInfo = null;
+        },
+        '<init>(Landroid/content/ClipDescription;Ljava/util/ArrayList;)V': (self, [description, list], vm) => {
+          const peer = list?.$peer ?? list ?? {};
+          const entries = Array.isArray(peer.items) ? peer.items : (Array.isArray(peer.setItems) ? peer.setItems : []);
+          self.$items = [...entries];
+          self.$description = copyClipDescription(vm, description);
+          self.$activityInfo = null;
+        },
+        '<init>(Landroid/content/ClipData;)V': (self, [other], vm) => {
+          const source = other?.$peer ?? other ?? {};
+          self.$items = [...(source.$items || [])];
+          self.$description = copyClipDescription(vm, source.$description);
+          self.$activityInfo = source.$activityInfo ?? null;
+        },
+        'getItemCount()I': (self) => clipItemsOf(self).length,
+        'getItemAt(I)Landroid/content/ClipData$Item;': (self, [index]) => clipItemsOf(self)[index | 0] ?? null,
         'getDescription()Landroid/content/ClipDescription;': (self) => self.$description ?? null,
-        'toString()Ljava/lang/String;': (self) => String(self.$description?.$label ?? ''),
+        'addItem(Landroid/content/ClipData$Item;)V': (self, [item]) => {
+          if (!item) return;
+          (self.$items ||= []).push(item);
+        },
+        'addItem(Landroid/content/ContentResolver;Landroid/content/ClipData$Item;)V': (self, [_resolver, item]) => {
+          if (!item) return;
+          (self.$items ||= []).push(item);
+        },
+        'getIcon()Landroid/graphics/Bitmap;': (self) => self.$icon ?? null,
+        'setItemAt(ILandroid/content/ClipData$Item;)V': (self, [index, item]) => {
+          const items = (self.$items ||= []);
+          const at = index | 0;
+          if (at >= 0 && at < items.length) items[at] = item ?? null;
+        },
+        'copyForTransferWithActivityInfo()Landroid/content/ClipData;': (self, _args, vm) => {
+          const object = vm.allocateRawObject('Landroid/content/ClipData;');
+          object.$peer = {
+            $items: [...clipItemsOf(self)],
+            $description: copyClipDescription(vm, self.$description),
+            $activityInfo: self.$activityInfo ?? null,
+          };
+          return object;
+        },
+        'willParcelWithActivityInfo()Z': (self) => !!self.$activityInfo,
+        'prepareToLeaveProcess(Z)V': (self, [grantUriPermissions]) => {
+          self.$leavingProcess = true;
+          self.$grantUriPermissions = !!grantUriPermissions;
+          self.$activityInfo = null;
+        },
+        'prepareToLeaveProcess(ZI)V': (self, [grantUriPermissions, intentFlags]) => {
+          self.$leavingProcess = true;
+          self.$grantUriPermissions = !!grantUriPermissions;
+          self.$intentFlags = intentFlags | 0;
+          self.$activityInfo = null;
+          for (const item of clipItemsOf(self)) {
+            const state = clipItemState(item);
+            if (state !== item) state.$intentFlags = intentFlags | 0;
+          }
+        },
+        'prepareToEnterProcess(Landroid/content/AttributionSource;)V': (self, [source]) => {
+          self.$leavingProcess = false;
+          self.$attributionSource = source ?? null;
+        },
+        'fixUris(I)V': (self, [mode]) => {
+          self.$fixMode = mode | 0;
+          for (const item of clipItemsOf(self)) {
+            const uri = clipItemState(item).$uri ?? null;
+            if (uri?.$peer) uri.$peer.$fixMode = mode | 0;
+          }
+        },
+        'fixUrisLight(I)V': (self, [mode]) => {
+          self.$fixMode = mode | 0;
+          self.$lightFix = true;
+          for (const item of clipItemsOf(self)) {
+            const uri = clipItemState(item).$uri ?? null;
+            if (uri?.$peer) uri.$peer.$fixMode = mode | 0;
+          }
+        },
+        'toShortString(Ljava/lang/StringBuilder;Z)V': (self, [builder, withPayload], vm) => {
+          const description = self.$description;
+          appendClipText(vm, builder, 'ClipData { ');
+          if (description) {
+            vm.invokeByName('toShortString', '(Ljava/lang/StringBuilder;Z)Z', description, [builder, !!withPayload]);
+          }
+          if (withPayload) {
+            for (const item of clipItemsOf(self)) {
+              const state = clipItemState(item);
+              appendClipText(vm, builder, ` ${state.$text ?? state.$uri?.$peer?.$value ?? ''}`);
+            }
+          }
+          appendClipText(vm, builder, ' }');
+        },
+        'dumpDebug(Landroid/util/proto/ProtoOutputStream;J)V': (self, [proto, fieldId]) => {
+          const peer = proto?.$peer ?? proto;
+          if (peer && typeof peer === 'object') {
+            (peer.written ||= []).push({ fieldId: Number(fieldId ?? 0), items: clipItemsOf(self).length });
+          }
+        },
+        'collectUris(Ljava/util/List;)V': (self, [list], vm) => {
+          const peer = list?.$peer ?? list;
+          const target = peer && (Array.isArray(peer.items) ? peer.items : (Array.isArray(peer.setItems) ? peer.setItems : null));
+          for (const item of clipItemsOf(self)) {
+            const state = clipItemState(item);
+            const uri = state.$uri ?? state.$intent?.$peer?.data ?? state.$intent?.data ?? null;
+            if (!uri) continue;
+            if (target) {
+              if (!target.includes(uri)) target.push(uri);
+            } else {
+              try {
+                vm.invokeByName('add', '(Ljava/lang/Object;)Z', list, [uri]);
+              } catch (_error) {
+                void _error;
+              }
+            }
+          }
+        },
+        'describeContents()I': () => 0,
+        'writeToParcel(Landroid/os/Parcel;I)V': (self, [parcel, flags]) => {
+          const peer = parcel?.$peer ?? parcel;
+          if (!peer || typeof peer !== 'object') return;
+          (peer.written ||= []).push({
+            type: 'ClipData',
+            flags: flags | 0,
+            label: String(clipDescriptionState(self.$description).$label ?? ''),
+            mimeTypes: [...(clipDescriptionState(self.$description).$mimeTypes || [])],
+            items: clipItemsOf(self).map((item) => {
+              const state = clipItemState(item);
+              return {
+                text: state.$text ?? null,
+                uri: state.$uri?.$peer?.$value ?? null,
+              };
+            }),
+          });
+        },
+        'toString()Ljava/lang/String;': (self) => String(clipDescriptionState(self.$description).$label ?? ''),
       },
       staticMethods: {
         'newUri(Landroid/content/ContentResolver;Ljava/lang/CharSequence;Landroid/net/Uri;)Landroid/content/ClipData;': (self, [_resolver, label, uri], vm) =>
@@ -4885,12 +5292,12 @@ export function buildFrameworkDefinitions(vm) {
           makeClipData(vm, label, [text], ['text/plain']),
         'newHtmlText(Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/String;)Landroid/content/ClipData;': (self, [label, text, html], vm) => {
           const clip = makeClipData(vm, label, [text], ['text/html']);
-          if (clip.$items[0]) clip.$items[0].$htmlText = jsString(html);
+          if (clip.$peer.$items[0]) clipItemState(clip.$peer.$items[0]).$htmlText = jsString(html);
           return clip;
         },
         'newIntent(Ljava/lang/CharSequence;Landroid/content/Intent;)Landroid/content/ClipData;': (self, [label, intent], vm) => {
           const clip = makeClipData(vm, label, [intent], ['text/uri-list']);
-          if (clip.$items[0]) clip.$items[0].$intent = intent ?? null;
+          if (clip.$peer.$items[0]) clipItemState(clip.$peer.$items[0]).$intent = intent ?? null;
           return clip;
         },
       },
