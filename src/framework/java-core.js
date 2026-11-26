@@ -6107,7 +6107,9 @@ function seedHardwareFs() {
   write('/proc/mounts', mountTable);
   write('/proc/self/mounts', mountTable);
   write('/proc/bootdevice/type', 'ufs\n');
-  write('/proc/asound/card0/id', '\n');
+  // ALSA 的声卡 id 是全小写字母数字、最长 15 字符的短名。
+  const soundCardId = identity.soundCard.replace(/[^A-Za-z0-9]/g, '').slice(0, 15);
+  write('/proc/asound/card0/id', soundCardId + '\n');
   write('/proc/scsi/scsi', 'Host: scsi0 Channel: 00 Id: 00 Lun: 00\n  Vendor: Linux    Model: UFS 128GB        Rev: 0001\n');
   write('/proc/bus/input/devices', [
     'I: Bus=0018 Vendor=0000 Product=0000 Version=0000',
@@ -6358,7 +6360,7 @@ function seedHardwareFs() {
   write('/proc/asound/card0/codec#0', `Codec: ${audioCodec}\n`);
   write('/proc/asound/card0/codec#1', `Codec: ${audioCodec}\n`);
   write('/proc/asound/card0/pcm0p/info', `card: 0\ndevice: 0\nsubdevice: 0\nstream: PLAYBACK\nid: MultiMedia1\nname: MultiMedia1\nsubname: subdevice #0\nclass: 0\nsubclass: 0\nsubdevices_count: 1\nsubdevices_avail: 1\n`);
-  write('/proc/asound/cards', ' 0 [' + identity.soundCard + ']: ' + identity.platform + ' - ' + identity.platform + '\n                      ' + identity.tag + ' SoC - ' + identity.soundCard + '\n');
+  write('/proc/asound/cards', ' 0 [' + soundCardId + ']: ' + identity.platform + ' - ' + identity.platform + '\n                      ' + identity.tag + ' SoC - ' + identity.soundCard + '\n');
   write('/proc/asound/devices', '  0: [ 0]   : control\n 16: [ 0- 0]: digital audio playback\n 24: [ 0- 0]: digital audio capture\n');
   write('/sys/class/sound/card0/id', identity.soundCard + '\n');
 

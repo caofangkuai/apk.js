@@ -22507,6 +22507,9 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
       return value;
     },
     getBoolean: (index, fallback) => {
+      if (globalThis.__DBG_TA && (indexAttrId(index) >>> 0) === 0x010103df) {
+        console.log('DBGTA.getBoolean', index, fallback, isPresent(index), typeof lookup(index), lookup(index));
+      }
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
       if (value === true || value === false) return value;
@@ -22516,6 +22519,9 @@ function makeTypedArrayPeer(vm, values, present = null, attrIds = null) {
     getInt: (index, fallback) => {
       if (!isPresent(index)) return fallback;
       const value = lookup(index);
+      if (globalThis.__DBG_TA && (indexAttrId(index) >>> 0) === 0x010103df) {
+        console.log('DBGTA.getInt', index, fallback, typeof value, value, new Error().stack.split('\n').slice(2, 5).join(' <- '));
+      }
       return typeof value === 'number' ? value | 0 : fallback;
     },
     getInteger: (index, fallback) => {
@@ -23075,6 +23081,22 @@ function createTypedArray(vm, attrs, styleId, attributeSet = null, defStyleAttr 
   // TypedArray 的访问器收的是 attr 数组下标，不是 attr id。
   // 必须把原始数组传下去，否则缺失的 attr 会让下标错位。
   object.$peer = makeTypedArrayPeer(vm, values, null, ids);
+  if (globalThis.__DBG_TA) {
+    const peer = object.$peer;
+    globalThis.__DBG_TA_COUNT = (globalThis.__DBG_TA_COUNT || 0) + 1;
+    if (globalThis.__DBG_TA_COUNT <= 3) console.log('DBGTA.created', globalThis.__DBG_TA_COUNT, ids.length);
+    for (const key of ['getInt', 'getBoolean', 'getInteger', 'getValue', 'hasValue']) {
+      const orig = peer[key].bind(peer);
+      peer[key] = (...args) => {
+        const result = orig(...args);
+        const cm = vm.interpreter?.currentMethod;
+        if (globalThis.__DBG_TA === 2 || (cm && /appcompat\/widget\/x;/.test(cm.classDesc))) {
+          console.log('DBGTA', key, JSON.stringify(args), '=>', result, 'attr=', ((peer.attrIds?.[args[0]] ?? 0) >>> 0).toString(16), 'cur=', cm ? cm.classDesc + '.' + cm.name : 'none');
+        }
+        return result;
+      };
+    }
+  }
   return object;
 }
 

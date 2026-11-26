@@ -1594,17 +1594,9 @@ export class View {
   offsetTopAndBottom(offset) {
     const delta = offset | 0;
     if (!delta) return;
-    // 滚动容器靠平移子项来实现滚动，
-    // 所以这里必须同时让父级重绘，并把滚动量反映到容器的滚动状态上，
-    // 否则触摸能到达 DEX、可界面永远不动。
-    const parent = this.parent || null;
-    if (parent) {
-      parent.$offsetAccumY = (parent.$offsetAccumY || 0) + delta;
-      if (parent.$offsetAccumY < 0) {
-        parent.scrollY = Math.max(0, (parent.scrollY | 0) - parent.$offsetAccumY);
-        parent.$offsetAccumY = 0;
-      }
-    }
+    // AOSP 的 offsetTopAndBottom 只调整子项位置（SwipeRefreshLayout 的刷新
+    // 指示器、AppBarLayout 折叠等都靠它），不代表容器滚动：绝不能再把偏移
+    // 折算进父级的 scrollY，否则一个藏在顶边外的子项会让整页内容被裁掉。
     this.top += delta;
     this.bottom += delta;
     if (typeof this.onOffsetChanged === 'function') this.onOffsetChanged(0, delta);
